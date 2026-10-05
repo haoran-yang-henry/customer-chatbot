@@ -1,0 +1,5 @@
+[
+  {"customer_id": "C-1001", "tenant_id": "nordelektro", "first_name": "Anna", "last_name": "Schneider", "email": "anna.schneider@example.de", "country": "DE"},
+  {"customer_id": "C-1002", "tenant_id": "nordelektro", "first_name": "Jonas", "last_name": "Weber", "email": "jonas.weber@example.de", "country": "DE"},
+  {"customer_id": "C-1003", "tenant_id": "nordelektro", "first_name": "Mehmet", "last_name": "Yılmaz", "email": "mehmet.yilmaz@example.at", "country": "AT"}
+]

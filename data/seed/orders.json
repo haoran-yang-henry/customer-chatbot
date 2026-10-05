@@ -1,0 +1,65 @@
+[
+  {
+    "order_id": "NE-100231", "customer_id": "C-1001", "status": "delivered", "created_at": "2026-09-16",
+    "items": [{"sku": "KW-ANC700", "name": "Klangwerk ANC 700", "quantity": 1, "unit_price": "249.00"}],
+    "total": "249.00", "payment_method": "paypal", "payment_status": "captured",
+    "shipping": {"carrier": "DHL", "tracking_number": "00340434161200231001", "shipped_at": "2026-09-17", "delivered_at": "2026-09-20", "expected_delivery": null},
+    "return_info": null
+  },
+  {
+    "order_id": "NE-100245", "customer_id": "C-1001", "status": "processing", "created_at": "2026-10-04",
+    "items": [{"sku": "VP-20", "name": "VoltPack 20", "quantity": 1, "unit_price": "49.99"}],
+    "total": "54.94", "payment_method": "credit_card", "payment_status": "captured",
+    "shipping": {"carrier": "DHL", "tracking_number": null, "shipped_at": null, "delivered_at": null, "expected_delivery": "2026-10-08"},
+    "return_info": null
+  },
+  {
+    "order_id": "NE-100198", "customer_id": "C-1001", "status": "delivered", "created_at": "2026-08-06",
+    "items": [{"sku": "NB-AIR14", "name": "NordBook Air 14", "quantity": 1, "unit_price": "1099.00"}],
+    "total": "1099.00", "payment_method": "klarna_invoice", "payment_status": "captured",
+    "shipping": {"carrier": "DHL", "tracking_number": "00340434161200198001", "shipped_at": "2026-08-07", "delivered_at": "2026-08-10", "expected_delivery": null},
+    "return_info": null
+  },
+  {
+    "order_id": "NE-100250", "customer_id": "C-1002", "status": "shipped", "created_at": "2026-10-02",
+    "items": [{"sku": "VT-X2-128", "name": "Velto X2", "quantity": 1, "unit_price": "599.00"}],
+    "total": "599.00", "payment_method": "paypal", "payment_status": "captured",
+    "shipping": {"carrier": "DHL", "tracking_number": "00340434161200250001", "shipped_at": "2026-10-03", "delivered_at": null, "expected_delivery": "2026-10-06"},
+    "return_info": null
+  },
+  {
+    "order_id": "NE-100252", "customer_id": "C-1002", "status": "pending_payment", "created_at": "2026-10-04",
+    "items": [{"sku": "KW-BUDSS", "name": "Klangwerk Buds S", "quantity": 1, "unit_price": "129.00"}],
+    "total": "129.00", "payment_method": "credit_card", "payment_status": "failed",
+    "shipping": {"carrier": "DHL", "tracking_number": null, "shipped_at": null, "delivered_at": null, "expected_delivery": null},
+    "return_info": null
+  },
+  {
+    "order_id": "NE-100180", "customer_id": "C-1002", "status": "returned", "created_at": "2026-08-20",
+    "items": [{"sku": "VT-W3", "name": "Velto Watch 3", "quantity": 1, "unit_price": "229.00"}],
+    "total": "229.00", "payment_method": "paypal", "payment_status": "refunded",
+    "shipping": {"carrier": "DHL", "tracking_number": "00340434161200180001", "shipped_at": "2026-08-21", "delivered_at": "2026-08-23", "expected_delivery": null},
+    "return_info": {"status": "completed", "requested_at": "2026-09-10", "received_at": "2026-09-15", "refund_status": "refunded", "refunded_at": "2026-09-28", "refund_amount": "229.00"}
+  },
+  {
+    "order_id": "NE-100260", "customer_id": "C-1003", "status": "paid", "created_at": "2026-10-05",
+    "items": [{"sku": "VP-20", "name": "VoltPack 20", "quantity": 2, "unit_price": "49.99"}],
+    "total": "107.93", "payment_method": "klarna_invoice", "payment_status": "authorized",
+    "shipping": {"carrier": "DHL", "tracking_number": null, "shipped_at": null, "delivered_at": null, "expected_delivery": "2026-10-10"},
+    "return_info": null
+  },
+  {
+    "order_id": "NE-100240", "customer_id": "C-1003", "status": "return_requested", "created_at": "2026-09-10",
+    "items": [{"sku": "KW-ANC700", "name": "Klangwerk ANC 700", "quantity": 1, "unit_price": "249.00"}],
+    "total": "249.00", "payment_method": "credit_card", "payment_status": "captured",
+    "shipping": {"carrier": "DHL", "tracking_number": "00340434161200240001", "shipped_at": "2026-09-11", "delivered_at": "2026-09-15", "expected_delivery": null},
+    "return_info": {"status": "in_transit", "requested_at": "2026-10-01", "received_at": null, "refund_status": "pending", "refunded_at": null, "refund_amount": null}
+  },
+  {
+    "order_id": "NE-100170", "customer_id": "C-1003", "status": "cancelled", "created_at": "2026-08-01",
+    "items": [{"sku": "NB-AIR14", "name": "NordBook Air 14", "quantity": 1, "unit_price": "1099.00"}],
+    "total": "1099.00", "payment_method": "prepayment", "payment_status": "voided",
+    "shipping": {"carrier": "DHL", "tracking_number": null, "shipped_at": null, "delivered_at": null, "expected_delivery": null},
+    "return_info": null
+  }
+]

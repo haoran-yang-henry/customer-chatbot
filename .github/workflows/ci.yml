@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync --locked
+      - name: Lint
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+      - name: Type check
+        run: uv run mypy
+      - name: Tests
+        run: uv run pytest --cov -m "not integration and not llm"
+      - name: Evaluation harness (placeholder agent, no gate until Day 3)
+        run: uv run customer-agent-eval --dataset eval/datasets/core.jsonl --day 1 --out eval-result.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eval-result
+          path: eval-result.json

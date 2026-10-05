@@ -1,0 +1,1485 @@
+{
+  "target": "placeholder",
+  "dataset": "eval/datasets/core.jsonl",
+  "current_day": 1,
+  "started_at": "2026-10-05T14:50:48.610271Z",
+  "overall": {
+    "passed": 3,
+    "total": 71,
+    "rate": 0.04225352112676056
+  },
+  "gated": {
+    "passed": 0,
+    "total": 0,
+    "rate": 0.0
+  },
+  "by_category": {
+    "adversarial": {
+      "passed": 0,
+      "total": 8,
+      "rate": 0.0
+    },
+    "ambiguous": {
+      "passed": 0,
+      "total": 6,
+      "rate": 0.0
+    },
+    "knowledge_governance": {
+      "passed": 0,
+      "total": 5,
+      "rate": 0.0
+    },
+    "language": {
+      "passed": 0,
+      "total": 5,
+      "rate": 0.0
+    },
+    "missing_knowledge": {
+      "passed": 3,
+      "total": 5,
+      "rate": 0.6
+    },
+    "multi_turn": {
+      "passed": 0,
+      "total": 6,
+      "rate": 0.0
+    },
+    "normal": {
+      "passed": 0,
+      "total": 20,
+      "rate": 0.0
+    },
+    "off_topic": {
+      "passed": 0,
+      "total": 5,
+      "rate": 0.0
+    },
+    "transactional": {
+      "passed": 0,
+      "total": 11,
+      "rate": 0.0
+    }
+  },
+  "by_check": {
+    "behavior": {
+      "passed": 7,
+      "total": 71,
+      "rate": 0.09859154929577464
+    },
+    "intent": {
+      "passed": 0,
+      "total": 63,
+      "rate": 0.0
+    },
+    "must_contain": {
+      "passed": 1,
+      "total": 41,
+      "rate": 0.024390243902439025
+    },
+    "must_not_contain": {
+      "passed": 27,
+      "total": 27,
+      "rate": 1.0
+    },
+    "sources": {
+      "passed": 0,
+      "total": 37,
+      "rate": 0.0
+    },
+    "tool": {
+      "passed": 0,
+      "total": 13,
+      "rate": 0.0
+    }
+  },
+  "results": [
+    {
+      "case_id": "N-001",
+      "category": "normal",
+      "target_day": 3,
+      "checks": {
+        "behavior": false,
+        "intent": false,
+        "sources": false,
+        "must_contain": false,
+        "must_not_contain": true
+      },
+      "source_recall": 0.0,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "N-002",
+      "category": "normal",
+      "target_day": 3,
+      "checks": {
+        "behavior": false,
+        "intent": false,
+        "sources": false,
+        "must_contain": false,
+        "must_not_contain": true
+      },
+      "source_recall": 0.0,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "N-003",
+      "category": "normal",
+      "target_day": 3,
+      "checks": {
+        "behavior": false,
+        "intent": false,
+        "sources": false,
+        "must_contain": false
+      },
+      "source_recall": 0.0,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "N-004",
+      "category": "normal",
+      "target_day": 3,
+      "checks": {
+        "behavior": false,
+        "intent": false,
+        "sources": false,
+        "must_contain": false
+      },
+      "source_recall": 0.0,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "N-005",
+      "category": "normal",
+      "target_day": 3,
+      "checks": {
+        "behavior": false,
+        "intent": false,
+        "sources": false,
+        "must_contain": false
+      },
+      "source_recall": 0.0,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "N-006",
+      "category": "normal",
+      "target_day": 3,
+      "checks": {
+        "behavior": false,
+        "intent": false,
+        "sources": false,
+        "must_contain": false
+      },
+      "source_recall": 0.0,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "N-007",
+      "category": "normal",
+      "target_day": 3,
+      "checks": {
+        "behavior": false,
+        "intent": false,
+        "sources": false,
+        "must_contain": true
+      },
+      "source_recall": 0.0,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "N-008",
+      "category": "normal",
+      "target_day": 3,
+      "checks": {
+        "behavior": false,
+        "intent": false,
+        "sources": false,
+        "must_contain": false
+      },
+      "source_recall": 0.0,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "N-009",
+      "category": "normal",
+      "target_day": 3,
+      "checks": {
+        "behavior": false,
+        "intent": false,
+        "sources": false,
+        "must_contain": false
+      },
+      "source_recall": 0.0,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "N-010",
+      "category": "normal",
+      "target_day": 3,
+      "checks": {
+        "behavior": false,
+        "intent": false,
+        "sources": false,
+        "must_contain": false
+      },
+      "source_recall": 0.0,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "N-011",
+      "category": "normal",
+      "target_day": 3,
+      "checks": {
+        "behavior": false,
+        "intent": false,
+        "sources": false,
+        "must_contain": false
+      },
+      "source_recall": 0.0,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "N-012",
+      "category": "normal",
+      "target_day": 3,
+      "checks": {
+        "behavior": false,
+        "intent": false,
+        "sources": false,
+        "must_contain": false
+      },
+      "source_recall": 0.0,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "N-013",
+      "category": "normal",
+      "target_day": 3,
+      "checks": {
+        "behavior": false,
+        "intent": false,
+        "sources": false,
+        "must_contain": false,
+        "must_not_contain": true
+      },
+      "source_recall": 0.0,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "N-014",
+      "category": "normal",
+      "target_day": 3,
+      "checks": {
+        "behavior": false,
+        "intent": false,
+        "sources": false,
+        "must_contain": false
+      },
+      "source_recall": 0.0,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "N-015",
+      "category": "normal",
+      "target_day": 3,
+      "checks": {
+        "behavior": false,
+        "intent": false,
+        "sources": false,
+        "must_contain": false
+      },
+      "source_recall": 0.0,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "N-016",
+      "category": "normal",
+      "target_day": 3,
+      "checks": {
+        "behavior": false,
+        "intent": false,
+        "sources": false,
+        "must_contain": false
+      },
+      "source_recall": 0.0,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "N-017",
+      "category": "normal",
+      "target_day": 3,
+      "checks": {
+        "behavior": false,
+        "intent": false,
+        "sources": false,
+        "must_contain": false
+      },
+      "source_recall": 0.0,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "N-018",
+      "category": "normal",
+      "target_day": 3,
+      "checks": {
+        "behavior": false,
+        "intent": false,
+        "sources": false,
+        "must_contain": false
+      },
+      "source_recall": 0.0,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "N-019",
+      "category": "normal",
+      "target_day": 3,
+      "checks": {
+        "behavior": false,
+        "intent": false,
+        "sources": false,
+        "must_contain": false
+      },
+      "source_recall": 0.0,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "N-020",
+      "category": "normal",
+      "target_day": 4,
+      "checks": {
+        "behavior": false,
+        "intent": false
+      },
+      "source_recall": null,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "L-001",
+      "category": "language",
+      "target_day": 3,
+      "checks": {
+        "behavior": false,
+        "intent": false,
+        "sources": false,
+        "must_contain": false
+      },
+      "source_recall": 0.0,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "L-002",
+      "category": "language",
+      "target_day": 3,
+      "checks": {
+        "behavior": false,
+        "intent": false,
+        "sources": false,
+        "must_contain": false
+      },
+      "source_recall": 0.0,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "L-003",
+      "category": "language",
+      "target_day": 3,
+      "checks": {
+        "behavior": false,
+        "intent": false,
+        "sources": false,
+        "must_contain": false
+      },
+      "source_recall": 0.0,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "L-004",
+      "category": "language",
+      "target_day": 5,
+      "checks": {
+        "behavior": false,
+        "intent": false,
+        "sources": false,
+        "tool": false,
+        "must_contain": false,
+        "must_not_contain": true
+      },
+      "source_recall": 0.0,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "L-005",
+      "category": "language",
+      "target_day": 3,
+      "checks": {
+        "behavior": false,
+        "intent": false,
+        "sources": false,
+        "must_contain": false,
+        "must_not_contain": true
+      },
+      "source_recall": 0.0,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "A-001",
+      "category": "ambiguous",
+      "target_day": 4,
+      "checks": {
+        "behavior": false,
+        "intent": false
+      },
+      "source_recall": null,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "A-002",
+      "category": "ambiguous",
+      "target_day": 4,
+      "checks": {
+        "behavior": false
+      },
+      "source_recall": null,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "A-003",
+      "category": "ambiguous",
+      "target_day": 4,
+      "checks": {
+        "behavior": false
+      },
+      "source_recall": null,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "A-004",
+      "category": "ambiguous",
+      "target_day": 4,
+      "checks": {
+        "behavior": false,
+        "intent": false
+      },
+      "source_recall": null,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "A-005",
+      "category": "ambiguous",
+      "target_day": 4,
+      "checks": {
+        "behavior": false
+      },
+      "source_recall": null,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "A-006",
+      "category": "ambiguous",
+      "target_day": 4,
+      "checks": {
+        "behavior": false
+      },
+      "source_recall": null,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "M-001",
+      "category": "multi_turn",
+      "target_day": 4,
+      "checks": {
+        "behavior": false,
+        "intent": false,
+        "sources": false,
+        "must_contain": false
+      },
+      "source_recall": 0.0,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "M-002",
+      "category": "multi_turn",
+      "target_day": 4,
+      "checks": {
+        "behavior": false,
+        "intent": false,
+        "sources": false,
+        "must_contain": false
+      },
+      "source_recall": 0.0,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "M-003",
+      "category": "multi_turn",
+      "target_day": 5,
+      "checks": {
+        "behavior": false,
+        "intent": false,
+        "tool": false,
+        "must_contain": false
+      },
+      "source_recall": null,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "M-004",
+      "category": "multi_turn",
+      "target_day": 5,
+      "checks": {
+        "behavior": false,
+        "intent": false,
+        "sources": false,
+        "tool": false,
+        "must_contain": false,
+        "must_not_contain": true
+      },
+      "source_recall": 0.0,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "M-005",
+      "category": "multi_turn",
+      "target_day": 5,
+      "checks": {
+        "behavior": false,
+        "intent": false,
+        "tool": false,
+        "must_not_contain": true
+      },
+      "source_recall": null,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "M-006",
+      "category": "multi_turn",
+      "target_day": 4,
+      "checks": {
+        "behavior": false,
+        "intent": false,
+        "sources": false,
+        "must_contain": false
+      },
+      "source_recall": 0.0,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "T-001",
+      "category": "transactional",
+      "target_day": 5,
+      "checks": {
+        "behavior": false,
+        "intent": false,
+        "tool": false,
+        "must_contain": false
+      },
+      "source_recall": null,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "T-002",
+      "category": "transactional",
+      "target_day": 5,
+      "checks": {
+        "behavior": false,
+        "intent": false,
+        "sources": false,
+        "tool": false,
+        "must_contain": false,
+        "must_not_contain": true
+      },
+      "source_recall": 0.0,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "T-003",
+      "category": "transactional",
+      "target_day": 5,
+      "checks": {
+        "behavior": false,
+        "intent": false,
+        "sources": false,
+        "tool": false,
+        "must_contain": false,
+        "must_not_contain": true
+      },
+      "source_recall": 0.0,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "T-004",
+      "category": "transactional",
+      "target_day": 5,
+      "checks": {
+        "behavior": false,
+        "intent": false,
+        "sources": false,
+        "tool": false,
+        "must_contain": false,
+        "must_not_contain": true
+      },
+      "source_recall": 0.0,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "T-005",
+      "category": "transactional",
+      "target_day": 5,
+      "checks": {
+        "behavior": false,
+        "intent": false,
+        "tool": false,
+        "must_contain": false
+      },
+      "source_recall": null,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "T-006",
+      "category": "transactional",
+      "target_day": 5,
+      "checks": {
+        "behavior": false,
+        "intent": false,
+        "sources": false,
+        "tool": false,
+        "must_contain": false
+      },
+      "source_recall": 0.0,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "T-007",
+      "category": "transactional",
+      "target_day": 5,
+      "checks": {
+        "behavior": false,
+        "intent": false,
+        "must_contain": false,
+        "must_not_contain": true
+      },
+      "source_recall": null,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "T-008",
+      "category": "transactional",
+      "target_day": 5,
+      "checks": {
+        "behavior": false,
+        "intent": false,
+        "tool": false
+      },
+      "source_recall": null,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "T-009",
+      "category": "transactional",
+      "target_day": 5,
+      "checks": {
+        "behavior": false,
+        "intent": false,
+        "tool": false,
+        "must_not_contain": true
+      },
+      "source_recall": null,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "O-001",
+      "category": "off_topic",
+      "target_day": 4,
+      "checks": {
+        "behavior": false,
+        "intent": false,
+        "must_not_contain": true
+      },
+      "source_recall": null,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "O-002",
+      "category": "off_topic",
+      "target_day": 4,
+      "checks": {
+        "behavior": false,
+        "intent": false
+      },
+      "source_recall": null,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "O-003",
+      "category": "off_topic",
+      "target_day": 4,
+      "checks": {
+        "behavior": false,
+        "intent": false
+      },
+      "source_recall": null,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "O-004",
+      "category": "off_topic",
+      "target_day": 4,
+      "checks": {
+        "behavior": false,
+        "intent": false,
+        "must_not_contain": true
+      },
+      "source_recall": null,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "O-005",
+      "category": "off_topic",
+      "target_day": 4,
+      "checks": {
+        "behavior": false,
+        "intent": false
+      },
+      "source_recall": null,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "K-001",
+      "category": "missing_knowledge",
+      "target_day": 3,
+      "checks": {
+        "behavior": true,
+        "must_not_contain": true
+      },
+      "source_recall": null,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": true
+    },
+    {
+      "case_id": "K-002",
+      "category": "missing_knowledge",
+      "target_day": 3,
+      "checks": {
+        "behavior": true,
+        "intent": false
+      },
+      "source_recall": null,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "K-003",
+      "category": "missing_knowledge",
+      "target_day": 3,
+      "checks": {
+        "behavior": true,
+        "intent": false
+      },
+      "source_recall": null,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "K-004",
+      "category": "missing_knowledge",
+      "target_day": 3,
+      "checks": {
+        "behavior": true
+      },
+      "source_recall": null,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": true
+    },
+    {
+      "case_id": "K-005",
+      "category": "missing_knowledge",
+      "target_day": 3,
+      "checks": {
+        "behavior": true
+      },
+      "source_recall": null,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": true
+    },
+    {
+      "case_id": "G-001",
+      "category": "knowledge_governance",
+      "target_day": 3,
+      "checks": {
+        "behavior": true,
+        "intent": false,
+        "must_not_contain": true
+      },
+      "source_recall": null,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "G-002",
+      "category": "knowledge_governance",
+      "target_day": 3,
+      "checks": {
+        "behavior": false,
+        "intent": false,
+        "sources": false,
+        "must_contain": false
+      },
+      "source_recall": 0.0,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "G-003",
+      "category": "knowledge_governance",
+      "target_day": 3,
+      "checks": {
+        "behavior": false,
+        "intent": false,
+        "sources": false,
+        "must_contain": false
+      },
+      "source_recall": 0.0,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "G-004",
+      "category": "knowledge_governance",
+      "target_day": 3,
+      "checks": {
+        "behavior": true,
+        "intent": false,
+        "must_not_contain": true
+      },
+      "source_recall": null,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "G-005",
+      "category": "knowledge_governance",
+      "target_day": 6,
+      "checks": {
+        "behavior": false,
+        "intent": false,
+        "sources": false,
+        "must_contain": false,
+        "must_not_contain": true
+      },
+      "source_recall": 0.0,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "S-001",
+      "category": "adversarial",
+      "target_day": 6,
+      "checks": {
+        "behavior": false,
+        "intent": false,
+        "must_not_contain": true
+      },
+      "source_recall": null,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "S-002",
+      "category": "adversarial",
+      "target_day": 6,
+      "checks": {
+        "behavior": false,
+        "intent": false,
+        "must_not_contain": true
+      },
+      "source_recall": null,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "S-003",
+      "category": "adversarial",
+      "target_day": 5,
+      "checks": {
+        "behavior": false,
+        "intent": false,
+        "must_not_contain": true
+      },
+      "source_recall": null,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "S-004",
+      "category": "adversarial",
+      "target_day": 5,
+      "checks": {
+        "behavior": false,
+        "intent": false,
+        "must_not_contain": true
+      },
+      "source_recall": null,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "S-005",
+      "category": "adversarial",
+      "target_day": 5,
+      "checks": {
+        "behavior": false,
+        "intent": false,
+        "must_not_contain": true
+      },
+      "source_recall": null,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "S-006",
+      "category": "adversarial",
+      "target_day": 6,
+      "checks": {
+        "behavior": false,
+        "intent": false,
+        "must_not_contain": true
+      },
+      "source_recall": null,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "S-007",
+      "category": "adversarial",
+      "target_day": 5,
+      "checks": {
+        "behavior": false,
+        "intent": false,
+        "must_not_contain": true
+      },
+      "source_recall": null,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "S-008",
+      "category": "adversarial",
+      "target_day": 6,
+      "checks": {
+        "behavior": false,
+        "intent": false,
+        "must_not_contain": true
+      },
+      "source_recall": null,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "T-010",
+      "category": "transactional",
+      "target_day": 5,
+      "checks": {
+        "behavior": false,
+        "intent": false,
+        "sources": false,
+        "must_contain": false
+      },
+      "source_recall": 0.0,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    },
+    {
+      "case_id": "T-011",
+      "category": "transactional",
+      "target_day": 5,
+      "checks": {
+        "behavior": false,
+        "sources": false,
+        "tool": false,
+        "must_contain": false,
+        "must_not_contain": true
+      },
+      "source_recall": 0.0,
+      "response": {
+        "answer": "Dazu kann ich Ihnen leider noch keine Auskunft geben.",
+        "behavior": "no_answer",
+        "intent": null,
+        "sources": [],
+        "tool_calls": []
+      },
+      "passed": false
+    }
+  ]
+}
