@@ -163,5 +163,5 @@ system's own overhead with a mocked LLM, because LLM provider latency is outside
 | # | Question | Decide by |
 |---|---|---|
 | Q1 | Which LLM provider and model(s)? | D3 (ADR) |
-| Q2 | Which embedding model (multilingual, German quality, cost)? | D2 (ADR) |
+| ~~Q2~~ | ~~Which embedding model?~~ Decided: OpenAI `text-embedding-3-small` ([ADR-0007](adr/0007-openai-embeddings.md)) | D2 |
 | Q3 | Is a web UI needed, or is the API + Swagger sufficient for the demo? | D3 |

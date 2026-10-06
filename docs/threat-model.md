@@ -110,7 +110,7 @@ The synthetic knowledge base deliberately contains documents that exercise these
 | Document | Exercises |
 |---|---|
 | `policy-returns-v4` (archived, 14 days, paid returns) | T04 |
-| `policy-returns-v6-draft` (draft, 60 days) | T04 |
+| `policy-returns-v6` (draft, 60 days) | T04 |
 | `promo-winter-sale-2025` (expired) | T04 |
 | `internal-goodwill-guidelines` (ACL internal) | T05 |
 | `community-velto-watch-pairing-tip` (untrusted, contains an injected instruction) | T02 |

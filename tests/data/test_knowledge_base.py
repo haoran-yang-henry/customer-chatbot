@@ -1,17 +1,20 @@
 """Governance rules for the knowledge base in data/knowledge (threat model T03, T04)."""
 
 from collections import defaultdict
+from datetime import date
+from itertools import pairwise
 
 import pytest
 
 from customer_agent.domain.knowledge import (
     AccessLevel,
+    DocumentStatus,
     KnowledgeDocument,
     SourceType,
     TrustLevel,
 )
 from customer_agent.infrastructure.knowledge_files import load_knowledge_directory
-from tests.conftest import KNOWLEDGE_DIR, REFERENCE_DATE, TENANT_ID
+from tests.conftest import KNOWLEDGE_DIR, TENANT_ID
 
 
 @pytest.fixture(scope="module")
@@ -23,14 +26,22 @@ def test_knowledge_base_is_not_empty(documents: list[KnowledgeDocument]) -> None
     assert len(documents) >= 25
 
 
-def test_at_most_one_active_policy_per_topic(documents: list[KnowledgeDocument]) -> None:
-    active_by_topic: defaultdict[str, list[str]] = defaultdict(list)
-    for doc in documents:
-        if doc.meta.source_type is SourceType.POLICY and doc.meta.is_active_on(REFERENCE_DATE):
-            active_by_topic[doc.meta.topic].append(doc.meta.id)
+def test_approved_policy_versions_never_overlap(documents: list[KnowledgeDocument]) -> None:
+    """At most one approved policy per topic is valid on any date, past or future.
 
-    conflicts = {topic: ids for topic, ids in active_by_topic.items() if len(ids) > 1}
-    assert not conflicts, f"conflicting active policies: {conflicts}"
+    Publishing a new version therefore requires closing the previous one (``valid_until``)
+    in the same change; see docs/architecture.md, "Knowledge lifecycle".
+    """
+    windows: defaultdict[str, list[tuple[date, date, str]]] = defaultdict(list)
+    for doc in documents:
+        meta = doc.meta
+        if meta.source_type is SourceType.POLICY and meta.status is DocumentStatus.APPROVED:
+            windows[meta.topic].append((meta.valid_from, meta.valid_until or date.max, meta.id))
+
+    for topic, spans in windows.items():
+        spans.sort()
+        for (_, end, earlier), (start, _, later) in pairwise(spans):
+            assert start > end, f"{topic}: {earlier} and {later} are both valid on {start}"
 
 
 def test_versions_are_unique_per_topic(documents: list[KnowledgeDocument]) -> None:

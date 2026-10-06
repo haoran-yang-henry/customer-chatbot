@@ -1,6 +1,7 @@
 """Evaluation dataset schema and loader."""
 
 import json
+from datetime import date
 from enum import StrEnum
 from pathlib import Path
 from typing import Self
@@ -9,6 +10,9 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from customer_agent.domain.conversation import Behavior, Conversation, Message, Role
 from customer_agent.domain.intents import Intent
+
+# All date-dependent expectations in the datasets assume this "today" (data/seed/README.md).
+DATASET_REFERENCE_DATE = date(2026, 10, 5)
 
 
 class Category(StrEnum):

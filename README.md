@@ -7,8 +7,8 @@ cancellation, returns) behind explicit authorization, policy checks and confirma
 Customers write German; the agent answers in German. Code and documentation are in English
 ([ADR-0003](docs/adr/0003-german-language-strategy.md)).
 
-> **Status: Day 1 of 8** — requirements, design, synthetic data, evaluation dataset and the project
-> skeleton are in place. The agent itself starts on Day 3. See the
+> **Status: Day 2 of 8** — knowledge ingestion and hybrid retrieval (Postgres full-text +
+> pgvector, RRF) are in place and evaluated. The answering agent starts on Day 3. See the
 > [development plan](docs/development-plan.md).
 
 ## Documentation
@@ -25,14 +25,20 @@ Customers write German; the agent answers in German. Code and documentation are 
 
 ## Quick start
 
-Requirements: Python 3.12, [uv](https://docs.astral.sh/uv/), Docker (from Day 2).
+Requirements: Python 3.12, [uv](https://docs.astral.sh/uv/), Docker, an OpenAI API key
+(embeddings, [ADR-0007](docs/adr/0007-openai-embeddings.md)).
 
 ```bash
-make install   # dependencies + pre-commit hooks
-make check     # lint, type check, tests
-make eval      # run the evaluation dataset against the current agent
-make run       # API on http://localhost:8000 (docs at /docs)
-make up        # start Postgres + pgvector (Day 2+)
+cp .env.example .env   # then set CA_OPENAI_API_KEY
+make install           # dependencies + pre-commit hooks
+make check             # lint, type check, unit tests (no Docker, no API key)
+make test-integration  # repository tests against a throwaway Postgres (Testcontainers)
+make test-llm          # same + production scenarios with the real embedding model
+make up migrate        # start Postgres + pgvector, apply migrations
+make ingest            # index data/knowledge (idempotent)
+make eval-retrieval    # Recall@5 / MRR for fulltext, vector and hybrid search
+make eval              # end-to-end evaluation against the current agent
+make run               # API on http://localhost:8000 (docs at /docs)
 ```
 
 ## Repository layout
@@ -51,6 +57,15 @@ tests/                unit and data validation tests
 | Day | Gated pass rate | Notes |
 |---|---|---|
 | D1 | n/a (0 cases due) | Placeholder agent: 3/71 overall; harness and dataset validated |
+| D2 | n/a (0 cases due) | Retrieval only, see below |
+
+**Retrieval (Day 2, 37 cases, `text-embedding-3-small`)**
+
+| Mode | Recall@5 | MRR |
+|---|---|---|
+| Full-text (German FTS) | 0.865 | 0.743 |
+| Vector | 0.973 | 0.944 |
+| Hybrid (RRF) | **0.973** | 0.876 |
 
 ## Roadmap
 

@@ -20,7 +20,8 @@
 |---|---|---|---|
 | Unit | Domain rules, policies, state transitions, parsers, scoring functions | Yes | Every commit |
 | Data validation | Knowledge metadata, dataset consistency, seed referential integrity | Yes | Every commit |
-| Integration | Postgres repositories, retrieval SQL, migrations | Yes | Every commit (D2+) |
+| Integration | Postgres repositories, retrieval SQL, migrations (hashing embedder) | Yes | Every commit (D2+) |
+| Integration, real model | Same tests + production scenarios (`test_retrieval_production.py`): held-out customer phrasings, filters vs. semantically closest forbidden docs, lifecycle, provider failures, hostile input, concurrency | Mostly | `make test-llm`, before merging retrieval changes |
 | Component eval | Intent accuracy, retrieval Recall@k / MRR | Mostly | Every PR (smoke), nightly (full) |
 | End-to-end eval | Full agent on conversations: behaviour, content, sources, tools | No (LLM) | Every PR (smoke), nightly (full) |
 | Red team | Adversarial dataset | No (LLM) | Nightly, before release (D6+) |
@@ -106,6 +107,18 @@ over to a human / creates a ticket · `no_answer`: states that the information i
 A case **passes** when every applicable check passes: intent (if expected), behaviour, sources
 (at least one expected source cited, if any expected), tool (if expected), `must_contain`,
 `must_not_contain`.
+
+### 4.1 Retrieval evaluation (Day 2)
+
+`make eval-retrieval` runs every case with `expected_sources` (37 cases) through fulltext, vector
+and hybrid search and reports Recall@5 and MRR (ranking depth 10) per mode and per category.
+
+- The query is the concatenation of all user turns — a stand-in for conversation-aware query
+  rewriting, which arrives with conversation state on Day 4.
+- Searches run with the dataset reference date 2026-10-05 and the default tenant.
+- Metrics are document-level: chunks are aggregated to their document before scoring.
+- With 37 cases, one miss moves Recall@5 by ~0.03. Tuning retrieval parameters against this set
+  overfits it; parameter changes should be confirmed on new cases first.
 
 ## 5. LLM-as-judge
 

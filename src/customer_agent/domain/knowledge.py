@@ -79,3 +79,14 @@ class KnowledgeDocument(BaseModel):
 
     meta: KnowledgeDocumentMeta
     body: str = Field(min_length=1)
+
+
+class KnowledgeChunk(BaseModel):
+    """A retrievable section of a document; ``content`` carries the document title as context."""
+
+    model_config = ConfigDict(frozen=True)
+
+    document_id: str
+    position: int = Field(ge=0)
+    heading: str | None
+    content: str = Field(min_length=1)

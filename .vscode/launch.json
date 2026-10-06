@@ -1,0 +1,84 @@
+{
+  // Run and Debug (Ctrl+Shift+D) → pick a configuration → F5.
+  // Settings come from .env via pydantic-settings; nothing secret lives in this file.
+  "version": "0.2.0",
+  "inputs": [
+    {
+      "id": "query",
+      "type": "promptString",
+      "description": "German customer question",
+      "default": "Muss ich für die Retoure was zahlen?"
+    },
+    {
+      "id": "testFilter",
+      "type": "promptString",
+      "description": "pytest -k expression (empty = all)",
+      "default": ""
+    }
+  ],
+  "configurations": [
+    {
+      "name": "Search: one question (all modes)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "customer_agent.cli.search",
+      "args": ["${input:query}"],
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "Search: one question + SQL log",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "customer_agent.cli.search",
+      "args": ["${input:query}", "--mode", "hybrid"],
+      "env": { "CA_SQL_ECHO": "true" },
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "Ingest knowledge",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "customer_agent.cli.ingest",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "Eval: retrieval (all modes)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "customer_agent.evaluation.retrieval_cli",
+      "args": ["--dataset", "eval/datasets/core.jsonl"],
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "API (uvicorn, no reload)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["--factory", "customer_agent.main:create_app", "--port", "8000"],
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "Tests: unit (filter)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": ["-m", "not integration and not llm", "-k", "${input:testFilter}", "-x", "-q"],
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "Tests: integration, real model (filter)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": ["-m", "integration", "--embeddings=openai", "-k", "${input:testFilter}", "-x", "-q"],
+      "console": "integratedTerminal",
+      "justMyCode": false
+    }
+  ]
+}

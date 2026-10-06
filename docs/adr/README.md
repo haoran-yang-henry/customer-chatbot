@@ -19,3 +19,4 @@ its consequences. Format: a lightweight variant of [MADR](https://adr.github.io/
 | [0004](0004-evaluation-first-with-versioned-datasets.md) | Evaluation first with versioned datasets | Accepted | 2026-10-05 |
 | [0005](0005-explicit-state-and-validated-actions.md) | Explicit conversation state and validated tool calls | Proposed | 2026-10-05 |
 | [0006](0006-no-order-mutations-by-the-agent.md) | No order mutations by the agent — guidance and human handoff | Accepted | 2026-10-05 |
+| [0007](0007-openai-embeddings.md) | OpenAI `text-embedding-3-small` for embeddings | Accepted | 2026-10-06 |

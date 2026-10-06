@@ -1,5 +1,5 @@
 ---
-id: policy-returns-v6-draft
+id: policy-returns-v6
 title: Rückgaberecht und Rücksendung (Entwurf 2027)
 topic: returns
 intents: [RETURN_POLICY]

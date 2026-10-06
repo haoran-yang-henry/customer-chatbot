@@ -53,7 +53,7 @@ flowchart TB
         ingest[Ingestion CLI<br/>same codebase, D2]
         evalcli[Evaluation CLI<br/>same codebase]
     end
-    db[(PostgreSQL 17 + pgvector<br/>knowledge, chunks, sessions,<br/>orders, tickets, audit log)]
+    db[(PostgreSQL 16 + pgvector<br/>knowledge, chunks, sessions,<br/>orders, tickets, audit log)]
     otel[OpenTelemetry collector<br/>+ Prometheus/Grafana, D7]
 
     web --> api
@@ -258,7 +258,42 @@ A document is **retrievable for a customer on date d** iff
 `status = approved ∧ valid_from ≤ d ∧ (valid_until is null ∨ d ≤ valid_until) ∧
 tenant matches ∧ public ∈ acl`.
 
-### 6.2 Database (D2 onwards)
+### 6.2 Knowledge lifecycle
+
+Git is the source of truth for knowledge; the database is a derived index that can be rebuilt at
+any time. The file name equals the document `id` and **never changes** — answers and evaluation
+cases cite it. Lifecycle changes are edits to the front matter, reviewed in a pull request.
+
+```mermaid
+stateDiagram-v2
+    [*] --> draft: new file
+    draft --> approved: PR merged (status, acl, trust_level)
+    approved --> archived: superseded or retired
+    archived --> [*]
+    note right of approved
+        indexed; retrievable only inside
+        valid_from .. valid_until
+    end note
+```
+
+| Task | Change |
+|---|---|
+| Write a new policy version | New file `policy-<topic>-v<N>.md` with `status: draft`, `acl: [internal]` |
+| Publish | `status: approved`, `acl: [public]`, `trust_level: official` |
+| Schedule | Publish in advance with a future `valid_from`; the switch happens at query time, without a deploy |
+| Supersede | In the **same** PR, set the previous version's `valid_until` to the day before |
+| Retire | `status: archived` (files are never deleted; git history is the audit trail) |
+
+Guarantees:
+
+- `tests/data/test_knowledge_base.py` fails if two approved versions of a policy topic are valid
+  on any common date, so a forgotten `valid_until` cannot be merged.
+- Ingestion indexes only `approved` documents and removes everything else from the index; queries
+  filter again by status, validity, tenant and ACL (defence in depth).
+- In production the same fields would be edited through a CMS with a review step; ingestion would
+  run automatically on merge to `main`.
+
+### 6.3 Database (D2 onwards)
 
 ```mermaid
 erDiagram
@@ -272,15 +307,25 @@ erDiagram
 
     knowledge_documents {
         text id PK
-        jsonb metadata
-        text content_hash
+        text title
+        text source_type
+        text trust_level
+        text status
+        date valid_from
+        date valid_until
+        text tenant_id
+        text_array acl
+        text fingerprint "change detection"
     }
     knowledge_chunks {
-        uuid id PK
-        text document_id FK
-        text content
-        tsvector fts "german config"
-        vector embedding
+        bigint id PK
+        text document_id FK "ON DELETE CASCADE"
+        int position
+        text heading
+        text content "title + section text"
+        tsvector fts "generated, german config, GIN"
+        vector embedding "1536, HNSW cosine"
+        text embedding_model
     }
     sessions {
         uuid id PK
@@ -298,7 +343,33 @@ erDiagram
     }
 ```
 
-### 6.3 Seed data
+Knowledge tables are implemented (Day 2, migration `0001`); the other tables arrive with their
+use cases. Design notes:
+
+- **Filters live on the document**, chunks are joined at query time. At this corpus size a join is
+  cheaper than keeping denormalised copies in sync; denormalising filter columns into chunks is the
+  usual optimisation at millions of chunks.
+- **`fts` is a generated column**, so Postgres keeps it consistent with `content`.
+- **`fingerprint`** = SHA-256 over metadata, body, chunker version and embedding model. Unchanged
+  fingerprints are skipped, so re-ingestion makes no embedding calls; a model change re-embeds
+  everything instead of mixing vector spaces.
+- **Replacement is delete-then-insert per document in one transaction** (chunks cascade), which
+  is simpler than per-chunk upserts because a document is always replaced as a whole.
+
+### 6.4 Retrieval
+
+1. Lexical: the German lexemes of the query (plus an umlaut-transliterated variant) are
+   **OR-combined** and ranked with `ts_rank_cd`. AND semantics (`websearch_to_tsquery`) almost
+   never match a full natural-language question.
+2. Semantic: cosine distance on the query embedding.
+3. Both lists (20 candidates each) are fused with **Reciprocal Rank Fusion** (k = 60) and
+   aggregated to documents (document score = best chunk). Results keep their `trust_level`.
+   RRF scores only express rank, so each hit also keeps its **cosine similarity** — the absolute
+   relevance signal for "no answer" decisions (measured on Day 2: answerable ≥ 0.575, not in the
+   knowledge base ≤ 0.461, off-topic ≈ 0.30; small sample, threshold to be set on Day 3).
+4. Every query applies the scope filters (status, validity on *today*, tenant, ACL) in SQL.
+
+### 6.5 Seed data
 
 `data/seed/customers.json` and `data/seed/orders.json` describe the mock order system. Order
 statuses: `pending_payment → paid → processing → shipped → delivered`, plus `cancelled`,
