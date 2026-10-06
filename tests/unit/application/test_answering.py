@@ -1,0 +1,149 @@
+from datetime import date
+
+import pytest
+
+from customer_agent.application.answering import (
+    AnswerService,
+    FinalAnswer,
+    TextDelta,
+    format_history,
+    search_query,
+    session_id,
+)
+from customer_agent.domain.conversation import Behavior, Conversation, Message, Role
+from customer_agent.domain.retrieval import RetrievedDocument
+from customer_agent.infrastructure.prompts import load_prompt
+from tests.fakes import FakeLLM, FakeRetriever, FixedClock, document
+
+TODAY = date(2026, 10, 5)
+RETURNS = document("policy-returns-v5", 0.67, "Rückgabe: 30 Tage, Rücksendung kostenlos.")
+
+
+def conversation(*texts: str) -> Conversation:
+    roles = [Role.USER, Role.ASSISTANT]
+    return Conversation(
+        messages=[Message(role=roles[i % 2], content=t) for i, t in enumerate(texts)]
+    )
+
+
+def service(
+    llm: FakeLLM, documents: list[RetrievedDocument] | None = None
+) -> tuple[AnswerService, FakeRetriever]:
+    retriever = FakeRetriever(documents if documents is not None else [RETURNS])
+    answers = AnswerService(
+        retriever,
+        llm,
+        load_prompt("answer", 1),
+        FixedClock(TODAY),
+        tenant_id="nordelektro",
+        min_similarity=0.5,
+    )
+    return answers, retriever
+
+
+async def test_grounded_answer_returns_clean_text_and_sources() -> None:
+    llm = FakeLLM("Die Rücksendung ist kostenlos. [policy-returns-v5]")
+    answers, retriever = service(llm)
+
+    response = await answers.answer(conversation("Kostet die Rücksendung etwas?"))
+
+    assert response.behavior is Behavior.ANSWER
+    assert response.answer == "Die Rücksendung ist kostenlos."
+    assert response.sources == ["policy-returns-v5"]
+    assert retriever.queries[0][1].today == TODAY
+
+
+async def test_prompt_contains_evidence_question_and_trust_level() -> None:
+    llm = FakeLLM("Ok. [policy-returns-v5]")
+    answers, _ = service(llm)
+
+    await answers.answer(conversation("Kostet die Rücksendung etwas?"))
+
+    system, user = llm.calls[0]
+    assert system.role == "system" and "German" in system.content
+    assert '<document id="policy-returns-v5" trust="official">' in user.content
+    assert "Kostet die Rücksendung etwas?" in user.content
+
+
+async def test_low_similarity_answers_without_calling_the_llm() -> None:
+    llm = FakeLLM("should not be used")
+    answers, _ = service(llm, [document("faq-account", 0.31)])
+
+    response = await answers.answer(conversation("Wie wird das Wetter morgen?"))
+
+    assert response.behavior is Behavior.NO_ANSWER
+    assert response.reasons == ["low_similarity"]
+    assert llm.calls == []
+
+
+async def test_no_documents_is_no_answer() -> None:
+    answers, _ = service(FakeLLM(), [])
+
+    assert (await answers.answer(conversation("Hallo?"))).behavior is Behavior.NO_ANSWER
+
+
+async def test_model_declining_becomes_no_answer() -> None:
+    answers, _ = service(FakeLLM("KEINE_ANTWORT"))
+
+    response = await answers.answer(conversation("Habt ihr Filialen?"))
+
+    assert response.behavior is Behavior.NO_ANSWER
+    assert response.reasons == ["model_declined"]
+
+
+@pytest.mark.parametrize(
+    "reply",
+    ["Die Rücksendung ist kostenlos.", "Die Rücksendung ist kostenlos. [invented-doc]"],
+    ids=["no-citation", "hallucinated-citation"],
+)
+async def test_uncited_answer_is_replaced_by_fallback(reply: str) -> None:
+    answers, _ = service(FakeLLM(reply))
+
+    response = await answers.answer(conversation("Kostet die Rücksendung etwas?"))
+
+    assert response.behavior is Behavior.NO_ANSWER
+    assert response.reasons == ["missing_citation"]
+    assert "kostenlos" not in response.answer
+
+
+async def test_stream_yields_clean_deltas_then_authoritative_final() -> None:
+    answers, _ = service(FakeLLM("Die Rücksendung ist kostenlos. [policy-returns-v5]", piece=4))
+
+    events = [e async for e in answers.answer_stream(conversation("Kosten Rücksendung?"))]
+
+    streamed = "".join(e.text for e in events if isinstance(e, TextDelta))
+    final = events[-1]
+    assert isinstance(final, FinalAnswer)
+    assert "[" not in streamed and streamed.strip() == final.response.answer
+    assert final.response.sources == ["policy-returns-v5"]
+
+
+async def test_stream_and_complete_make_the_same_decision() -> None:
+    reply = "Die Rücksendung ist kostenlos."  # uncited → blocked
+    answers, _ = service(FakeLLM(reply))
+    convo = conversation("Kosten Rücksendung?")
+
+    complete = await answers.answer(convo)
+    events = [e async for e in answers.answer_stream(convo)]
+
+    assert isinstance(events[-1], FinalAnswer)
+    assert events[-1].response == complete
+
+
+async def test_session_id_is_stable_within_a_conversation() -> None:
+    llm = FakeLLM("Ok. [policy-returns-v5]")
+    answers, _ = service(llm)
+
+    await answers.answer(conversation("Versand nach Österreich?"))
+    await answers.answer(conversation("Versand nach Österreich?", "7,95 €.", "Und Schweiz?"))
+
+    assert llm.session_ids[0] == llm.session_ids[1] is not None
+
+
+def test_search_query_and_history_formatting() -> None:
+    convo = conversation("Versand nach Österreich?", "7,95 €.", "Und in die Schweiz?")
+
+    assert search_query(convo) == "Versand nach Österreich? Und in die Schweiz?"
+    assert format_history(convo) == "Customer: Versand nach Österreich?\nAssistant: 7,95 €."
+    assert format_history(conversation("Hallo")) == "(none)"
+    assert session_id(convo) == session_id(conversation("Versand nach Österreich?"))

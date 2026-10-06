@@ -30,8 +30,8 @@ jobs:
         run: uv run pytest --cov -m "not integration and not llm"
       - name: Integration tests (Testcontainers, Docker is preinstalled on the runner)
         run: uv run pytest -m integration
-      - name: Evaluation harness (placeholder agent, no gate until Day 3)
-        run: uv run customer-agent-eval --dataset eval/datasets/core.jsonl --day 2 --out eval-result.json
+      - name: Evaluation harness smoke test (placeholder agent; real-agent gate on Day 8)
+        run: uv run customer-agent-eval --dataset eval/datasets/core.jsonl --day 1 --out eval-result.json
       - uses: actions/upload-artifact@v4
         with:
           name: eval-result

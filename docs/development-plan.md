@@ -275,3 +275,7 @@ the D8 CI gate.
 |---|---|
 | 2026-10-05 | Initial plan |
 | 2026-10-05 | D5 changed: no order mutations by the agent; guidance + human handoff (ADR-0006) |
+| 2026-10-06 | D2 done. Added real-model production tests (`make test-llm`); cosine similarity kept through RRF as relevance signal |
+| 2026-10-06 | D3 done. Logging foundation moved from D7 to D3; relevance gate (two-tier) from D2 measurements; LLM via OpenAI-compatible endpoint (ADR-0008); web UI cut (Swagger + curl suffice) |
+| 2026-10-06 | D4 additions: conversation-aware query rewriting (replaces joined user turns); decide `ORDER_CHANGE` vs `HUMAN_AGENT` (T-011); split API/orchestrator responsibilities further |
+| 2026-10-06 | Backlog additions: weighted RRF / reranker after adding new retrieval cases ("Retoure" case); human labelling of `eval/calibration/groundedness-day3.jsonl` |

@@ -22,6 +22,7 @@ def test_gated_summary_only_counts_cases_due_by_current_day() -> None:
 
 
 def test_cli_writes_report_and_enforces_min_pass_rate(tmp_path: Path) -> None:
+    # placeholder target: no network, no database
     out = tmp_path / "result.json"
     args = ["--dataset", str(CORE_DATASET), "--day", "3", "--out", str(out)]
 

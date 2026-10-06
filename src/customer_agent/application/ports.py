@@ -1,13 +1,19 @@
 """Ports (interfaces) implemented by infrastructure adapters. Added as use cases need them."""
 
-from collections.abc import Sequence
-from typing import Protocol, Self
+from collections.abc import AsyncIterator, Sequence
+from datetime import date
+from typing import Literal, Protocol, Self
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
 from customer_agent.domain.conversation import AgentResponse, Conversation
 from customer_agent.domain.knowledge import KnowledgeChunk, KnowledgeDocumentMeta
-from customer_agent.domain.retrieval import ChunkHit, SearchScope
+from customer_agent.domain.retrieval import (
+    ChunkHit,
+    RetrievedDocument,
+    SearchMode,
+    SearchScope,
+)
 
 
 class CustomerServiceAgent(Protocol):
@@ -69,3 +75,64 @@ class KnowledgeSearch(Protocol):
     async def search_vector(
         self, embedding: Sequence[float], scope: SearchScope, limit: int
     ) -> list[ChunkHit]: ...
+
+
+class ProviderUnavailableError(RuntimeError):
+    """An external model provider failed (timeout, 5xx, auth). Adapters raise this instead of
+    SDK-specific exceptions so the application layer stays provider-agnostic."""
+
+
+class Clock(Protocol):
+    def today(self) -> date: ...
+
+
+class Retriever(Protocol):
+    async def retrieve(
+        self,
+        query: str,
+        scope: SearchScope,
+        *,
+        top_k: int = 5,
+        mode: SearchMode = SearchMode.HYBRID,
+    ) -> list[RetrievedDocument]: ...
+
+
+class ChatMessage(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    role: Literal["system", "user", "assistant"]
+    content: str
+
+
+class LLMResult(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    text: str
+    model: str
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+
+
+class LLMProvider(Protocol):
+    @property
+    def model_name(self) -> str: ...
+
+    async def complete(
+        self,
+        messages: Sequence[ChatMessage],
+        *,
+        max_tokens: int,
+        temperature: float,
+        session_id: str | None = None,
+    ) -> LLMResult:
+        """``session_id`` is stable per conversation (routing / prompt caching at the provider)."""
+        ...
+
+    def stream(
+        self,
+        messages: Sequence[ChatMessage],
+        *,
+        max_tokens: int,
+        temperature: float,
+        session_id: str | None = None,
+    ) -> AsyncIterator[str]: ...

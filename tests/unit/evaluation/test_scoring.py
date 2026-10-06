@@ -86,6 +86,17 @@ class TestScoreCase:
 
         assert set(score_case(case, GOOD).checks) == {"behavior"}
 
+    def test_checks_count_only_from_the_day_their_capability_exists(self) -> None:
+        case = make_case(expected_tool="get_order_status")
+
+        assert set(score_case(case, GOOD, current_day=3).checks) == {
+            "behavior",
+            "sources",
+            "must_contain",
+            "must_not_contain",
+        }
+        assert {"intent", "tool"} <= set(score_case(case, GOOD, current_day=5).checks)
+
     def test_tool_check_requires_expected_tool_in_calls(self) -> None:
         case = make_case(expected_tool="get_order_status")
 

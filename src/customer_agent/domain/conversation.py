@@ -54,3 +54,5 @@ class AgentResponse(BaseModel):
     intent: Intent | None = None
     sources: list[str] = Field(default_factory=list)
     tool_calls: list[str] = Field(default_factory=list)
+    # Why a fallback was used (guardrail / no-answer reason codes); empty for normal answers.
+    reasons: list[str] = Field(default_factory=list)

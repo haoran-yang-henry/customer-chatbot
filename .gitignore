@@ -13,3 +13,5 @@ build/
 # evaluation runs: only end-of-day snapshots (dayN.json) are committed
 eval/results/*.json
 !eval/results/day*.json
+# LLM response cache for evaluation runs
+.cache/

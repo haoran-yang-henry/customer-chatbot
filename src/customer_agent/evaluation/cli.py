@@ -1,14 +1,16 @@
-"""Command-line entry point: ``customer-agent-eval --dataset eval/datasets/core.jsonl --day 1``."""
+"""``customer-agent-eval --dataset eval/datasets/core.jsonl --day 3 --target agent [--judge]``."""
 
 import argparse
 import asyncio
+import json
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-from customer_agent.evaluation.runner import EvalReport, run_evaluation
-from customer_agent.evaluation.schema import load_dataset
+from customer_agent.evaluation.runner import EvalReport, build_report, run_cases
+from customer_agent.evaluation.schema import EvalCase, load_dataset
 from customer_agent.evaluation.targets import TARGETS
+from customer_agent.observability import configure_logging
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
@@ -17,44 +19,129 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--target", choices=sorted(TARGETS), default="placeholder")
     parser.add_argument("--day", type=int, required=True, help="Current project day (1-8).")
     parser.add_argument("--out", type=Path, help="Result file (default: eval/results/<ts>.json).")
+    parser.add_argument("--concurrency", type=int, default=4)
+    parser.add_argument("--judge", action="store_true", help="Run the groundedness LLM judge.")
+    parser.add_argument(
+        "--calibration-out", type=Path, help="Write judged answers for human labelling."
+    )
+    parser.add_argument(
+        "--check-calibration", type=Path, help="Report judge/human agreement for a labelled file."
+    )
     parser.add_argument(
         "--min-pass-rate",
         type=float,
         help="Exit with status 1 if the gated pass rate is below this value (0-1).",
     )
+    parser.add_argument("--log-level", default="WARNING")
     return parser.parse_args(argv)
 
 
 def _print_summary(report: EvalReport) -> None:
     print(f"Target: {report.target}   Dataset: {report.dataset}   Day: {report.current_day}")
+    for key, value in report.config.items():
+        print(f"  {key}: {value}")
     print(f"Overall: {report.overall.passed}/{report.overall.total} ({report.overall.rate:.0%})")
     print(
         f"Gated (target_day <= {report.current_day}): "
         f"{report.gated.passed}/{report.gated.total} ({report.gated.rate:.0%})"
     )
+    if report.groundedness:
+        g = report.groundedness
+        print(
+            f"Groundedness (judge, uncalibrated until checked): {g.passed}/{g.total} ({g.rate:.0%})"
+        )
     print("\nBy category:")
     for name, summary in report.by_category.items():
         print(f"  {name:<22} {summary.passed:>3}/{summary.total:<3} {summary.rate:>5.0%}")
     print("\nBy check:")
     for name, summary in report.by_check.items():
         print(f"  {name:<22} {summary.passed:>3}/{summary.total:<3} {summary.rate:>5.0%}")
+    failures = [r for r in report.results if r.target_day <= report.current_day and not r.passed]
+    if failures:
+        print("\nGated failures:")
+        for r in failures:
+            failed = ",".join(k for k, ok in r.checks.items() if not ok)
+            print(f"  {r.case_id:<6} [{failed}] {r.response.behavior}: {r.response.answer[:90]!r}")
+
+
+async def _judge(report: EvalReport, cases: list[EvalCase]) -> EvalReport:
+    from customer_agent.bootstrap import create_llm_provider
+    from customer_agent.config import get_settings
+    from customer_agent.evaluation.judge import GroundednessJudge, judgeable
+    from customer_agent.infrastructure.knowledge_files import load_knowledge_directory
+    from customer_agent.infrastructure.prompts import load_prompt
+
+    settings = get_settings()
+    judge = GroundednessJudge(
+        create_llm_provider(settings),
+        load_prompt("judge", 1),
+        load_knowledge_directory(settings.knowledge_dir),
+    )
+    results = []
+    for result in report.results:
+        if judgeable(result):
+            verdict = await judge.judge(result.response.answer, result.response.sources)
+            result = result.model_copy(update={"grounded": verdict.grounded})
+        results.append(result)
+    config = {**report.config, "judge_prompt": "judge/v1"}
+    return build_report(
+        results,
+        target=report.target,
+        dataset=report.dataset,
+        current_day=report.current_day,
+        started_at=report.started_at,
+        config=config,
+    )
+
+
+async def _run(args: argparse.Namespace, cases: list[EvalCase]) -> EvalReport:
+    started_at = datetime.now(UTC)
+    async with TARGETS[args.target]() as (agent, config):
+        results = await run_cases(cases, agent, current_day=args.day, concurrency=args.concurrency)
+    report = build_report(
+        results,
+        target=args.target,
+        dataset=str(args.dataset),
+        current_day=args.day,
+        started_at=started_at,
+        config=config,
+    )
+    return await _judge(report, cases) if args.judge else report
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
-    cases = load_dataset(args.dataset)
-    agent = TARGETS[args.target]()
-    report = asyncio.run(
-        run_evaluation(
-            cases, agent, target=args.target, dataset=str(args.dataset), current_day=args.day
+    configure_logging(args.log_level)
+
+    if args.check_calibration:
+        from customer_agent.evaluation.judge import agreement
+
+        agreeing, labelled = agreement(args.check_calibration)
+        rate = agreeing / labelled if labelled else 0.0
+        print(
+            f"Judge agrees with human labels on {agreeing}/{labelled} ({rate:.0%}); target ≥ 90 %"
         )
-    )
+        return 0
+
+    cases = load_dataset(args.dataset)
+    report = asyncio.run(_run(args, cases))
 
     out: Path = args.out or Path("eval/results") / (
         f"{datetime.now(UTC):%Y%m%dT%H%M%SZ}-{args.target}.json"
     )
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(report.model_dump_json(indent=2), encoding="utf-8")
+
+    if args.calibration_out:
+        from customer_agent.evaluation.judge import calibration_rows
+
+        questions = {c.id: c.turns[-1].content for c in cases}
+        rows = calibration_rows(report.results, questions)
+        args.calibration_out.parent.mkdir(parents=True, exist_ok=True)
+        args.calibration_out.write_text(
+            "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8"
+        )
+        print(f"Calibration sheet ({len(rows)} rows) written to {args.calibration_out}")
 
     _print_summary(report)
     print(f"\nWritten to {out}")

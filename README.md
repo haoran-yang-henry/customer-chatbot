@@ -7,8 +7,9 @@ cancellation, returns) behind explicit authorization, policy checks and confirma
 Customers write German; the agent answers in German. Code and documentation are in English
 ([ADR-0003](docs/adr/0003-german-language-strategy.md)).
 
-> **Status: Day 2 of 8** — knowledge ingestion and hybrid retrieval (Postgres full-text +
-> pgvector, RRF) are in place and evaluated. The answering agent starts on Day 3. See the
+> **Status: Day 3 of 8** — the agent answers German questions from the governed knowledge base
+> with citations, says honestly when it has no answer, and streams responses
+> ([API](docs/api.md)). Intent routing and conversation state follow on Day 4. See the
 > [development plan](docs/development-plan.md).
 
 ## Documentation
@@ -26,10 +27,11 @@ Customers write German; the agent answers in German. Code and documentation are 
 ## Quick start
 
 Requirements: Python 3.12, [uv](https://docs.astral.sh/uv/), Docker, an OpenAI API key
-(embeddings, [ADR-0007](docs/adr/0007-openai-embeddings.md)).
+(embeddings, [ADR-0007](docs/adr/0007-openai-embeddings.md)) and a key for an OpenAI-compatible
+chat endpoint ([ADR-0008](docs/adr/0008-llm-provider-opencode-go.md)).
 
 ```bash
-cp .env.example .env   # then set CA_OPENAI_API_KEY
+cp .env.example .env   # then set CA_OPENAI_API_KEY and CA_LLM_API_KEY
 make install           # dependencies + pre-commit hooks
 make check             # lint, type check, unit tests (no Docker, no API key)
 make test-integration  # repository tests against a throwaway Postgres (Testcontainers)
@@ -37,8 +39,8 @@ make test-llm          # same + production scenarios with the real embedding mod
 make up migrate        # start Postgres + pgvector, apply migrations
 make ingest            # index data/knowledge (idempotent)
 make eval-retrieval    # Recall@5 / MRR for fulltext, vector and hybrid search
-make eval              # end-to-end evaluation against the current agent
-make run               # API on http://localhost:8000 (docs at /docs)
+make eval              # end-to-end evaluation of the real agent + groundedness judge
+make run               # API on http://localhost:8000 (docs at /docs), live logs in the terminal
 ```
 
 ## Repository layout
@@ -58,6 +60,7 @@ tests/                unit and data validation tests
 |---|---|---|
 | D1 | n/a (0 cases due) | Placeholder agent: 3/71 overall; harness and dataset validated |
 | D2 | n/a (0 cases due) | Retrieval only, see below |
+| D3 | **32/32 (100 %)** | Real agent (`deepseek-v4-flash`, prompt `answer/v2`); groundedness 23/24 on Day-3 answers (judge, uncalibrated) |
 
 **Retrieval (Day 2, 37 cases, `text-embedding-3-small`)**
 

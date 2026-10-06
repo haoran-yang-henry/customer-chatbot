@@ -15,6 +15,7 @@ class CaseResult(BaseModel):
     checks: dict[str, bool]
     source_recall: float | None
     response: AgentResponse
+    grounded: bool | None = None  # LLM judge verdict, only when the judge ran
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -39,15 +40,20 @@ def source_recall(expected: list[str], cited: list[str]) -> float | None:
     return len(set(expected) & set(cited)) / len(set(expected))
 
 
-def score_case(case: EvalCase, response: AgentResponse) -> CaseResult:
+# Capabilities arrive day by day; a check counts only once its capability exists, so an early
+# agent is not failed for missing intents (Day 4) or tools (Day 5).
+CHECK_INTRODUCED_ON_DAY = {"intent": 4, "tool": 5}
+
+
+def score_case(case: EvalCase, response: AgentResponse, current_day: int = 8) -> CaseResult:
     """Apply every applicable check; expectations left unspecified are not checked."""
     checks: dict[str, bool] = {"behavior": response.behavior is case.expected_behavior}
-    if case.expected_intent is not None:
+    if case.expected_intent is not None and current_day >= CHECK_INTRODUCED_ON_DAY["intent"]:
         checks["intent"] = response.intent is case.expected_intent
     recall = source_recall(case.expected_sources, response.sources)
     if recall is not None:
         checks["sources"] = recall > 0
-    if case.expected_tool is not None:
+    if case.expected_tool is not None and current_day >= CHECK_INTRODUCED_ON_DAY["tool"]:
         checks["tool"] = case.expected_tool in response.tool_calls
     if case.must_contain:
         checks["must_contain"] = contains_all_groups(response.answer, case.must_contain)

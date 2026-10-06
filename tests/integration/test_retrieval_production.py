@@ -19,7 +19,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from customer_agent.application.ingestion import IngestionService
-from customer_agent.application.ports import EmbeddingProvider
+from customer_agent.application.ports import EmbeddingProvider, ProviderUnavailableError
 from customer_agent.application.retrieval import RetrievalService
 from customer_agent.config import Settings
 from customer_agent.domain.retrieval import SearchMode, SearchScope
@@ -278,7 +278,7 @@ async def test_invalid_api_key_raises_a_provider_error() -> None:
         client, settings.embedding_model, settings.embedding_dimensions
     )
 
-    with pytest.raises(openai.APIStatusError):
+    with pytest.raises(ProviderUnavailableError):
         await provider.embed_query("Versand")
 
 

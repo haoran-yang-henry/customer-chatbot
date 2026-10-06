@@ -30,8 +30,9 @@ test-llm:  ## All integration tests with the real embedding model + production s
 
 check: lint typecheck test  ## Fast checks (no Docker, no API keys)
 
-eval:  ## Run the evaluation dataset against the current agent
-	uv run customer-agent-eval --dataset eval/datasets/core.jsonl --day 2
+eval:  ## End-to-end evaluation of the real agent with the groundedness judge (cached LLM calls)
+	CA_LLM_CACHE_DIR=.cache/llm uv run customer-agent-eval --dataset eval/datasets/core.jsonl --day 3 \
+		--target agent --judge --calibration-out eval/calibration/groundedness-day3.jsonl
 
 eval-retrieval:  ## Recall@5 / MRR for fulltext, vector and hybrid search (needs DB + API key)
 	uv run customer-agent-eval-retrieval --dataset eval/datasets/core.jsonl --out eval/results/day2-retrieval.json
@@ -42,8 +43,8 @@ migrate:  ## Apply database migrations
 ingest:  ## Synchronise the knowledge index with data/knowledge (needs DB + API key)
 	uv run customer-agent-ingest
 
-run:  ## Start the API with auto-reload
-	uv run uvicorn --factory customer_agent.main:create_app --reload
+run:  ## Start the API with auto-reload; live logs in this terminal (needs DB + both API keys)
+	uv run uvicorn --factory customer_agent.main:create_app --reload --no-access-log
 
 up:  ## Start local infrastructure (Postgres + pgvector)
 	docker compose up -d --wait

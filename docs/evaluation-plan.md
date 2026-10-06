@@ -108,6 +108,9 @@ A case **passes** when every applicable check passes: intent (if expected), beha
 (at least one expected source cited, if any expected), tool (if expected), `must_contain`,
 `must_not_contain`.
 
+Checks count only from the day their capability exists (`CHECK_INTRODUCED_ON_DAY`): intent from
+Day 4, tool from Day 5. An answer-only agent on Day 3 is not failed for lacking an intent.
+
 ### 4.1 Retrieval evaluation (Day 2)
 
 `make eval-retrieval` runs every case with `expected_sources` (37 cases) through fulltext, vector
@@ -124,9 +127,24 @@ and hybrid search and reports Recall@5 and MRR (ranking depth 10) per mode and p
 
 Used only where deterministic checks are insufficient (groundedness, tone).
 
-- The judge prompt is versioned in `prompts/judge/`.
-- Before relying on it, 20 answers are labelled by hand; the judge must agree on ≥ 90 %.
+- The judge prompt is versioned in `prompts/judge/`; it judges every `answer` with sources
+  against the **full text of the cited documents**.
+- `--calibration-out` writes the judged answers to `eval/calibration/*.jsonl` with an empty
+  `human_grounded` field. A human labels at least 20 rows (`true`/`false`);
+  `--check-calibration <file>` reports agreement. **Until agreement ≥ 90 % the groundedness
+  number is reported as uncalibrated.**
+- The judge prompt is not changed to improve scores; it changes only after calibration shows a
+  systematic disagreement with human labels.
 - Judge model and prompt version are stored with every result.
+
+### 5.1 Day 3 findings
+
+- Prompt v1 → v2 fixed one gated failure (false premise declined) but first *reduced*
+  groundedness (85 % → 80 %): the new capability rule made the model append unsupported
+  "I cannot…" sentences everywhere. The judge caught it; v2 was tightened before release.
+  Every prompt change is an evaluation run, not a guess.
+- Keyword checks were too strict once (G-003: "keine Kosten" is correct); the phrase group was
+  widened in a separate, documented dataset change.
 
 ## 6. Results
 
@@ -141,8 +159,9 @@ The end-of-day run is copied to `eval/results/dayN.json` and committed.
 | Pull request | Smoke subset (~20 cases, tagged in D8) | Gated pass rate ≥ threshold; no adversarial failures |
 | Nightly / manual | Full `core.jsonl` + `redteam.jsonl` | Report only; regressions open an issue |
 
-Until the first real agent exists (D3), CI runs the harness against the placeholder agent without
-a threshold, which verifies that the dataset and harness stay valid.
+CI still runs the harness against the placeholder agent (no secrets in CI yet), which verifies
+that dataset and harness stay valid. The real-agent smoke gate is added on Day 8.
+`make eval` runs the real agent locally with an on-disk LLM cache (`.cache/llm`).
 
 ## 8. Dataset governance
 

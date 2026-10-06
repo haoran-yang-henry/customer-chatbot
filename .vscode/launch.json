@@ -58,7 +58,7 @@
       "type": "debugpy",
       "request": "launch",
       "module": "uvicorn",
-      "args": ["--factory", "customer_agent.main:create_app", "--port", "8000"],
+      "args": ["--factory", "customer_agent.main:create_app", "--port", "8000", "--no-access-log"],
       "console": "integratedTerminal",
       "justMyCode": true
     },

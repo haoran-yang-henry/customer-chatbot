@@ -25,7 +25,32 @@ class Settings(BaseSettings):
     embedding_model: str = "text-embedding-3-small"
     embedding_dimensions: int = 1536
 
-    @field_validator("openai_api_key", "openai_base_url", mode="before")
+    # Chat model (ADR-0008): any OpenAI-compatible endpoint
+    llm_api_key: SecretStr | None = None
+    llm_base_url: str | None = "https://opencode.ai/zen/go/v1"
+    llm_model: str = "deepseek-v4-flash"
+    llm_timeout_seconds: float = 30.0
+    # Honest client identification; OpenCode Go requires both (ADR-0008).
+    llm_user_agent: str = "nordelektro-customer-agent/0.1.0"
+    llm_session_header: str | None = None  # e.g. "x-opencode-session"
+    llm_reasoning_effort: str | None = None  # e.g. "none" for OpenAI GPT-5 models
+    llm_cache_dir: Path | None = None  # evaluation only, see infrastructure/llm_cache.py
+
+    # Answering (Day 3)
+    answer_prompt_version: int = 2
+    # Below this best cosine similarity the question is treated as unrelated and answered with
+    # "no answer" without an LLM call. Between this floor and clearly relevant scores the LLM
+    # decides (it may reply KEINE_ANTWORT). Measured on Day 2/3, see architecture §6.4.
+    min_answer_similarity: float = 0.35
+
+    @field_validator(
+        "openai_api_key",
+        "openai_base_url",
+        "llm_api_key",
+        "llm_base_url",
+        "llm_cache_dir",
+        mode="before",
+    )
     @classmethod
     def _empty_as_none(cls, value: Any) -> Any:
         return None if value == "" else value

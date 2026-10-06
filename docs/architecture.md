@@ -194,6 +194,19 @@ the guardrail configuration.
 Decisions are logged and exported as metrics (stage, action, reasons) — the basis for the
 false-positive and attack-success rates in the evaluation plan.
 
+#### Day 3 implementation notes
+
+- **Relevance gate.** Best cosine similarity < `CA_MIN_ANSWER_SIMILARITY` (0.35) → "no answer"
+  without an LLM call. Between the floor and clearly relevant scores the LLM decides and may
+  answer `KEINE_ANTWORT`. A single high threshold failed keyword questions such as
+  "Nachnahme" (0.447), which overlap with not-in-knowledge-base questions (≤ 0.461).
+- **Citations.** The model cites `[document-id]` inline; the customer sees clean text and the
+  ids travel as `sources`. Citing an id that was not offered counts as no citation.
+- **Prompts** are versioned YAML (`prompts/answer/v2.yaml`, `CA_ANSWER_PROMPT_VERSION`); every
+  evaluation result records the prompt ref and model.
+- **Streaming** uses the same decision path: the final answer is computed from the full model
+  output, and the `final` SSE event is authoritative.
+
 ### 5.2 Cancellation request: guidance, then handoff on request (D5)
 
 ```mermaid
@@ -381,7 +394,8 @@ statuses: `pending_payment → paid → processing → shipped → delivered`, p
 |---|---|---|
 | Configuration | `pydantic-settings`, env prefix `CA_`, `.env` for local only | D1 |
 | Language | German FTS config, multilingual embeddings, German prompts; see [ADR-0003](adr/0003-german-language-strategy.md) | D1–D3 |
-| Errors | Domain exceptions mapped to RFC 9457 problem responses at the API edge | D3 |
+| Errors | Invalid requests → `422`; provider failures (`ProviderUnavailableError`) degrade to a German fallback answer, never `5xx` | D3 |
+| Logging | `customer_agent.observability`: one format, request id via `ContextVar` (also while streaming), `key=value` messages with per-step timings; `CA_LOG_LEVEL` | D3 |
 | Authentication | JWT bearer token with `customer_id`, `tenant_id` | D5 |
 | Observability | OpenTelemetry traces, JSON logs with correlation ids, Prometheus metrics | D7 |
 | Resilience | Timeouts, retries with backoff, fallbacks to handoff | D7 |

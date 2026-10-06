@@ -162,6 +162,6 @@ system's own overhead with a mocked LLM, because LLM provider latency is outside
 
 | # | Question | Decide by |
 |---|---|---|
-| Q1 | Which LLM provider and model(s)? | D3 (ADR) |
+| ~~Q1~~ | ~~Which LLM provider?~~ Decided: OpenAI-compatible endpoint, OpenCode Go `deepseek-v4-flash` for development ([ADR-0008](adr/0008-llm-provider-opencode-go.md)) | D3 |
 | ~~Q2~~ | ~~Which embedding model?~~ Decided: OpenAI `text-embedding-3-small` ([ADR-0007](adr/0007-openai-embeddings.md)) | D2 |
 | Q3 | Is a web UI needed, or is the API + Swagger sufficient for the demo? | D3 |
