@@ -21,6 +21,7 @@ from customer_agent.infrastructure.db.knowledge_repository import PostgresKnowle
 from customer_agent.infrastructure.db.models import EMBEDDING_DIMENSIONS
 from customer_agent.infrastructure.db.session_repository import PostgresSessionStore
 from customer_agent.infrastructure.embeddings import OpenAIEmbeddingProvider
+from customer_agent.infrastructure.lifecycle import aclose_all
 from customer_agent.infrastructure.llm import OpenAICompatibleLLM
 from customer_agent.infrastructure.llm_cache import CachingLLM
 from customer_agent.infrastructure.prompts import load_prompt
@@ -50,7 +51,10 @@ def create_embedding_provider(settings: Settings) -> EmbeddingProvider:
     if settings.openai_api_key is None:
         raise ConfigurationError("CA_OPENAI_API_KEY is not set (see .env.example)")
     client = AsyncOpenAI(
-        api_key=settings.openai_api_key.get_secret_value(), base_url=settings.openai_base_url
+        api_key=settings.openai_api_key.get_secret_value(),
+        base_url=settings.openai_base_url,
+        timeout=settings.embedding_timeout_seconds,
+        max_retries=1,
     )
     provider = OpenAIEmbeddingProvider(
         client, model=settings.embedding_model, dimensions=settings.embedding_dimensions
@@ -76,7 +80,14 @@ def create_llm_provider(settings: Settings) -> LLMProvider:
         reasoning_effort=settings.llm_reasoning_effort,
     )
     if settings.llm_cache_dir is not None:
-        llm = CachingLLM(llm, settings.llm_cache_dir)
+        namespace = "|".join(
+            [
+                settings.llm_base_url or "openai-default",
+                settings.llm_model,
+                f"reasoning={settings.llm_reasoning_effort}",
+            ]
+        )
+        llm = CachingLLM(llm, settings.llm_cache_dir, namespace=namespace)
     return llm
 
 
@@ -87,10 +98,18 @@ class Container:
     engine: AsyncEngine
     agent: ConversationOrchestrator
     chat: ChatService
-    llm_model: str
+    llm: LLMProvider
+    embeddings: EmbeddingProvider
     prompts: dict[str, str]
 
+    @property
+    def llm_model(self) -> str:
+        return self.llm.model_name
+
     async def aclose(self) -> None:
+        """Graceful shutdown: let in-flight turns finish, then release connections."""
+        await self.chat.drain()
+        await aclose_all(self.llm, self.embeddings)
         await self.engine.dispose()
 
 
@@ -115,6 +134,7 @@ def build_container(settings: Settings, clock: Clock | None = None) -> Container
         engine=engine,
         agent=agent,
         chat=ChatService(agent, sessions, tenant_id=settings.tenant_id),
-        llm_model=llm.model_name,
+        llm=llm,
+        embeddings=embeddings,
         prompts={"answer": answer_prompt.ref, "router": router_prompt.ref},
     )

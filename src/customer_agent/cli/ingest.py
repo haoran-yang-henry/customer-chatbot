@@ -11,6 +11,7 @@ from customer_agent.bootstrap import (
 )
 from customer_agent.config import get_settings
 from customer_agent.infrastructure.knowledge_files import load_knowledge_directory
+from customer_agent.infrastructure.lifecycle import aclose_all
 
 
 def _print_report(report: IngestionReport) -> None:
@@ -29,12 +30,13 @@ async def _run() -> IngestionReport:
     settings = get_settings()
     documents = load_knowledge_directory(settings.knowledge_dir)
     engine = create_engine(settings)
+    embeddings = None
     try:
-        service = IngestionService(
-            create_knowledge_repository(engine), create_embedding_provider(settings)
-        )
+        embeddings = create_embedding_provider(settings)
+        service = IngestionService(create_knowledge_repository(engine), embeddings)
         return await service.run(documents)
     finally:
+        await aclose_all(embeddings)
         await engine.dispose()
 
 

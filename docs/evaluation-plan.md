@@ -137,6 +137,18 @@ Used only where deterministic checks are insufficient (groundedness, tone).
   systematic disagreement with human labels.
 - Judge model and prompt version are stored with every result.
 
+### 5.3 Engineering review (Day 4)
+
+- **The LLM cache key ignored provider settings.** After switching `reasoning_effort` the
+  evaluation silently reused answers generated with the old setting; the reported 47/47 was
+  partly measured on a mixed configuration. The cache key now includes a namespace (endpoint,
+  model, reasoning settings). Clean re-run: gated **45/47**, groundedness 31/31 on Day-4 answers.
+- With reasoning off, the model sometimes explains first and appends `KEINE_ANTWORT` (K-004 leaked
+  "Die EVIDENCE enthält…" to the customer). The token is now detected anywhere. Two cases still
+  phrase a no-answer without the token (K-003, G-001) — a prompt topic for Day 5.
+- Lesson: an evaluation result is only as trustworthy as its cache key. Anything that can change
+  the output must be part of it.
+
 ### 5.2 Day 4 findings
 
 - **Empty generations were cached.** `deepseek-v4-flash` with default reasoning sometimes

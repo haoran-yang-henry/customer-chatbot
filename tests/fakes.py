@@ -5,6 +5,7 @@ from datetime import date
 
 from customer_agent.application.ports import (
     ChatMessage,
+    ConcurrentTurnError,
     LLMResult,
     ProviderUnavailableError,
     StoredSession,
@@ -157,11 +158,20 @@ class InMemorySessionStore:
         return self.sessions.get(session_id)
 
     async def save_turn(
-        self, session_id: str, *, state: SessionState, user: str, reply: AgentResponse
+        self,
+        session_id: str,
+        *,
+        expected_version: int,
+        state: SessionState,
+        user: str,
+        reply: AgentResponse,
     ) -> None:
         old = self.sessions[session_id]
+        if old.version != expected_version:
+            raise ConcurrentTurnError(session_id)
         self.sessions[session_id] = old.model_copy(
             update={
+                "version": old.version + 1,
                 "state": state,
                 "messages": [
                     *old.messages,

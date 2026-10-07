@@ -89,6 +89,7 @@ class ChatSessionRow(Base):
     active_intent: Mapped[str | None]
     workflow_state: Mapped[str]
     slots: Mapped[dict[str, str]] = mapped_column(JSONB)
+    version: Mapped[int] = mapped_column(default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

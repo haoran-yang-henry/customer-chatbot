@@ -10,12 +10,18 @@ from collections.abc import AsyncIterator, Sequence
 from pathlib import Path
 
 from customer_agent.application.ports import ChatMessage, LLMProvider, LLMResult
+from customer_agent.infrastructure.lifecycle import SupportsAclose
 
 
 class CachingLLM:
-    def __init__(self, inner: LLMProvider, directory: Path) -> None:
+    """``namespace`` must identify everything besides the request that changes the output
+    (endpoint, model, reasoning settings); otherwise a config change silently reuses old answers.
+    """
+
+    def __init__(self, inner: LLMProvider, directory: Path, *, namespace: str) -> None:
         self._inner = inner
         self._directory = directory
+        self._namespace = namespace
         directory.mkdir(parents=True, exist_ok=True)
 
     @property
@@ -24,7 +30,7 @@ class CachingLLM:
 
     def _path(self, messages: Sequence[ChatMessage], max_tokens: int, temperature: float) -> Path:
         key = json.dumps(
-            [self._inner.model_name, [m.model_dump() for m in messages], max_tokens, temperature],
+            [self._namespace, [m.model_dump() for m in messages], max_tokens, temperature],
             ensure_ascii=False,
         )
         return self._directory / f"{hashlib.sha256(key.encode()).hexdigest()}.json"
@@ -59,3 +65,7 @@ class CachingLLM:
             messages, max_tokens=max_tokens, temperature=temperature, session_id=session_id
         )
         yield result.text
+
+    async def aclose(self) -> None:
+        if isinstance(self._inner, SupportsAclose):
+            await self._inner.aclose()

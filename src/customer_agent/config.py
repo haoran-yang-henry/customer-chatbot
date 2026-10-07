@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     openai_base_url: str | None = None
     embedding_model: str = "text-embedding-3-small"
     embedding_dimensions: int = 1536
+    # The SDK default is 600 s with 2 retries; a hung call would block a request for minutes.
+    embedding_timeout_seconds: float = 15.0
 
     # Chat model (ADR-0008): any OpenAI-compatible endpoint
     llm_api_key: SecretStr | None = None

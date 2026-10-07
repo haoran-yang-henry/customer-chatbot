@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 from customer_agent.application.answering import TextDelta
 from customer_agent.application.chat import ChatTurn, SessionNotFoundError
+from customer_agent.application.ports import ConcurrentTurnError
 from customer_agent.config import Settings
 from customer_agent.domain.conversation import AgentResponse, Behavior
 from customer_agent.domain.intents import Intent
@@ -31,6 +32,8 @@ class FakeChat:
         self.calls.append((session_id, customer_id, text))
         if session_id == "missing":
             raise SessionNotFoundError(session_id)
+        if session_id == "busy":
+            raise ConcurrentTurnError(session_id)
         yield TextDelta(text="Die Rücksendung ")
         yield TextDelta(text="ist kostenlos.")
         yield TURN
@@ -93,3 +96,10 @@ def test_stream_sends_deltas_then_final_event() -> None:
 
     assert names == ["delta", "delta", "final"]
     assert payloads[2]["session_id"] == "abc" and payloads[2]["intent"] == "RETURN_POLICY"
+
+
+def test_concurrent_turn_is_409() -> None:
+    with client(FakeChat()) as c:
+        response = c.post("/v1/chat", json={"session_id": "busy", "message": "Hallo"})
+
+    assert response.status_code == 409

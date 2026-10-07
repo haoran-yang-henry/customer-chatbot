@@ -10,6 +10,7 @@ from fastapi.responses import StreamingResponse
 from customer_agent.api.schemas import ChatRequest, ChatResponse
 from customer_agent.application.answering import TextDelta
 from customer_agent.application.chat import ChatService, ChatTurn, SessionNotFoundError
+from customer_agent.application.ports import ConcurrentTurnError
 from customer_agent.observability import request_id_var
 
 router = APIRouter(prefix="/v1", tags=["chat"])
@@ -22,6 +23,7 @@ def get_chat(request: Request) -> ChatService:
 
 Chat = Annotated[ChatService, Depends(get_chat)]
 _NOT_FOUND = HTTPException(status_code=404, detail="session not found")
+_CONFLICT_DETAIL = "another message of this session was processed at the same time; please retry"
 
 
 def _response(turn: ChatTurn, request_id: str) -> ChatResponse:
@@ -42,6 +44,8 @@ async def chat(body: ChatRequest, service: Chat) -> ChatResponse:
         turn = await service.chat(body.session_id, None, body.message)
     except SessionNotFoundError:
         raise _NOT_FOUND from None
+    except ConcurrentTurnError:
+        raise HTTPException(status_code=409, detail=_CONFLICT_DETAIL) from None
     return _response(turn, request_id_var.get())
 
 
@@ -55,6 +59,7 @@ def _sse(event: str, data: dict[str, object]) -> str:
     responses={
         200: {"content": {"text/event-stream": {}}},
         404: {"description": "Unknown session"},
+        409: {"description": "Concurrent turn on the same session"},
     },
 )
 async def chat_stream(body: ChatRequest, service: Chat) -> StreamingResponse:
@@ -80,7 +85,12 @@ async def chat_stream(body: ChatRequest, service: Chat) -> StreamingResponse:
                     yield _sse("delta", {"text": event.text})
                 else:
                     yield _sse("final", _response(event, request_id).model_dump(mode="json"))
-                event = await anext(events, None)
+                try:
+                    event = await anext(events, None)
+                except ConcurrentTurnError:
+                    # The 200 status is already sent; report the conflict as a stream event.
+                    yield _sse("error", {"status": 409, "detail": _CONFLICT_DETAIL})
+                    return
         finally:
             request_id_var.reset(token)
 

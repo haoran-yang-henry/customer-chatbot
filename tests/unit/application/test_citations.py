@@ -26,7 +26,15 @@ def test_square_brackets_that_are_not_ids_stay() -> None:
     assert cited == [] and text == "Größe [XL] ist verfügbar."
 
 
-@pytest.mark.parametrize("text", ["KEINE_ANTWORT", "  KEINE_ANTWORT\n", "KEINE_ANTWORT."])
+@pytest.mark.parametrize(
+    "text",
+    [
+        "KEINE_ANTWORT",
+        "  KEINE_ANTWORT\n",
+        "KEINE_ANTWORT.",
+        "Die EVIDENCE enthält keine Informationen dazu.\n\nKEINE_ANTWORT",
+    ],
+)
 def test_no_answer_token(text: str) -> None:
     assert is_no_answer(text)
 

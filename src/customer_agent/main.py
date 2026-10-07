@@ -1,5 +1,6 @@
 """FastAPI application factory."""
 
+import re
 import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -15,6 +16,15 @@ from customer_agent.config import Settings, get_settings
 from customer_agent.observability import configure_logging, elapsed_ms, get_logger, request_id_var
 
 log = get_logger("http")
+
+# Client-supplied ids end up in logs and response headers: accept only a safe, short format.
+_REQUEST_ID = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+
+
+def request_id_from(header: str | None) -> str:
+    if header and _REQUEST_ID.fullmatch(header):
+        return header
+    return uuid.uuid4().hex[:12]
 
 
 def create_app(settings: Settings | None = None, chat: ChatService | None = None) -> FastAPI:
@@ -49,7 +59,7 @@ def create_app(settings: Settings | None = None, chat: ChatService | None = None
     async def request_context(
         request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
-        request_id = request.headers.get("x-request-id") or uuid.uuid4().hex[:12]
+        request_id = request_id_from(request.headers.get("x-request-id"))
         token = request_id_var.set(request_id)
         start = time.perf_counter()
         try:

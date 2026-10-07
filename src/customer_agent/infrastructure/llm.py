@@ -31,6 +31,9 @@ class OpenAICompatibleLLM:
     def model_name(self) -> str:
         return self._model
 
+    async def aclose(self) -> None:
+        await self._client.close()
+
     def _request(
         self,
         messages: Sequence[ChatMessage],
@@ -104,14 +107,30 @@ class OpenAICompatibleLLM:
         session_id: str | None = None,
     ) -> AsyncIterator[str]:
         start = time.perf_counter()
+        chars, finish_reason, usage = 0, None, None
         try:
             chunks = await self._client.chat.completions.create(
-                **self._request(messages, max_tokens, temperature, session_id), stream=True
+                **self._request(messages, max_tokens, temperature, session_id),
+                stream=True,
+                stream_options={"include_usage": True},
             )
             async for chunk in chunks:
-                if chunk.choices and chunk.choices[0].delta.content:
-                    yield chunk.choices[0].delta.content
+                usage = chunk.usage or usage  # sent in a final chunk without choices
+                if not chunk.choices:
+                    continue
+                finish_reason = chunk.choices[0].finish_reason or finish_reason
+                if content := chunk.choices[0].delta.content:
+                    chars += len(content)
+                    yield content
         except openai.OpenAIError as exc:
             log.warning("model=%s stream error=%s", self._model, type(exc).__name__)
             raise ProviderUnavailableError(f"{self._model}: {exc}") from exc
-        log.info("model=%s stream took=%dms", self._model, elapsed_ms(start))
+        if chars == 0:
+            log.warning("model=%s empty stream finish_reason=%s", self._model, finish_reason)
+        log.info(
+            "model=%s stream tokens_in=%s tokens_out=%s took=%dms",
+            self._model,
+            usage.prompt_tokens if usage else None,
+            usage.completion_tokens if usage else None,
+            elapsed_ms(start),
+        )

@@ -4,6 +4,8 @@ import pytest
 from openai import AsyncOpenAI
 
 from customer_agent.application.ports import ChatMessage
+from customer_agent.infrastructure.embeddings import OpenAIEmbeddingProvider
+from customer_agent.infrastructure.lifecycle import aclose_all
 from customer_agent.infrastructure.llm import OpenAICompatibleLLM
 from customer_agent.infrastructure.llm_cache import CachingLLM
 from customer_agent.infrastructure.prompts import load_prompt
@@ -38,10 +40,10 @@ def test_reasoning_models_use_newer_parameters() -> None:
 
 async def test_cache_answers_identical_requests_from_disk(tmp_path: Path) -> None:
     inner = FakeLLM("Antwort")
-    cache = CachingLLM(inner, tmp_path)
+    cache = CachingLLM(inner, tmp_path, namespace="n")
 
     first = await cache.complete(MESSAGES, max_tokens=10, temperature=0.0)
-    second = await CachingLLM(FakeLLM("anders"), tmp_path).complete(
+    second = await CachingLLM(FakeLLM("anders"), tmp_path, namespace="n").complete(
         MESSAGES, max_tokens=10, temperature=0.0
     )
     await cache.complete([ChatMessage(role="user", content="Neu")], max_tokens=10, temperature=0.0)
@@ -67,7 +69,9 @@ def test_prompt_rendering_requires_all_placeholders() -> None:
 
 
 async def test_empty_generation_is_not_cached(tmp_path: Path) -> None:
-    await CachingLLM(FakeLLM(""), tmp_path).complete(MESSAGES, max_tokens=10, temperature=0.0)
+    await CachingLLM(FakeLLM(""), tmp_path, namespace="n").complete(
+        MESSAGES, max_tokens=10, temperature=0.0
+    )
 
     assert list(tmp_path.iterdir()) == []
 
@@ -75,8 +79,32 @@ async def test_empty_generation_is_not_cached(tmp_path: Path) -> None:
 async def test_cache_forwards_session_id_on_a_miss(tmp_path: Path) -> None:
     inner = FakeLLM("Antwort")
 
-    await CachingLLM(inner, tmp_path).complete(
+    await CachingLLM(inner, tmp_path, namespace="n").complete(
         MESSAGES, max_tokens=10, temperature=0.0, session_id="conv-1"
     )
 
     assert inner.session_ids == ["conv-1"]
+
+
+async def test_cache_is_separated_by_namespace(tmp_path: Path) -> None:
+    """Changing e.g. reasoning settings must not reuse answers produced with the old ones."""
+    await CachingLLM(FakeLLM("alt"), tmp_path, namespace="reasoning=None").complete(
+        MESSAGES, max_tokens=10, temperature=0.0
+    )
+    inner = FakeLLM("neu")
+
+    result = await CachingLLM(inner, tmp_path, namespace="reasoning=none").complete(
+        MESSAGES, max_tokens=10, temperature=0.0
+    )
+
+    assert result.text == "neu" and len(inner.calls) == 1
+
+
+async def test_adapters_close_their_http_clients(tmp_path: Path) -> None:
+    llm_client, embed_client = AsyncOpenAI(api_key="t"), AsyncOpenAI(api_key="t")
+    llm = CachingLLM(OpenAICompatibleLLM(llm_client, "m"), tmp_path, namespace="n")
+    embeddings = OpenAIEmbeddingProvider(embed_client, "e", 8)
+
+    await aclose_all(llm, embeddings, None, "not closable")
+
+    assert llm_client.is_closed() and embed_client.is_closed()

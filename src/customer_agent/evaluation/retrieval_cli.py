@@ -14,6 +14,7 @@ from customer_agent.config import get_settings
 from customer_agent.domain.retrieval import SearchMode, SearchScope
 from customer_agent.evaluation.retrieval import RetrievalReport, run_retrieval_evaluation
 from customer_agent.evaluation.schema import DATASET_REFERENCE_DATE, load_dataset
+from customer_agent.infrastructure.lifecycle import aclose_all
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
@@ -40,6 +41,7 @@ async def _run(args: argparse.Namespace) -> list[RetrievalReport]:
     scope = SearchScope(today=DATASET_REFERENCE_DATE, tenant_id=settings.tenant_id)
     modes = list(SearchMode) if args.mode == "all" else [SearchMode(args.mode)]
     engine = create_engine(settings)
+    embeddings = None
     try:
         embeddings = create_embedding_provider(settings)
         service = RetrievalService(create_knowledge_repository(engine), embeddings)
@@ -50,6 +52,7 @@ async def _run(args: argparse.Namespace) -> list[RetrievalReport]:
             for m in modes
         ]
     finally:
+        await aclose_all(embeddings)
         await engine.dispose()
 
 

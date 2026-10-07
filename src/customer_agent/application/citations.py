@@ -20,7 +20,9 @@ def extract_citations(text: str) -> tuple[str, list[str]]:
 
 
 def is_no_answer(text: str) -> bool:
-    return text.strip().startswith(NO_ANSWER_TOKEN)
+    """The token anywhere counts: models sometimes explain first and append it (Day 4, K-004).
+    Such text must never reach the customer; the streamed part is replaced by the final event."""
+    return NO_ANSWER_TOKEN in text
 
 
 class StreamingCitationFilter:

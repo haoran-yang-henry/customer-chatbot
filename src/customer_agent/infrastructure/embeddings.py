@@ -29,6 +29,9 @@ class OpenAIEmbeddingProvider:
     def dimensions(self) -> int:
         return self._dimensions
 
+    async def aclose(self) -> None:
+        await self._client.close()
+
     async def embed_documents(self, texts: Sequence[str]) -> list[list[float]]:
         vectors: list[list[float]] = []
         for start in range(0, len(texts), self._batch_size):

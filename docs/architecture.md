@@ -240,6 +240,12 @@ stateDiagram-v2
     idle --> idle: knowledge / greeting / out of scope / handoff / ask login / clarify
 ```
 
+**Turn lifecycle and concurrency (review fixes, Day 4).** Each turn runs in its own task, decoupled
+from the HTTP response: a client disconnect does not lose the turn, and shutdown drains running
+turns before closing connections. `chat_sessions.version` (migration 0003) is an optimistic
+concurrency token: a turn saves only if the session is still at the version it loaded, so two
+simultaneous messages cannot overwrite each other's state (the loser gets `409`).
+
 Steps by intent group: knowledge → grounded answer with the **standalone query** for retrieval
 and the customer's original words in the answer prompt; transactional → general question
 answered from knowledge, otherwise ask to log in / ask for the order number / order guidance

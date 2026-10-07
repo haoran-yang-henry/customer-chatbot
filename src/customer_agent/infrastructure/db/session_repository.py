@@ -5,7 +5,7 @@ import uuid
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from customer_agent.application.ports import StoredSession
+from customer_agent.application.ports import ConcurrentTurnError, StoredSession
 from customer_agent.domain.conversation import AgentResponse, Message, Role
 from customer_agent.domain.intents import Intent
 from customer_agent.domain.session import SessionState, WorkflowState
@@ -32,6 +32,7 @@ class PostgresSessionStore:
             active_intent=None,
             workflow_state=WorkflowState.IDLE.value,
             slots={},
+            version=0,
         )
         async with self._sessions.begin() as session:
             session.add(row)
@@ -54,33 +55,56 @@ class PostgresSessionStore:
                 customer_id=row.customer_id,
                 state=_state(row),
                 messages=[Message(role=Role(m.role), content=m.content) for m in messages],
+                version=row.version,
             )
 
     async def save_turn(
-        self, session_id: str, *, state: SessionState, user: str, reply: AgentResponse
+        self,
+        session_id: str,
+        *,
+        expected_version: int,
+        state: SessionState,
+        user: str,
+        reply: AgentResponse,
     ) -> None:
         async with self._sessions.begin() as session:
-            # Row lock: concurrent requests on one session append in a well-defined order.
-            row = await session.get(ChatSessionRow, session_id, with_for_update=True)
-            if row is None:
-                raise LookupError(session_id)
-            position = await session.scalar(
-                select(func.coalesce(func.max(ChatMessageRow.position), -1)).where(
+            # Optimistic concurrency: the UPDATE only matches the version this turn started from.
+            # A concurrent turn blocks on the row lock, then sees the new version and matches 0
+            # rows, so neither the state nor the transcript can be overwritten silently.
+            updated = await session.execute(
+                update(ChatSessionRow)
+                .where(ChatSessionRow.id == session_id)
+                .where(ChatSessionRow.version == expected_version)
+                .values(
+                    active_intent=state.active_intent.value if state.active_intent else None,
+                    workflow_state=state.workflow.value,
+                    slots=state.slots,
+                    version=ChatSessionRow.version + 1,
+                    updated_at=func.now(),
+                )
+                .returning(ChatSessionRow.id)
+            )
+            if updated.first() is None:
+                if await session.get(ChatSessionRow, session_id) is None:
+                    raise LookupError(session_id)
+                raise ConcurrentTurnError(session_id)
+            last = await session.scalar(
+                select(func.max(ChatMessageRow.position)).where(
                     ChatMessageRow.session_id == session_id
                 )
             )
-            next_position = (position if position is not None else -1) + 1
+            position = -1 if last is None else last
             session.add_all(
                 [
                     ChatMessageRow(
                         session_id=session_id,
-                        position=next_position,
+                        position=position + 1,
                         role=Role.USER.value,
                         content=user,
                     ),
                     ChatMessageRow(
                         session_id=session_id,
-                        position=next_position + 1,
+                        position=position + 2,
                         role=Role.ASSISTANT.value,
                         content=reply.answer,
                         intent=reply.intent.value if reply.intent else None,
@@ -88,14 +112,4 @@ class PostgresSessionStore:
                         sources=list(reply.sources),
                     ),
                 ]
-            )
-            await session.execute(
-                update(ChatSessionRow)
-                .where(ChatSessionRow.id == session_id)
-                .values(
-                    active_intent=state.active_intent.value if state.active_intent else None,
-                    workflow_state=state.workflow.value,
-                    slots=state.slots,
-                    updated_at=func.now(),
-                )
             )

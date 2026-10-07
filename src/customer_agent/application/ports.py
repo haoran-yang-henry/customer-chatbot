@@ -146,6 +146,11 @@ class StoredSession(BaseModel):
     customer_id: str | None
     state: SessionState
     messages: list[Message]
+    version: int = 0  # optimistic concurrency token, incremented by every saved turn
+
+
+class ConcurrentTurnError(RuntimeError):
+    """Another turn of the same session was saved since this one loaded it (lost update)."""
 
 
 class SessionStore(Protocol):
@@ -154,7 +159,16 @@ class SessionStore(Protocol):
     async def load(self, session_id: str) -> StoredSession | None: ...
 
     async def save_turn(
-        self, session_id: str, *, state: SessionState, user: str, reply: AgentResponse
+        self,
+        session_id: str,
+        *,
+        expected_version: int,
+        state: SessionState,
+        user: str,
+        reply: AgentResponse,
     ) -> None:
-        """Append the user message and the reply and store the new state, atomically."""
+        """Append the user message and the reply and store the new state, atomically.
+
+        Raises ``ConcurrentTurnError`` if the stored version differs from ``expected_version``.
+        """
         ...

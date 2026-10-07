@@ -1,10 +1,12 @@
 from datetime import date
+from typing import Any
 
 import pytest
 
 from customer_agent.application.answering import AnswerService
 from customer_agent.application.chat import ChatService, SessionNotFoundError
 from customer_agent.application.orchestrator import ConversationOrchestrator
+from customer_agent.application.ports import ConcurrentTurnError
 from customer_agent.application.routing import IntentRouter
 from customer_agent.domain.session import WorkflowState
 from customer_agent.infrastructure.prompts import load_prompt
@@ -62,3 +64,36 @@ async def test_unknown_or_foreign_session_is_not_found(session_id: str) -> None:
 
     with pytest.raises(SessionNotFoundError):
         await chat.chat(session_id, "C-2002", "Zeig mir den Verlauf")
+
+
+async def test_turn_is_saved_even_if_the_client_disconnects_mid_stream() -> None:
+    store = InMemorySessionStore()
+    chat = service(store)
+    first = await chat.chat(None, "C-1001", "Wo ist meine Bestellung?")  # asks for order no.
+
+    stream = chat.chat_stream(first.session_id, "C-1001", "Wie lange habe ich Zeit?")
+    await anext(stream)  # the client reads one event …
+    await stream.aclose()  # … and disconnects
+    await chat.drain()
+
+    assert len(store.sessions[first.session_id].messages) == 4  # second turn was persisted
+
+
+class RacingStore(InMemorySessionStore):
+    """Another turn commits between this turn's load and its save."""
+
+    async def save_turn(self, session_id: str, **kwargs: Any) -> None:
+        current = self.sessions[session_id]
+        self.sessions[session_id] = current.model_copy(update={"version": current.version + 1})
+        await super().save_turn(session_id, **kwargs)
+
+
+async def test_concurrent_turn_on_the_same_session_is_rejected() -> None:
+    store = RacingStore()
+    chat = service(store)
+    created = await store.create(tenant_id="nordelektro", customer_id="C-1001")
+
+    with pytest.raises(ConcurrentTurnError):
+        await chat.chat(created.session_id, "C-1001", "Wo ist meine Bestellung?")
+
+    assert store.sessions[created.session_id].messages == []  # nothing half-written

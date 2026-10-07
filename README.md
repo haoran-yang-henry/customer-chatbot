@@ -61,7 +61,7 @@ tests/                unit and data validation tests
 |---|---|---|
 | D1 | n/a (0 cases due) | Placeholder agent: 3/71 overall; harness and dataset validated |
 | D2 | n/a (0 cases due) | Retrieval only, see below |
-| D4 | **47/47 (100 %)** | Intent accuracy 62/65 (95 %); groundedness 27/28 on Day-4 answers (uncalibrated); router `v2`, answer `v2`, reasoning off |
+| D4 | **45/47 (96 %)** | After review fixes (clean cache): intent accuracy 62/65 (95 %); groundedness 31/31 on Day-4 answers (uncalibrated). An earlier 47/47 was measured on a partly stale cache |
 | D3 | **32/32 (100 %)** | Real agent (`deepseek-v4-flash`, prompt `answer/v2`); groundedness 23/24 on Day-3 answers (judge, uncalibrated) |
 
 **Retrieval (Day 2, 37 cases, `text-embedding-3-small`)**

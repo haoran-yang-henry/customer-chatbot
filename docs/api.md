@@ -9,8 +9,9 @@
 ## Conventions
 
 - JSON in UTF-8; customer-facing text is German.
-- Every response carries an `x-request-id` header. Clients may send their own `x-request-id`;
-  it is used in all log lines of that request.
+- Every response carries an `x-request-id` header. Clients may send their own `x-request-id`
+  (1–64 characters `A-Z a-z 0-9 . _ -`; anything else is replaced by a generated id); it is used
+  in all log lines of that request.
 - Authentication arrives on Day 5 (JWT bearer). Until then all requests are anonymous;
   `customer_id` is never accepted from the request body.
 
@@ -56,6 +57,7 @@ Sends one customer message. The server owns the transcript and the conversation 
 `intent` is the router's classification (see [intent taxonomy](intent-taxonomy.md)) or `null`.
 
 **Errors** — `404` unknown session (also for a session of another customer, from Day 5);
+`409` another message of the same session was processed at the same time (retry);
 `422` invalid request. Provider outages do **not** produce `5xx`; they degrade to
 `behavior: "no_answer"`.
 
@@ -76,7 +78,9 @@ data: {"session_id": "…", "answer": "…", "behavior": "answer", "intent": "SH
 ```
 
 - `delta` events contain display text (citation markers already removed).
-- Exactly one `final` event ends the stream. **Clients must replace the streamed text with
+- Exactly one `final` event ends the stream — or an `error` event
+  (`{"status": 409, "detail": "…"}`) if a concurrent turn of the same session won.
+- If the client disconnects, the turn still completes and is saved on the server. **Clients must replace the streamed text with
   `final.answer`**: an output guardrail may replace an answer after streaming started (for
   example when the model cited no source).
 

@@ -82,8 +82,11 @@ async def test_no_documents_is_no_answer() -> None:
     assert (await answers.answer(conversation("Hallo?"))).behavior is Behavior.NO_ANSWER
 
 
-async def test_model_declining_becomes_no_answer() -> None:
-    answers, _ = service(FakeLLM("KEINE_ANTWORT"))
+@pytest.mark.parametrize(
+    "reply", ["KEINE_ANTWORT", "Dazu steht nichts in der EVIDENCE. KEINE_ANTWORT"]
+)
+async def test_model_declining_becomes_no_answer(reply: str) -> None:
+    answers, _ = service(FakeLLM(reply))
 
     response = await answers.answer(conversation("Habt ihr Filialen?"))
 

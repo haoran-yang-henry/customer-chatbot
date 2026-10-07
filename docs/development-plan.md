@@ -279,4 +279,5 @@ the D8 CI gate.
 | 2026-10-06 | D3 done. Logging foundation moved from D7 to D3; relevance gate (two-tier) from D2 measurements; LLM via OpenAI-compatible endpoint (ADR-0008); web UI cut (Swagger + curl suffice) |
 | 2026-10-06 | D4 additions: conversation-aware query rewriting (replaces joined user turns); decide `ORDER_CHANGE` vs `HUMAN_AGENT` (T-011); split API/orchestrator responsibilities further |
 | 2026-10-07 | D4 done. T-011 → `HUMAN_AGENT` (ADR-0009); server-side sessions (client sends `session_id` + message); AI disclosure in greeting (FR-05); `CA_LLM_REASONING_EFFORT=none` after empty-output findings |
+| 2026-10-07 | Engineering review: fixed cache key, embedding timeout, turn loss on disconnect, lost updates (optimistic locking, 409), unclosed HTTP clients, unvalidated request ids, missing stream usage logging. P1/P2 items scheduled into D5–D8 (see review notes in this conversation) |
 | 2026-10-06 | Backlog additions: weighted RRF / reranker after adding new retrieval cases ("Retoure" case); human labelling of `eval/calibration/groundedness-day3.jsonl` |
