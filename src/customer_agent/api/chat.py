@@ -1,4 +1,4 @@
-"""Chat endpoints. Thin adapters: HTTP ⇄ ``Conversation`` / ``AgentResponse``."""
+"""Chat endpoints. Thin adapters: HTTP ⇄ ``ChatService``."""
 
 import json
 from collections.abc import AsyncIterator
@@ -6,40 +6,43 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from pydantic import ValidationError
 
 from customer_agent.api.schemas import ChatRequest, ChatResponse
-from customer_agent.application.answering import FinalAnswer, TextDelta
-from customer_agent.application.orchestrator import ConversationOrchestrator
-from customer_agent.domain.conversation import Conversation
+from customer_agent.application.answering import TextDelta
+from customer_agent.application.chat import ChatService, ChatTurn, SessionNotFoundError
 from customer_agent.observability import request_id_var
 
 router = APIRouter(prefix="/v1", tags=["chat"])
 
 
-def get_agent(request: Request) -> ConversationOrchestrator:
-    agent: ConversationOrchestrator = request.app.state.agent
-    return agent
+def get_chat(request: Request) -> ChatService:
+    chat: ChatService = request.app.state.chat
+    return chat
 
 
-Agent = Annotated[ConversationOrchestrator, Depends(get_agent)]
+Chat = Annotated[ChatService, Depends(get_chat)]
+_NOT_FOUND = HTTPException(status_code=404, detail="session not found")
 
 
-def _conversation(body: ChatRequest) -> Conversation:
-    # customer_id comes from the verified token on Day 5, never from the request body.
-    try:
-        return Conversation(messages=body.messages, customer_id=None)
-    except ValidationError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail=exc.errors(include_url=False, include_input=False, include_context=False),
-        ) from exc
+def _response(turn: ChatTurn, request_id: str) -> ChatResponse:
+    return ChatResponse(
+        session_id=turn.session_id,
+        answer=turn.response.answer,
+        behavior=turn.response.behavior,
+        intent=turn.response.intent,
+        sources=turn.response.sources,
+        request_id=request_id,
+    )
 
 
+# customer_id is None until authentication arrives (Day 5); it never comes from the body.
 @router.post("/chat")
-async def chat(body: ChatRequest, agent: Agent) -> ChatResponse:
-    response = await agent.respond(_conversation(body))
-    return ChatResponse.from_agent(response, request_id_var.get())
+async def chat(body: ChatRequest, service: Chat) -> ChatResponse:
+    try:
+        turn = await service.chat(body.session_id, None, body.message)
+    except SessionNotFoundError:
+        raise _NOT_FOUND from None
+    return _response(turn, request_id_var.get())
 
 
 def _sse(event: str, data: dict[str, object]) -> str:
@@ -49,29 +52,36 @@ def _sse(event: str, data: dict[str, object]) -> str:
 @router.post(
     "/chat/stream",
     response_class=StreamingResponse,
-    responses={200: {"content": {"text/event-stream": {}}}},
+    responses={
+        200: {"content": {"text/event-stream": {}}},
+        404: {"description": "Unknown session"},
+    },
 )
-async def chat_stream(body: ChatRequest, agent: Agent) -> StreamingResponse:
+async def chat_stream(body: ChatRequest, service: Chat) -> StreamingResponse:
     """Server-Sent Events: ``delta`` events with text, then one authoritative ``final`` event.
 
     Clients must replace the streamed text with ``final.answer``: an output guardrail may
     substitute a fallback after streaming started.
     """
-    conversation = _conversation(body)
     request_id = request_id_var.get()
+    events = service.chat_stream(body.session_id, None, body.message)
+    try:
+        first = await anext(events)  # resolve the session before the 200 response starts
+    except SessionNotFoundError:
+        raise _NOT_FOUND from None
 
-    async def events() -> AsyncIterator[str]:
-        # The body is produced after the middleware has returned; restore the request id so
-        # log lines written while streaming keep it.
+    async def body_events() -> AsyncIterator[str]:
+        # The body is produced after the middleware returned; restore the request id for logs.
         token = request_id_var.set(request_id)
         try:
-            async for event in agent.respond_stream(conversation):
+            event: TextDelta | ChatTurn | None = first
+            while event is not None:
                 if isinstance(event, TextDelta):
                     yield _sse("delta", {"text": event.text})
-                elif isinstance(event, FinalAnswer):
-                    final = ChatResponse.from_agent(event.response, request_id)
-                    yield _sse("final", final.model_dump(mode="json"))
+                else:
+                    yield _sse("final", _response(event, request_id).model_dump(mode="json"))
+                event = await anext(events, None)
         finally:
             request_id_var.reset(token)
 
-    return StreamingResponse(events(), media_type="text/event-stream")
+    return StreamingResponse(body_events(), media_type="text/event-stream")

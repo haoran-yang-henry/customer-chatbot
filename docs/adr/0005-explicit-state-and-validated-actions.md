@@ -1,6 +1,6 @@
 # ADR-0005: Explicit conversation state and validated tool calls
 
-- **Status:** Proposed (to be accepted on Day 4/5 after implementation)
+- **Status:** Accepted (state machine: Day 4; validated tool calls: Day 5)
 - **Date:** 2026-10-05
 - **Related:** FR-20 – FR-24, [threat model T06, T08](../threat-model.md),
   [ADR-0006](0006-no-order-mutations-by-the-agent.md)
@@ -33,6 +33,17 @@ We propose **option 2**.
   order ownership) → eligibility policy (advisory) → tool call → audit log.
 - `create_ticket` is only reachable from the `HUMAN_AGENT` / `COMPLAINT` flows, or from the
   "self-service not possible" branch of a transactional flow.
+
+## Implementation (Day 4)
+
+- `domain/session.py`: `SessionState` (active intent, workflow state, slots) and the pure
+  function `decide(state, routing, authenticated) → Decision`; every transition is unit-tested.
+- `application/routing.py`: rules first (greeting; bare order number while
+  `AWAITING_ORDER_ID`), otherwise one LLM call returning intent, confidence, "about a specific
+  order", a standalone query and an optional clarification question. Order numbers are always
+  extracted by regex, never taken from the LLM.
+- `application/chat.py` + `chat_sessions` / `chat_messages` (migration 0002): the server owns
+  transcript and state; the client sends `session_id` + message.
 
 ## Consequences
 

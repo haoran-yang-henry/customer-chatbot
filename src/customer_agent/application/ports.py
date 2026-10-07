@@ -6,7 +6,7 @@ from typing import Literal, Protocol, Self
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
-from customer_agent.domain.conversation import AgentResponse, Conversation
+from customer_agent.domain.conversation import AgentResponse, Conversation, Message
 from customer_agent.domain.knowledge import KnowledgeChunk, KnowledgeDocumentMeta
 from customer_agent.domain.retrieval import (
     ChunkHit,
@@ -14,6 +14,7 @@ from customer_agent.domain.retrieval import (
     SearchMode,
     SearchScope,
 )
+from customer_agent.domain.session import SessionState
 
 
 class CustomerServiceAgent(Protocol):
@@ -136,3 +137,24 @@ class LLMProvider(Protocol):
         temperature: float,
         session_id: str | None = None,
     ) -> AsyncIterator[str]: ...
+
+
+class StoredSession(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    session_id: str
+    customer_id: str | None
+    state: SessionState
+    messages: list[Message]
+
+
+class SessionStore(Protocol):
+    async def create(self, *, tenant_id: str, customer_id: str | None) -> StoredSession: ...
+
+    async def load(self, session_id: str) -> StoredSession | None: ...
+
+    async def save_turn(
+        self, session_id: str, *, state: SessionState, user: str, reply: AgentResponse
+    ) -> None:
+        """Append the user message and the reply and store the new state, atomically."""
+        ...

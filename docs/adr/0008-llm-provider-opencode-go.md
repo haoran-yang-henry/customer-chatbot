@@ -38,6 +38,10 @@ Qwen) and an OpenAI API key.
   accepts the risk of throttling or suspension of the subscription for this learning project.
   Switching to OpenAI (verified on Day 3: `gpt-5.2` with `CA_LLM_REASONING_EFFORT=none`,
   ~1.8 s, correct German with citations) is a configuration change.
+- **`CA_LLM_REASONING_EFFORT=none`** (added Day 4). With default reasoning,
+  `deepseek-v4-flash` spent the whole token budget on hidden reasoning in 2 of 5 router calls and
+  returned empty output. Measured alternatives for routing: `none` 5/5 correct, 1.3 s;
+  `low` 5/5, 3.2 s; `qwen3.8-flash` 5/5, 12.8 s; `glm-5.3-flash` 5/5, 20.6 s; `kimi-k2.6` 0/5.
 - Embeddings stay on OpenAI (ADR-0007); OpenCode Go offers no embedding models.
 - Evaluation runs may enable an on-disk response cache (`CA_LLM_CACHE_DIR`) so that unchanged
   prompts are not sent again.

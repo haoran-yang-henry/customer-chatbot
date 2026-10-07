@@ -14,6 +14,7 @@ class CaseResult(BaseModel):
     target_day: int
     checks: dict[str, bool]
     source_recall: float | None
+    expected_intent: str | None = None
     response: AgentResponse
     grounded: bool | None = None  # LLM judge verdict, only when the judge ran
 
@@ -65,5 +66,6 @@ def score_case(case: EvalCase, response: AgentResponse, current_day: int = 8) ->
         target_day=case.target_day,
         checks=checks,
         source_recall=recall,
+        expected_intent=case.expected_intent,
         response=response,
     )

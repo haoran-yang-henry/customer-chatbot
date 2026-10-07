@@ -43,7 +43,8 @@ class CachingLLM:
         result = await self._inner.complete(
             messages, max_tokens=max_tokens, temperature=temperature, session_id=session_id
         )
-        path.write_text(result.model_dump_json(), encoding="utf-8")
+        if result.text.strip():  # never cache an empty (failed) generation
+            path.write_text(result.model_dump_json(), encoding="utf-8")
         return result
 
     async def stream(

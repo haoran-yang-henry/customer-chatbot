@@ -137,6 +137,20 @@ Used only where deterministic checks are insufficient (groundedness, tone).
   systematic disagreement with human labels.
 - Judge model and prompt version are stored with every result.
 
+### 5.2 Day 4 findings
+
+- **Empty generations were cached.** `deepseek-v4-flash` with default reasoning sometimes
+  spent the full token budget on hidden reasoning and returned no text; the cache stored those
+  empty results (34 entries, also from Day 3 runs). Fixed: empty output is never cached and is
+  logged with `finish_reason`; `CA_LLM_REASONING_EFFORT=none` removed the cause (ADR-0008).
+- **Query drift.** The router rewrote "was zurückzuschicken" to "eine *Bestellung*
+  zurückzuschicken"; the added word pulled order documents into full-text results and pushed
+  the return policy out of the top 4 (L-001). Fixed by a general rewrite rule (keep the
+  customer's words); the underlying hybrid-fusion sensitivity stays a backlog item.
+- **Labels vs. decisions.** Two labels predated later decisions and were corrected in documented
+  dataset changes: A-006 (ADR-0009), G-004 (taxonomy rule 6, consistent with S-006). Taxonomy
+  rule 1 contradicted rule 4 for delivery problems and was clarified (N-015).
+
 ### 5.1 Day 3 findings
 
 - Prompt v1 → v2 fixed one gated failure (false premise declined) but first *reduced*

@@ -53,8 +53,11 @@ handoff offer; `create_ticket` runs only when the customer asks for a human.
 | `COMPLAINT` | `create_ticket` | „Das ist schon das dritte beschädigte Paket, ich bin sauer!“ |
 | `HUMAN_AGENT` | `create_ticket` | „Ich möchte mit einem Menschen sprechen.“ · „Können Sie das bitte für mich stornieren?“ (after guidance) |
 
-A request to have the agent perform an order change ("Machen Sie das bitte für mich") after
-guidance was given is treated as `HUMAN_AGENT`.
+A request to have the agent perform an action it cannot do ("Machen Sie das bitte für mich")
+after guidance was given is treated as `HUMAN_AGENT`. So are **requests to change an existing
+order** (address, items, payment method): only a human can do that
+([ADR-0009](adr/0009-order-changes-route-to-human-agent.md)). General questions about changing
+orders ("Kann man die Adresse noch ändern?") remain knowledge questions.
 
 ### Control
 
@@ -67,9 +70,11 @@ guidance was given is treated as `HUMAN_AGENT`.
 
 The rules are applied in order; the first match wins.
 
-1. **Order reference → transactional.** A message that references a specific own order
-   (order number `NE-\d{6}`, "meine Bestellung", "mein Paket") is transactional, even if phrased
-   like a general question. „Wann kommt mein Paket?“ → `ORDER_STATUS`, not `SHIPPING_INFO`.
+1. **Order reference → transactional.** Asking about a concrete own order (order number
+   `NE-\d{6}`, „Wo ist meine Bestellung?“, „Wann kommt mein Paket?“) is transactional, even if
+   phrased like a general question → `ORDER_STATUS`, not `SHIPPING_INFO`. *Clarified on Day 4:*
+   describing a delivery problem without an order number („als zugestellt markiert, aber nicht
+   da“) is `SHIPPING_INFO` (rule 4) — the general steps help immediately, also when anonymous.
 2. **General vs. specific refunds.** „Wie lange dauert eine Erstattung?“ → `RETURN_POLICY`;
    „Wo bleibt meine Erstattung für NE-100240?“ → `REFUND_STATUS`.
 3. **Return question vs. return action.** „Kann man In-Ear-Kopfhörer zurückgeben?“ →
@@ -78,8 +83,11 @@ The rules are applied in order; the first match wins.
    with expressed frustration or repeated incidents → `COMPLAINT`.
 5. **Emotion overrides topic.** Strong dissatisfaction or explicit escalation wishes →
    `COMPLAINT` / `HUMAN_AGENT`, even if a topic is mentioned.
-6. **Requests about other people's data or internal information** are classified by topic but
-   always refused by the authorization and scope layers; they are never a separate intent.
+6. **Requests for internal information** (internal policies, goodwill limits, system prompt)
+   are `OUT_OF_SCOPE` and refused. **Requests about other customers' data** are classified by
+   topic and refused by authorization (Day 5); neither is a separate intent.
+7. **Order change requests** ("Ändern Sie bitte die Adresse von NE-100245") → `HUMAN_AGENT`
+   (ADR-0009).
 
 ## 4. Confidence and multiple intents
 

@@ -37,6 +37,8 @@ class EvalReport(BaseModel):
     by_category: dict[str, RateSummary]
     by_check: dict[str, RateSummary]
     groundedness: RateSummary | None = None
+    # expected intent → predicted intent → count, over cases that expect an intent
+    intent_confusion: dict[str, dict[str, int]] = {}
     results: list[CaseResult]
 
 
@@ -60,6 +62,11 @@ def build_report(
         for check, ok in result.checks.items():
             by_check[check].append(ok)
     judged = [r.grounded for r in results if r.grounded is not None]
+    confusion: defaultdict[str, defaultdict[str, int]] = defaultdict(lambda: defaultdict(int))
+    for result in results:
+        if result.expected_intent is not None:
+            predicted = result.response.intent or "None"
+            confusion[result.expected_intent][predicted] += 1
     return EvalReport(
         target=target,
         dataset=dataset,
@@ -71,6 +78,7 @@ def build_report(
         by_category={k: _summarise(v) for k, v in sorted(by_category.items())},
         by_check={k: _summarise(v) for k, v in sorted(by_check.items())},
         groundedness=_summarise(judged) if judged else None,
+        intent_confusion={k: dict(v) for k, v in sorted(confusion.items())},
         results=results,
     )
 

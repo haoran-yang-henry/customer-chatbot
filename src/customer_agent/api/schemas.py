@@ -2,32 +2,25 @@
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from customer_agent.domain.conversation import AgentResponse, Behavior, Message
+from customer_agent.domain.conversation import Behavior
+from customer_agent.domain.intents import Intent
 
 
 class ChatRequest(BaseModel):
     model_config = ConfigDict(
-        json_schema_extra={
-            "examples": [
-                {"messages": [{"role": "user", "content": "Kostet die Rücksendung etwas?"}]}
-            ]
-        }
+        json_schema_extra={"examples": [{"message": "Kostet die Rücksendung etwas?"}]}
     )
 
-    messages: list[Message] = Field(min_length=1, max_length=50)
+    session_id: str | None = Field(
+        default=None, description="Omit to start a new conversation; then send the returned id."
+    )
+    message: str = Field(min_length=1, max_length=10_000)
 
 
 class ChatResponse(BaseModel):
+    session_id: str
     answer: str
     behavior: Behavior
+    intent: Intent | None
     sources: list[str]
     request_id: str
-
-    @classmethod
-    def from_agent(cls, response: AgentResponse, request_id: str) -> "ChatResponse":
-        return cls(
-            answer=response.answer,
-            behavior=response.behavior,
-            sources=response.sources,
-            request_id=request_id,
-        )

@@ -7,9 +7,10 @@ cancellation, returns) behind explicit authorization, policy checks and confirma
 Customers write German; the agent answers in German. Code and documentation are in English
 ([ADR-0003](docs/adr/0003-german-language-strategy.md)).
 
-> **Status: Day 3 of 8** — the agent answers German questions from the governed knowledge base
-> with citations, says honestly when it has no answer, and streams responses
-> ([API](docs/api.md)). Intent routing and conversation state follow on Day 4. See the
+> **Status: Day 4 of 8** — the agent routes each message to an intent (rules first, then an
+> LLM), keeps explicit conversation state in Postgres, resolves follow-up questions, asks for
+> missing order numbers, and answers German questions from the governed knowledge base with
+> citations ([API](docs/api.md)). Order lookup and human handoff follow on Day 5. See the
 > [development plan](docs/development-plan.md).
 
 ## Documentation
@@ -60,6 +61,7 @@ tests/                unit and data validation tests
 |---|---|---|
 | D1 | n/a (0 cases due) | Placeholder agent: 3/71 overall; harness and dataset validated |
 | D2 | n/a (0 cases due) | Retrieval only, see below |
+| D4 | **47/47 (100 %)** | Intent accuracy 62/65 (95 %); groundedness 27/28 on Day-4 answers (uncalibrated); router `v2`, answer `v2`, reasoning off |
 | D3 | **32/32 (100 %)** | Real agent (`deepseek-v4-flash`, prompt `answer/v2`); groundedness 23/24 on Day-3 answers (judge, uncalibrated) |
 
 **Retrieval (Day 2, 37 cases, `text-embedding-3-small`)**

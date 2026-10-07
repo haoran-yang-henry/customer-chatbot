@@ -56,7 +56,18 @@ def _print_summary(report: EvalReport) -> None:
     print("\nBy check:")
     for name, summary in report.by_check.items():
         print(f"  {name:<22} {summary.passed:>3}/{summary.total:<3} {summary.rate:>5.0%}")
-    failures = [r for r in report.results if r.target_day <= report.current_day and not r.passed]
+    misrouted = {
+        expected: {p: n for p, n in predicted.items() if p != expected}
+        for expected, predicted in report.intent_confusion.items()
+    }
+    misrouted = {k: v for k, v in misrouted.items() if v}
+    if misrouted:
+        print("\nIntent confusion (expected → predicted: count):")
+        for expected, predicted in misrouted.items():
+            wrong = ", ".join(f"{p}: {n}" for p, n in predicted.items())
+            print(f"  {expected:<16} → {wrong}")
+    due = [r for r in report.results if r.target_day <= report.current_day]
+    failures = [r for r in due if not r.passed]
     if failures:
         print("\nGated failures:")
         for r in failures:

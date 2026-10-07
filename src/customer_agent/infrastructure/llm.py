@@ -72,6 +72,14 @@ class OpenAICompatibleLLM:
             )
             raise ProviderUnavailableError(f"{self._model}: {exc}") from exc
         usage = response.usage
+        if not response.choices[0].message.content:
+            # Reasoning models can spend the whole token budget before writing any output.
+            log.warning(
+                "model=%s empty output finish_reason=%s tokens_out=%s",
+                self._model,
+                response.choices[0].finish_reason,
+                usage.completion_tokens if usage else None,
+            )
         result = LLMResult(
             text=response.choices[0].message.content or "",
             model=response.model or self._model,

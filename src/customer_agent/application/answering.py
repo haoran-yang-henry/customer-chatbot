@@ -50,12 +50,13 @@ StreamEvent = TextDelta | FinalAnswer
 
 
 def search_query(conversation: Conversation) -> str:
-    """All user turns joined: a stand-in for conversation-aware query rewriting (Day 4)."""
+    """All user turns joined. Fallback when the router provides no standalone query."""
     return " ".join(m.content for m in conversation.messages if m.role is Role.USER)
 
 
 def session_id(conversation: Conversation) -> str:
-    """Stable per conversation until real sessions exist (Day 4): hash of its first message."""
+    """Stable id for stateless callers (evaluation): hash of the conversation's first message.
+    Served conversations use the persisted session id instead."""
     seed = f"{conversation.customer_id or '-'}|{conversation.messages[0].content}"
     return hashlib.sha256(seed.encode()).hexdigest()[:32]
 
@@ -105,11 +106,13 @@ class AnswerService:
         self._min_similarity = min_similarity
         self._top_k = top_k
 
-    async def _prepare(self, conversation: Conversation) -> _Prepared | AgentResponse:
+    async def _prepare(
+        self, conversation: Conversation, query: str | None, session: str | None
+    ) -> _Prepared | AgentResponse:
         start = time.perf_counter()
         scope = SearchScope(today=self._clock.today(), tenant_id=self._tenant_id)
         documents = await self._retriever.retrieve(
-            search_query(conversation), scope, top_k=self._top_k
+            query or search_query(conversation), scope, top_k=self._top_k
         )
         best = max((d.similarity or 0.0 for d in documents), default=0.0)
         log.info(
@@ -134,7 +137,7 @@ class AnswerService:
                 ChatMessage(role="system", content=self._prompt.system),
                 ChatMessage(role="user", content=user),
             ],
-            session_id=session_id(conversation),
+            session_id=session or session_id(conversation),
         )
 
     def _finish(self, raw: str, documents: list[RetrievedDocument]) -> AgentResponse:
@@ -151,8 +154,15 @@ class AnswerService:
         log.info("answer sources=%s chars=%d", ",".join(sources), len(answer))
         return AgentResponse(answer=answer, behavior=Behavior.ANSWER, sources=sources)
 
-    async def answer(self, conversation: Conversation) -> AgentResponse:
-        prepared = await self._prepare(conversation)
+    async def answer(
+        self,
+        conversation: Conversation,
+        *,
+        query: str | None = None,
+        session_id: str | None = None,
+    ) -> AgentResponse:
+        """``query``: the router's standalone question; ``None`` → joined user turns."""
+        prepared = await self._prepare(conversation, query, session_id)
         if isinstance(prepared, AgentResponse):
             return prepared
         result = await self._llm.complete(
@@ -163,8 +173,14 @@ class AnswerService:
         )
         return self._finish(result.text, prepared.documents)
 
-    async def answer_stream(self, conversation: Conversation) -> AsyncIterator[StreamEvent]:
-        prepared = await self._prepare(conversation)
+    async def answer_stream(
+        self,
+        conversation: Conversation,
+        *,
+        query: str | None = None,
+        session_id: str | None = None,
+    ) -> AsyncIterator[StreamEvent]:
+        prepared = await self._prepare(conversation, query, session_id)
         if isinstance(prepared, AgentResponse):
             yield FinalAnswer(response=prepared)
             return

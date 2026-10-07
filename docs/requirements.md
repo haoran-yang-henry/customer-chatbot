@@ -75,6 +75,8 @@ The agent politely declines and, where useful, redirects:
   targeted clarification question instead of guessing.
 - **FR-04** The agent can switch topic mid-conversation without losing an unfinished workflow
   silently (it either completes or explicitly abandons it).
+- **FR-05** The agent discloses that the customer is talking to an AI assistant (EU AI Act,
+  transparency obligation); implemented in the greeting (Day 4).
 
 ### Knowledge answers
 

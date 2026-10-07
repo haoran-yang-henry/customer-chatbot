@@ -10,13 +10,16 @@ from openai import AsyncOpenAI
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 
 from customer_agent.application.answering import AnswerService
+from customer_agent.application.chat import ChatService
 from customer_agent.application.orchestrator import ConversationOrchestrator
 from customer_agent.application.ports import Clock, EmbeddingProvider, LLMProvider
 from customer_agent.application.retrieval import RetrievalService
+from customer_agent.application.routing import IntentRouter
 from customer_agent.config import Settings
 from customer_agent.infrastructure.clock import SystemClock
 from customer_agent.infrastructure.db.knowledge_repository import PostgresKnowledgeRepository
 from customer_agent.infrastructure.db.models import EMBEDDING_DIMENSIONS
+from customer_agent.infrastructure.db.session_repository import PostgresSessionStore
 from customer_agent.infrastructure.embeddings import OpenAIEmbeddingProvider
 from customer_agent.infrastructure.llm import OpenAICompatibleLLM
 from customer_agent.infrastructure.llm_cache import CachingLLM
@@ -83,8 +86,9 @@ class Container:
 
     engine: AsyncEngine
     agent: ConversationOrchestrator
+    chat: ChatService
     llm_model: str
-    answer_prompt: str
+    prompts: dict[str, str]
 
     async def aclose(self) -> None:
         await self.engine.dispose()
@@ -94,19 +98,23 @@ def build_container(settings: Settings, clock: Clock | None = None) -> Container
     engine = create_engine(settings)
     embeddings = create_embedding_provider(settings)
     llm = create_llm_provider(settings)
-    prompt = load_prompt("answer", settings.answer_prompt_version)
+    answer_prompt = load_prompt("answer", settings.answer_prompt_version)
+    router_prompt = load_prompt("router", settings.router_prompt_version)
     retrieval = RetrievalService(create_knowledge_repository(engine), embeddings)
     answers = AnswerService(
         retrieval,
         llm,
-        prompt,
+        answer_prompt,
         clock or SystemClock(),
         tenant_id=settings.tenant_id,
         min_similarity=settings.min_answer_similarity,
     )
+    agent = ConversationOrchestrator(IntentRouter(llm, router_prompt), answers)
+    sessions = PostgresSessionStore(async_sessionmaker(engine, expire_on_commit=False))
     return Container(
         engine=engine,
-        agent=ConversationOrchestrator(answers),
+        agent=agent,
+        chat=ChatService(agent, sessions, tenant_id=settings.tenant_id),
         llm_model=llm.model_name,
-        answer_prompt=prompt.ref,
+        prompts={"answer": answer_prompt.ref, "router": router_prompt.ref},
     )

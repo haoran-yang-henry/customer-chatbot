@@ -77,7 +77,7 @@ flowchart TB
     end
     subgraph app_layer [application — use cases]
         orchestrator[ConversationOrchestrator]
-        router[IntentRouter D4]
+        router[IntentRouter + state machine D4]
         rag[AnswerService D3]
         workflow[OrderGuidance + Handoff D5]
         guard[GuardrailPipeline D6]
@@ -207,7 +207,46 @@ false-positive and attack-success rates in the evaluation plan.
 - **Streaming** uses the same decision path: the final answer is computed from the full model
   output, and the `final` SSE event is authoritative.
 
-### 5.2 Cancellation request: guidance, then handoff on request (D5)
+### 5.2 One turn with explicit state (D4)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant S as ChatService
+    participant DB as Postgres
+    participant O as Orchestrator
+    participant R as IntentRouter
+    participant M as decide()
+
+    C->>S: {session_id, message}
+    S->>DB: load transcript + SessionState
+    S->>O: conversation, state
+    O->>R: route (rules first, else one LLM call)
+    R-->>O: intent, confidence, about_specific_order, standalone_query
+    O->>M: decide(state, routing, authenticated)
+    M-->>O: next step + new state
+    O-->>S: reply (+ streamed deltas) and new state
+    S->>DB: append both messages, store state (one transaction, row lock)
+    S-->>C: answer, behavior, intent, session_id
+```
+
+```mermaid
+stateDiagram-v2
+    [*] --> idle
+    idle --> awaiting_order_id: transactional, about own order, order no. missing (logged in)
+    awaiting_order_id --> idle: order no. given (rule, no LLM) → order guidance
+    awaiting_order_id --> idle: topic switch (workflow abandoned explicitly, FR-04)
+    idle --> idle: knowledge / greeting / out of scope / handoff / ask login / clarify
+```
+
+Steps by intent group: knowledge → grounded answer with the **standalone query** for retrieval
+and the customer's original words in the answer prompt; transactional → general question
+answered from knowledge, otherwise ask to log in / ask for the order number / order guidance
+(Day 5 adds order data); support → handoff (ticket on Day 5); control → greeting (discloses the
+AI assistant) or polite refusal. Router confidence < 0.6 → clarification question.
+
+### 5.3 Cancellation request: guidance, then handoff on request (D5)
 
 ```mermaid
 sequenceDiagram
@@ -356,8 +395,9 @@ erDiagram
     }
 ```
 
-Knowledge tables are implemented (Day 2, migration `0001`); the other tables arrive with their
-use cases. Design notes:
+Knowledge tables are implemented (Day 2, migration `0001`), chat sessions and messages on Day 4
+(migration `0002`; the transcript contains customer text, retention 90 days, cleanup job on
+Day 7); the other tables arrive with their use cases. Design notes:
 
 - **Filters live on the document**, chunks are joined at query time. At this corpus size a join is
   cheaper than keeping denormalised copies in sync; denormalising filter columns into chunks is the

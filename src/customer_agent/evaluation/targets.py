@@ -37,7 +37,7 @@ async def _agent() -> AsyncIterator[Target]:
     try:
         config = {
             "llm_model": container.llm_model,
-            "answer_prompt": container.answer_prompt,
+            **{f"{name}_prompt": ref for name, ref in container.prompts.items()},
             "embedding_model": settings.embedding_model,
             "min_answer_similarity": str(settings.min_answer_similarity),
         }

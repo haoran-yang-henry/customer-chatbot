@@ -50,7 +50,9 @@ async def test_cache_answers_identical_requests_from_disk(tmp_path: Path) -> Non
     assert len(inner.calls) == 2  # third request differs → real call
 
 
-@pytest.mark.parametrize(("name", "version"), [("answer", 1), ("answer", 2), ("judge", 1)])
+@pytest.mark.parametrize(
+    ("name", "version"), [("answer", 1), ("answer", 2), ("router", 1), ("router", 2), ("judge", 1)]
+)
 def test_shipped_prompts_load(name: str, version: int) -> None:
     prompt = load_prompt(name, version)
 
@@ -62,6 +64,12 @@ def test_prompt_rendering_requires_all_placeholders() -> None:
 
     with pytest.raises(KeyError):
         prompt.render_user(evidence="…")
+
+
+async def test_empty_generation_is_not_cached(tmp_path: Path) -> None:
+    await CachingLLM(FakeLLM(""), tmp_path).complete(MESSAGES, max_tokens=10, temperature=0.0)
+
+    assert list(tmp_path.iterdir()) == []
 
 
 async def test_cache_forwards_session_id_on_a_miss(tmp_path: Path) -> None:

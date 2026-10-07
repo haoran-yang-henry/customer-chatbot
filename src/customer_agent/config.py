@@ -38,6 +38,7 @@ class Settings(BaseSettings):
 
     # Answering (Day 3)
     answer_prompt_version: int = 2
+    router_prompt_version: int = 2
     # Below this best cosine similarity the question is treated as unrelated and answered with
     # "no answer" without an LLM call. Between this floor and clearly relevant scores the LLM
     # decides (it may reply KEINE_ANTWORT). Measured on Day 2/3, see architecture §6.4.

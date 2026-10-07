@@ -38,7 +38,7 @@ def database_url() -> Iterator[str]:
 async def engine(database_url: str) -> AsyncIterator[AsyncEngine]:
     engine = create_async_engine(database_url)
     async with engine.begin() as connection:
-        await connection.execute(text("TRUNCATE knowledge_documents CASCADE"))
+        await connection.execute(text("TRUNCATE knowledge_documents, chat_sessions CASCADE"))
     yield engine
     await engine.dispose()
 
