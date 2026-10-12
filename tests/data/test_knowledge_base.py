@@ -69,3 +69,18 @@ def test_community_content_is_marked_untrusted(documents: list[KnowledgeDocument
 
 def test_all_documents_belong_to_the_tenant(documents: list[KnowledgeDocument]) -> None:
     assert {doc.meta.tenant_id for doc in documents} == {TENANT_ID}
+
+
+def test_contact_facts_in_replies_match_the_knowledge_base(
+    documents: list[KnowledgeDocument],
+) -> None:
+    """The anonymous handoff reply repeats contact facts; they must not drift from the KB."""
+    from customer_agent.application.fallbacks import (
+        CONTACT_EMAIL,
+        CONTACT_PHONE,
+        CONTACT_SOURCE,
+    )
+
+    body = next(d.body for d in documents if d.meta.id == CONTACT_SOURCE)
+    for fact in (CONTACT_PHONE, CONTACT_EMAIL, "8–20 Uhr", "9–16 Uhr"):
+        assert fact in body, fact

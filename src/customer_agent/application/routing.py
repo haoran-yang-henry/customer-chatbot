@@ -34,6 +34,7 @@ class _LLMRouting(BaseModel):
     intent: Intent | None = None
     confidence: float = 0.0
     about_specific_order: bool = False
+    third_party: bool = False
     standalone_query: str = ""
     clarification_question: str | None = None
 
@@ -100,6 +101,7 @@ def parse_llm_routing(text: str, conversation: Conversation) -> RoutingResult:
         confidence=parsed.confidence,
         order_id=order_id,
         about_specific_order=parsed.about_specific_order or order_id is not None,
+        third_party=parsed.third_party,
         standalone_query=parsed.standalone_query.strip() or search_query(conversation),
         clarification_question=(parsed.clarification_question or "").strip() or None,
         source=RoutingSource.LLM,

@@ -31,6 +31,8 @@ class RoutingResult(BaseModel):
     order_id: str | None = None
     # The customer refers to one concrete order of theirs (vs. a general "how does it work?").
     about_specific_order: bool = False
+    # The customer asks about another person's orders or data, or to act for them.
+    third_party: bool = False
     # Self-contained German question for retrieval ("Und in die Schweiz?" → full question).
     standalone_query: str
     clarification_question: str | None = None

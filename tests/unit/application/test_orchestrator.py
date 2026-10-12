@@ -1,30 +1,26 @@
-from datetime import date
+from typing import Any
 
 import pytest
 
-from customer_agent.application.answering import AnswerService
 from customer_agent.application.orchestrator import ConversationOrchestrator, TurnResult
-from customer_agent.application.routing import IntentRouter
 from customer_agent.domain.conversation import Behavior, Conversation, Message, Role
 from customer_agent.domain.intents import Intent
 from customer_agent.domain.session import SessionState, WorkflowState
-from customer_agent.infrastructure.prompts import load_prompt
-from tests.fakes import FakeRetriever, FixedClock, ScriptedRouterLLM, document
+from customer_agent.infrastructure.memory import InMemoryAuditLog, InMemoryTicketService
+from tests.fakes import (
+    FakeRetriever,
+    ScriptedRouterLLM,
+    SeedOrderRepository,
+    document,
+    make_orchestrator,
+)
 
 RETRIEVER = FakeRetriever([document("policy-returns-v5", 0.7)])
 
 
-def orchestrator(llm: ScriptedRouterLLM) -> ConversationOrchestrator:
+def orchestrator(llm: ScriptedRouterLLM, **kwargs: Any) -> ConversationOrchestrator:
     RETRIEVER.queries.clear()
-    answers = AnswerService(
-        RETRIEVER,
-        llm,
-        load_prompt("answer", 2),
-        FixedClock(date(2026, 10, 5)),
-        tenant_id="nordelektro",
-        min_similarity=0.35,
-    )
-    return ConversationOrchestrator(IntentRouter(llm, load_prompt("router", 1)), answers)
+    return make_orchestrator(llm, RETRIEVER, **kwargs)
 
 
 def ask(text: str, customer: str | None = None) -> Conversation:
@@ -50,16 +46,12 @@ async def test_knowledge_intent_is_answered_with_rewritten_query_and_intent() ->
 
 @pytest.mark.parametrize(
     ("intent", "behavior"),
-    [
-        ("OUT_OF_SCOPE", Behavior.REFUSE),
-        ("HUMAN_AGENT", Behavior.ESCALATE),
-        ("COMPLAINT", Behavior.ESCALATE),
-    ],
+    [("OUT_OF_SCOPE", Behavior.REFUSE), ("HUMAN_AGENT", Behavior.ESCALATE)],
 )
 async def test_template_steps_do_not_call_the_answer_llm(intent: str, behavior: Behavior) -> None:
     llm = ScriptedRouterLLM(routing(intent))
 
-    response = await orchestrator(llm).respond(ask("…"))
+    response = await orchestrator(llm).respond(ask("…", "C-1001"))
 
     assert response.behavior is behavior and response.intent == intent
     assert len(llm.calls) == 0  # only the router ran (router calls are not recorded in calls)
@@ -79,7 +71,7 @@ async def test_order_question_waits_for_order_number_then_continues() -> None:
     agent = orchestrator(llm)
 
     first = await agent.handle(
-        ask("Wo ist meine Bestellung?", "C-1"), SessionState(), session_id="s"
+        ask("Wo ist meine Bestellung?", "C-1002"), SessionState(), session_id="s"
     )
     assert first.response.behavior is Behavior.CLARIFY
     assert first.state.workflow is WorkflowState.AWAITING_ORDER_ID
@@ -90,13 +82,14 @@ async def test_order_question_waits_for_order_number_then_continues() -> None:
             Message(role=Role.ASSISTANT, content=first.response.answer),
             Message(role=Role.USER, content="NE-100250"),
         ],
-        customer_id="C-1",
+        customer_id="C-1002",
     )
     second = await agent.handle(convo, first.state, session_id="s")
 
     assert llm.router_calls == 1  # the bare order number was routed by rules
     assert second.state.slots == {"order_id": "NE-100250"}
     assert second.response.intent is Intent.ORDER_STATUS
+    assert "unterwegs" in second.response.answer  # NE-100250 is shipped (seed data)
 
 
 async def test_anonymous_order_question_asks_to_log_in() -> None:
@@ -136,3 +129,89 @@ async def test_stream_ends_with_turn_result() -> None:
 
     assert isinstance(events[-1], TurnResult)
     assert events[-1].state.active_intent is Intent.RETURN_POLICY
+
+
+async def test_own_order_is_looked_up_audited_and_explained() -> None:
+    orders, audit = SeedOrderRepository(), InMemoryAuditLog()
+    llm = ScriptedRouterLLM(routing("ORDER_CANCEL", specific=True))
+
+    response = await orchestrator(llm, orders=orders, audit=audit).respond(
+        ask("Bitte NE-100245 stornieren", "C-1001")
+    )
+
+    assert response.behavior is Behavior.ANSWER and response.tool_calls == ["get_order_status"]
+    assert "kann kostenlos storniert werden" in response.answer
+    assert orders.lookups == [("NE-100245", "C-1001")]
+    assert [(e.tool, e.outcome) for e in audit.entries] == [("get_order_status", "found")]
+
+
+async def test_foreign_order_looks_exactly_like_a_missing_one() -> None:
+    llm = ScriptedRouterLLM(routing("ORDER_STATUS", specific=True))
+    audit = InMemoryAuditLog()
+    agent = orchestrator(llm, audit=audit)
+
+    foreign = await agent.respond(ask("Status von NE-100250?", "C-1001"))  # belongs to C-1002
+    missing = await agent.respond(ask("Status von NE-999999?", "C-1001"))
+
+    assert foreign.answer.replace("NE-100250", "X") == missing.answer.replace("NE-999999", "X")
+    assert foreign.behavior is Behavior.REFUSE and "Velto" not in foreign.answer
+    assert [e.outcome for e in audit.entries] == ["not_found", "not_found"]
+
+
+async def test_handoff_creates_a_ticket_with_context_and_audit_entry() -> None:
+    tickets, audit = InMemoryTicketService(), InMemoryAuditLog()
+    llm = ScriptedRouterLLM(routing("HUMAN_AGENT"))
+
+    response = await orchestrator(llm, tickets=tickets, audit=audit).respond(
+        ask("Bitte ändern Sie die Adresse von NE-100245", "C-1001")
+    )
+
+    assert response.behavior is Behavior.ESCALATE and response.tool_calls == ["create_ticket"]
+    assert "T-000001" in response.answer
+    [ticket] = tickets.tickets
+    assert (ticket.customer_id, ticket.order_id, ticket.intent) == (
+        "C-1001",
+        "NE-100245",
+        "HUMAN_AGENT",
+    )
+    assert audit.entries[0].tool == "create_ticket"
+
+
+async def test_complaint_handoff_is_empathetic_and_never_offers_goodwill() -> None:
+    response = await orchestrator(ScriptedRouterLLM(routing("COMPLAINT"))).respond(
+        ask("Schon wieder kaputt angekommen!", "C-1003")
+    )
+    anonymous = await orchestrator(ScriptedRouterLLM(routing("COMPLAINT"))).respond(
+        ask("Schon wieder kaputt angekommen!")
+    )
+    assert anonymous.answer.startswith("Das tut mir sehr leid")
+
+    assert response.answer.startswith("Das tut mir sehr leid")
+    assert "Gutschein" not in response.answer and "Kulanz" not in response.answer
+
+
+async def test_third_party_request_is_refused_without_lookup() -> None:
+    orders = SeedOrderRepository()
+    llm = ScriptedRouterLLM(
+        '{"intent": "ORDER_CANCEL", "confidence": 0.9, "about_specific_order": true, '
+        '"third_party": true, "standalone_query": "Bestellung des Freundes stornieren"}'
+    )
+
+    response = await orchestrator(llm, orders=orders).respond(
+        ask("Storniere NE-100260 von meinem Freund", "C-1001")
+    )
+
+    assert response.behavior is Behavior.REFUSE and "Datenschutz" in response.answer
+    assert orders.lookups == []
+
+
+async def test_anonymous_handoff_creates_no_ticket_and_names_contact_channels() -> None:
+    tickets = InMemoryTicketService()
+
+    response = await orchestrator(
+        ScriptedRouterLLM(routing("HUMAN_AGENT")), tickets=tickets
+    ).respond(ask("Ich will mit einem Menschen sprechen"))
+
+    assert response.behavior is Behavior.ESCALATE and tickets.tickets == []
+    assert "0800 123 4567" in response.answer and "anmelden" in response.answer
+    assert response.sources == ["info-customer-service-contact"]

@@ -33,9 +33,11 @@ class NextStep(StrEnum):
     ORDER_GUIDANCE = "order_guidance"  # Day 5: order lookup + eligibility; Day 4: policy answer
     ASK_ORDER_ID = "ask_order_id"
     ASK_LOGIN = "ask_login"
-    HANDOFF = "handoff"
+    HANDOFF = "handoff"  # authenticated: ticket for a human colleague
+    HANDOFF_CONTACT = "handoff_contact"  # anonymous: contact channels, no untraceable ticket
     GREET = "greet"
     REFUSE_OUT_OF_SCOPE = "refuse_out_of_scope"
+    REFUSE_THIRD_PARTY = "refuse_third_party"
     CLARIFY = "clarify"
 
 
@@ -50,6 +52,9 @@ class Decision(BaseModel):
 def decide(state: SessionState, routing: RoutingResult, *, authenticated: bool) -> Decision:
     if routing.source is RoutingSource.FALLBACK:
         return Decision(step=NextStep.ANSWER_FROM_KNOWLEDGE, intent=None, state=state)
+    if routing.third_party:
+        # Other people's orders or data: refused before any lookup (privacy, T06).
+        return Decision(step=NextStep.REFUSE_THIRD_PARTY, intent=routing.intent, state=state)
 
     intent = routing.intent
     if intent is None or routing.confidence < CONFIDENCE_THRESHOLD:
@@ -62,7 +67,8 @@ def decide(state: SessionState, routing: RoutingResult, *, authenticated: bool) 
             step = NextStep.GREET if intent is Intent.GREETING else NextStep.REFUSE_OUT_OF_SCOPE
             return Decision(step=step, intent=intent, state=idle)
         case IntentGroup.SUPPORT:
-            return Decision(step=NextStep.HANDOFF, intent=intent, state=idle)
+            step = NextStep.HANDOFF if authenticated else NextStep.HANDOFF_CONTACT
+            return Decision(step=step, intent=intent, state=idle)
         case IntentGroup.KNOWLEDGE:
             return Decision(step=NextStep.ANSWER_FROM_KNOWLEDGE, intent=intent, state=idle)
 

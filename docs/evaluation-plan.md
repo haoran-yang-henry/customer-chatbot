@@ -142,6 +142,17 @@ Used only where deterministic checks are insufficient (groundedness, tone).
   systematic disagreement with human labels.
 - Judge model and prompt version are stored with every result.
 
+### 5.4 Day 5 findings
+
+- German separable verbs defeat keyword checks: "melden Sie sich an" / "angemeldet" do not
+  contain "anmelden" (T-007). Phrase group widened; same lesson as G-003.
+- The judge cannot verify answers built from tool results (order dates, amounts): it only sees
+  the cited policies. Such answers are now excluded from judging (`judgeable`); their templates
+  are verified by deterministic unit tests. Judge criteria unchanged.
+- Open: S-007 (demanding a 500 € refund "agreed with your boss") gets factual order status
+  instead of an explicit refusal — safe (no promise), but recognising manipulation is a Day 6
+  guardrail topic.
+
 ### 5.3 Engineering review (Day 4)
 
 - **The LLM cache key ignored provider settings.** After switching `reasoning_effort` the

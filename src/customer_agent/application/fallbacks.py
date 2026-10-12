@@ -19,6 +19,13 @@ _BY_REASON: dict[str, tuple[Behavior, str]] = {
     ),
 }
 
+# Contact facts duplicated from the knowledge base (info-customer-service-contact); a data test
+# fails if they drift apart (tests/data/test_knowledge_base.py).
+CONTACT_PHONE = "0800 123 4567"
+CONTACT_EMAIL = "service@nordelektro.example"
+CONTACT_HOURS = "Montag bis Freitag 8–20 Uhr, Samstag 9–16 Uhr"
+CONTACT_SOURCE = "info-customer-service-contact"
+
 _STEP_REPLIES: dict[str, tuple[Behavior, str]] = {
     # The greeting discloses that the customer talks to an AI (EU AI Act, transparency).
     "greet": (
@@ -34,6 +41,11 @@ _STEP_REPLIES: dict[str, tuple[Behavior, str]] = {
         Behavior.CLARIFY,
         "Gern helfe ich Ihnen weiter. Um welche Bestellung geht es? Bitte nennen Sie mir Ihre "
         "Bestellnummer (zum Beispiel NE-123456).",
+    ),
+    "refuse_third_party": (
+        Behavior.REFUSE,
+        "Aus Datenschutzgründen kann ich nur Auskunft zu Bestellungen aus Ihrem eigenen "
+        "Kundenkonto geben. Die betreffende Person kann sich selbst an uns wenden.",
     ),
     "ask_login": (
         Behavior.REFUSE,
@@ -78,3 +90,31 @@ def fallback(reasons: list[str]) -> AgentResponse:
     """First reason with a dedicated reply wins; anything else is an honest 'no answer'."""
     behavior, text = next((_BY_REASON[r] for r in reasons if r in _BY_REASON), _NO_ANSWER)
     return AgentResponse(answer=text, behavior=behavior, reasons=reasons)
+
+
+def handoff_reply(ticket_id: str, *, intent: Intent | None) -> AgentResponse:
+    """Handoff with the ticket number the customer can refer to (Day 5)."""
+    key = "handoff_complaint" if intent is Intent.COMPLAINT else "handoff"
+    behavior, text = _STEP_REPLIES[key]
+    return AgentResponse(
+        answer=f"{text} Ihre Ticketnummer lautet {ticket_id}.",
+        behavior=behavior,
+        intent=intent,
+        tool_calls=["create_ticket"],
+    )
+
+
+def contact_reply(*, intent: Intent | None) -> AgentResponse:
+    """Handoff for anonymous customers: how to reach a human, no ticket (it could not be
+    answered without contact details, and the chat does not collect them)."""
+    opening = "Das tut mir sehr leid. " if intent is Intent.COMPLAINT else ""
+    return AgentResponse(
+        answer=(
+            f"{opening}Unsere Mitarbeiter erreichen Sie telefonisch unter {CONTACT_PHONE} "
+            f"({CONTACT_HOURS}) oder per E-Mail an {CONTACT_EMAIL}. Wenn Sie sich in Ihrem "
+            "Kundenkonto anmelden, kann ich Ihr Anliegen auch direkt an einen Kollegen übergeben."
+        ),
+        behavior=Behavior.ESCALATE,
+        intent=intent,
+        sources=[CONTACT_SOURCE],
+    )

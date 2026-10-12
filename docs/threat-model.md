@@ -81,7 +81,7 @@ verify it. "Residual" is reassessed on Day 6.
 | T03 | **Knowledge poisoning** at ingestion | T / LLM04 | A4 | Schema validation; only `approved` docs indexed; provenance (`source_type`, `owner`); content hash; review step | D1, D2 | `tests/data` |
 | T04 | **Stale or draft knowledge used** (expired promotion, draft policy) | — / LLM09 | A4 | Retrieval filters on status and validity window; one active policy per topic (tested) | D1, D2 | G-001, G-002, G-003 |
 | T05 | **Internal knowledge disclosure** | I / LLM02 | A3 | ACL filter at retrieval (customers: `public` only); internal docs never reach the customer prompt | D2 | G-004, S-006 |
-| T06 | **Cross-customer data access (IDOR)**: "Zeig mir NE-100250" for someone else's order | I, E / LLM06 | A1 | `customer_id` from verified token only, never from text; ownership check in policy engine | D5 | S-003, S-005 |
+| T06 | **Cross-customer data access (IDOR)**: "Zeig mir NE-100250" for someone else's order | I, E / LLM06 | A1 | **Implemented D5:** `customer_id` only from the verified token; ownership in the SQL query; foreign and missing orders get identical replies; `third_party` requests refused before lookup | D5 | S-003, S-004, S-005, unit + integration tests |
 | T07 | **Unauthorized or manipulated actions** (cancel friend's order, invented refund amount) | T, E / LLM06 | A2 | **Eliminated by design**: no order-changing tools exist (ADR-0006). Residual: misleading guidance — eligibility computed by deterministic code | D5 | S-004, S-007 |
 | T08 | **Excessive agency**: LLM decides workflow steps or opens tickets / reads data on its own | E / LLM06 | A1 | Minimal tool set (read + ticket); explicit state machine; validated tool proposals (ADR-0005) | D4, D5 | M-004, M-005, T-008 |
 | T09 | **System prompt leakage** | I / LLM07 | A5 | No secrets in prompts; leakage check on output; refusal pattern | D3, D6 | S-001 |
@@ -89,7 +89,7 @@ verify it. "Residual" is reassessed on Day 6.
 | T11 | **Improper output handling** (HTML/script in answer rendered in UI) | T / LLM05 | Users | Render answers as text/escaped Markdown; no raw HTML | D3 | UI test |
 | T12 | **Denial of wallet / service**: long inputs, floods, loops | D / LLM10 | A6 | Input length limit; per-session and per-IP rate limit; max tool iterations; token budget per turn | D6, D7 | Load test |
 | T13 | **Session hijacking / spoofing** | S | A1, A2 | **Implemented D5:** RS256 JWT via JWKS (no `none`/HMAC, algorithm-confusion test), `iss`/`aud`/`exp` required, 15 min token lifetime; sessions bound to `customer_id` (404 otherwise) | D5 | `test_auth.py`, API tests |
-| T14 | **Repudiation of actions** | R | A7 | Append-only audit log with request and trace ids | D5 | Unit tests |
+| T14 | **Repudiation of actions** | R | A7 | **Implemented D5:** `audit_log` row for every order lookup and ticket (tool, customer, session, request id, arguments, outcome) | D5 | Unit + integration tests |
 | T15 | **Embedding / vector store weaknesses** (cross-tenant retrieval) | I / LLM08 | A3 | Tenant and ACL filters applied inside the SQL query, not after retrieval | D2 | Integration test |
 | T16 | **Misinformation** (hallucinated policy, price or spec) | — / LLM09 | A4 | Evidence-only answering; citation requirement; "no answer" path; groundedness eval | D3 | K-*, N-* cases |
 

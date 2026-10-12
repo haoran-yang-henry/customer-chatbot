@@ -8,7 +8,7 @@ from customer_agent.application.answering import (
     TextDelta,
     format_history,
     search_query,
-    session_id,
+    stateless_session_id,
 )
 from customer_agent.domain.conversation import Behavior, Conversation, Message, Role
 from customer_agent.domain.retrieval import RetrievedDocument
@@ -149,4 +149,6 @@ def test_search_query_and_history_formatting() -> None:
     assert search_query(convo) == "Versand nach Österreich? Und in die Schweiz?"
     assert format_history(convo) == "Customer: Versand nach Österreich?\nAssistant: 7,95 €."
     assert format_history(conversation("Hallo")) == "(none)"
-    assert session_id(convo) == session_id(conversation("Versand nach Österreich?"))
+    assert stateless_session_id(convo) == stateless_session_id(
+        conversation("Versand nach Österreich?")
+    )

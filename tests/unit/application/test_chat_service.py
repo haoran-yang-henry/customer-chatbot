@@ -1,16 +1,17 @@
-from datetime import date
 from typing import Any
 
 import pytest
 
-from customer_agent.application.answering import AnswerService
 from customer_agent.application.chat import ChatService, SessionNotFoundError
-from customer_agent.application.orchestrator import ConversationOrchestrator
 from customer_agent.application.ports import ConcurrentTurnError
-from customer_agent.application.routing import IntentRouter
 from customer_agent.domain.session import WorkflowState
-from customer_agent.infrastructure.prompts import load_prompt
-from tests.fakes import FakeRetriever, FixedClock, InMemorySessionStore, ScriptedRouterLLM, document
+from tests.fakes import (
+    FakeRetriever,
+    InMemorySessionStore,
+    ScriptedRouterLLM,
+    document,
+    make_orchestrator,
+)
 
 ROUTING = (
     '{"intent": "ORDER_STATUS", "confidence": 0.9, "about_specific_order": true, '
@@ -20,15 +21,7 @@ ROUTING = (
 
 def service(store: InMemorySessionStore) -> ChatService:
     llm = ScriptedRouterLLM(ROUTING)
-    answers = AnswerService(
-        FakeRetriever([document("policy-order-cancellation", 0.7)]),
-        llm,
-        load_prompt("answer", 2),
-        FixedClock(date(2026, 10, 5)),
-        tenant_id="nordelektro",
-        min_similarity=0.35,
-    )
-    agent = ConversationOrchestrator(IntentRouter(llm, load_prompt("router", 1)), answers)
+    agent = make_orchestrator(llm, FakeRetriever([document("policy-order-cancellation", 0.7)]))
     return ChatService(agent, store, tenant_id="nordelektro")
 
 

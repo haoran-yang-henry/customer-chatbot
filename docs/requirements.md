@@ -102,7 +102,7 @@ The agent politely declines and, where useful, redirects:
   evaluated by deterministic code, not by the LLM. The result is advisory; the binding decision is
   made by the order system or a human agent.
 - **FR-24** Every order lookup and every ticket creation is audit-logged with customer, tool,
-  arguments, result and timestamp.
+  arguments, result and timestamp. *(FR-20 – FR-24 implemented on Day 5.)*
 
 ### Handoff
 

@@ -13,5 +13,7 @@ build/
 # evaluation runs: only end-of-day snapshots (dayN.json) are committed
 eval/results/*.json
 !eval/results/day*.json
+# make eval writes this on every run; copy it to groundedness-dayN.jsonl at the end of a day
+eval/calibration/*-latest.jsonl
 # LLM response cache for evaluation runs
 .cache/

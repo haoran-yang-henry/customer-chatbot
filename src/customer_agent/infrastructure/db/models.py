@@ -1,6 +1,8 @@
 """ORM models. The schema itself is owned by the Alembic migrations in ``migrations/``."""
 
 from datetime import date, datetime
+from decimal import Decimal
+from typing import Any
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
@@ -10,6 +12,7 @@ from sqlalchemy import (
     ForeignKey,
     Identity,
     Index,
+    Numeric,
     Text,
     UniqueConstraint,
     func,
@@ -109,3 +112,58 @@ class ChatMessageRow(Base):
     behavior: Mapped[str | None] = mapped_column(default=None)
     sources: Mapped[list[str] | None] = mapped_column(ARRAY(Text), default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CustomerRow(Base):
+    __tablename__ = "customers"
+
+    customer_id: Mapped[str] = mapped_column(primary_key=True)
+    tenant_id: Mapped[str]
+    first_name: Mapped[str]
+    last_name: Mapped[str]
+    email: Mapped[str]
+    country: Mapped[str]
+
+
+class OrderRow(Base):
+    __tablename__ = "orders"
+
+    order_id: Mapped[str] = mapped_column(primary_key=True)
+    customer_id: Mapped[str] = mapped_column(ForeignKey("customers.customer_id"), index=True)
+    tenant_id: Mapped[str]
+    status: Mapped[str]
+    created_at: Mapped[date]
+    items: Mapped[list[dict[str, Any]]] = mapped_column(JSONB)
+    total: Mapped[Decimal] = mapped_column(Numeric(10, 2))
+    payment_method: Mapped[str]
+    payment_status: Mapped[str]
+    shipping: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    return_info: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+
+
+class TicketRow(Base):
+    __tablename__ = "tickets"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    tenant_id: Mapped[str]
+    customer_id: Mapped[str | None]
+    session_id: Mapped[str]
+    intent: Mapped[str | None]
+    order_id: Mapped[str | None]
+    summary: Mapped[str]
+    status: Mapped[str] = mapped_column(server_default="open")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AuditLogRow(Base):
+    __tablename__ = "audit_log"
+    __table_args__ = (Index("ix_audit_log_customer_at", "customer_id", "at"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    request_id: Mapped[str]
+    session_id: Mapped[str]
+    customer_id: Mapped[str | None]
+    tool: Mapped[str]
+    arguments: Mapped[dict[str, str]] = mapped_column(JSONB)
+    outcome: Mapped[str]

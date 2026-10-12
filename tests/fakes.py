@@ -1,7 +1,8 @@
-"""Test doubles for D3 ports."""
+"""Test doubles for the application ports."""
 
 from collections.abc import AsyncIterator, Sequence
 from datetime import date
+from typing import TYPE_CHECKING
 
 from customer_agent.application.ports import (
     ChatMessage,
@@ -12,6 +13,7 @@ from customer_agent.application.ports import (
 )
 from customer_agent.domain.conversation import AgentResponse, Message, Role
 from customer_agent.domain.knowledge import SourceType, TrustLevel
+from customer_agent.domain.orders import Order
 from customer_agent.domain.retrieval import (
     ChunkHit,
     RetrievedDocument,
@@ -19,6 +21,10 @@ from customer_agent.domain.retrieval import (
     SearchScope,
 )
 from customer_agent.domain.session import SessionState
+from customer_agent.infrastructure.memory import InMemoryAuditLog, InMemoryTicketService
+
+if TYPE_CHECKING:
+    from customer_agent.application.orchestrator import ConversationOrchestrator
 
 
 def document(doc_id: str, similarity: float | None, content: str = "Inhalt.") -> RetrievedDocument:
@@ -181,3 +187,55 @@ class InMemorySessionStore:
                 ],
             }
         )
+
+
+class SeedOrderRepository:
+    """Orders from data/seed with the same ownership rule as the Postgres adapter."""
+
+    def __init__(self) -> None:
+        import json
+        from pathlib import Path
+
+        seed = Path(__file__).resolve().parents[1] / "data" / "seed" / "orders.json"
+        self.orders = {o["order_id"]: Order.model_validate(o) for o in json.loads(seed.read_text())}
+        self.lookups: list[tuple[str, str]] = []
+
+    async def get_for_customer(
+        self, order_id: str, *, customer_id: str, tenant_id: str
+    ) -> Order | None:
+        self.lookups.append((order_id, customer_id))
+        order = self.orders.get(order_id)
+        return order if order and order.customer_id == customer_id else None
+
+
+def make_orchestrator(
+    llm: "ScriptedRouterLLM",
+    retriever: FakeRetriever | None = None,
+    *,
+    orders: SeedOrderRepository | None = None,
+    tickets: InMemoryTicketService | None = None,
+    audit: InMemoryAuditLog | None = None,
+    today: date = date(2026, 10, 5),
+) -> "ConversationOrchestrator":
+    from customer_agent.application.answering import AnswerService
+    from customer_agent.application.orchestrator import ConversationOrchestrator
+    from customer_agent.application.routing import IntentRouter
+    from customer_agent.infrastructure.prompts import load_prompt
+
+    answers = AnswerService(
+        retriever or FakeRetriever([document("policy-returns-v5", 0.7)]),
+        llm,
+        load_prompt("answer", 3),
+        FixedClock(today),
+        tenant_id="nordelektro",
+        min_similarity=0.35,
+    )
+    return ConversationOrchestrator(
+        IntentRouter(llm, load_prompt("router", 3)),
+        answers,
+        orders=orders or SeedOrderRepository(),
+        tickets=tickets or InMemoryTicketService(),
+        audit=audit or InMemoryAuditLog(),
+        clock=FixedClock(today),
+        tenant_id="nordelektro",
+    )

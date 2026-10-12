@@ -12,7 +12,14 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async
 from customer_agent.application.answering import AnswerService
 from customer_agent.application.chat import ChatService
 from customer_agent.application.orchestrator import ConversationOrchestrator
-from customer_agent.application.ports import Clock, EmbeddingProvider, LLMProvider, TokenVerifier
+from customer_agent.application.ports import (
+    AuditLog,
+    Clock,
+    EmbeddingProvider,
+    LLMProvider,
+    TicketService,
+    TokenVerifier,
+)
 from customer_agent.application.retrieval import RetrievalService
 from customer_agent.application.routing import IntentRouter
 from customer_agent.config import Settings
@@ -20,11 +27,17 @@ from customer_agent.infrastructure.auth import JwtVerifier, jwks_resolver
 from customer_agent.infrastructure.clock import SystemClock
 from customer_agent.infrastructure.db.knowledge_repository import PostgresKnowledgeRepository
 from customer_agent.infrastructure.db.models import EMBEDDING_DIMENSIONS
+from customer_agent.infrastructure.db.order_repository import (
+    PostgresAuditLog,
+    PostgresOrderRepository,
+    PostgresTicketService,
+)
 from customer_agent.infrastructure.db.session_repository import PostgresSessionStore
 from customer_agent.infrastructure.embeddings import OpenAIEmbeddingProvider
 from customer_agent.infrastructure.lifecycle import aclose_all
 from customer_agent.infrastructure.llm import OpenAICompatibleLLM
 from customer_agent.infrastructure.llm_cache import CachingLLM
+from customer_agent.infrastructure.memory import InMemoryAuditLog, InMemoryTicketService
 from customer_agent.infrastructure.prompts import load_prompt
 
 
@@ -132,8 +145,12 @@ class Container:
         await self.engine.dispose()
 
 
-def build_container(settings: Settings, clock: Clock | None = None) -> Container:
+def build_container(
+    settings: Settings, clock: Clock | None = None, *, side_effects: bool = True
+) -> Container:
+    """``side_effects=False`` keeps tickets and audit entries in memory (evaluation)."""
     engine = create_engine(settings)
+    clock = clock or SystemClock()
     embeddings = create_embedding_provider(settings)
     llms = create_llm_providers(settings)
     answer_prompt = load_prompt("answer", settings.answer_prompt_version)
@@ -147,14 +164,25 @@ def build_container(settings: Settings, clock: Clock | None = None) -> Container
         retrieval,
         llms["answer"],
         answer_prompt,
-        clock or SystemClock(),
+        clock,
         tenant_id=settings.tenant_id,
         min_similarity=settings.min_answer_similarity,
         top_k=settings.answer_top_k,
         max_tokens=settings.answer_max_tokens,
     )
-    agent = ConversationOrchestrator(IntentRouter(llms["router"], router_prompt), answers)
-    sessions = PostgresSessionStore(async_sessionmaker(engine, expire_on_commit=False))
+    db = async_sessionmaker(engine, expire_on_commit=False)
+    tickets: TicketService = PostgresTicketService(db) if side_effects else InMemoryTicketService()
+    audit: AuditLog = PostgresAuditLog(db) if side_effects else InMemoryAuditLog()
+    agent = ConversationOrchestrator(
+        IntentRouter(llms["router"], router_prompt),
+        answers,
+        orders=PostgresOrderRepository(db),
+        tickets=tickets,
+        audit=audit,
+        clock=clock,
+        tenant_id=settings.tenant_id,
+    )
+    sessions = PostgresSessionStore(db)
     return Container(
         engine=engine,
         agent=agent,

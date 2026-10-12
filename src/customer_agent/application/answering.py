@@ -53,7 +53,7 @@ def search_query(conversation: Conversation) -> str:
     return " ".join(m.content for m in conversation.messages if m.role is Role.USER)
 
 
-def session_id(conversation: Conversation) -> str:
+def stateless_session_id(conversation: Conversation) -> str:
     """Stable id for stateless callers (evaluation): hash of the conversation's first message.
     Served conversations use the persisted session id instead."""
     seed = f"{conversation.customer_id or '-'}|{conversation.messages[0].content}"
@@ -138,7 +138,7 @@ class AnswerService:
                 ChatMessage(role="system", content=self._prompt.system),
                 ChatMessage(role="user", content=user),
             ],
-            session_id=session or session_id(conversation),
+            session_id=session or stateless_session_id(conversation),
         )
 
     def _finish(self, raw: str, documents: list[RetrievedDocument]) -> AgentResponse:

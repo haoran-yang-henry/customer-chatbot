@@ -45,6 +45,12 @@ We propose **option 2**.
 - `application/chat.py` + `chat_sessions` / `chat_messages` (migration 0002): the server owns
   transcript and state; the client sends `session_id` + message.
 
+## Implementation (Day 5)
+
+No LLM tool proposals are needed: the router supplies intent and a regex-extracted order number,
+`decide()` selects the step, and the orchestrator calls the tool. This is stricter than the
+proposal pipeline described above — the LLM cannot name a tool or its arguments at all.
+
 ## Consequences
 
 **Positive**

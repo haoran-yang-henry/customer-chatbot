@@ -68,7 +68,11 @@ class GroundednessJudge:
 
 
 def judgeable(result: CaseResult) -> bool:
-    return result.response.behavior == "answer" and bool(result.response.sources)
+    """Knowledge answers only. Answers built from tool results (order guidance) contain order
+    facts the judge cannot see in the cited policies; those templates are verified by
+    deterministic unit tests instead (tests/unit/application/test_order_guidance.py)."""
+    response = result.response
+    return response.behavior == "answer" and bool(response.sources) and not response.tool_calls
 
 
 def calibration_rows(

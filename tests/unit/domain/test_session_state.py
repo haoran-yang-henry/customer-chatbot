@@ -47,7 +47,7 @@ WAITING = SessionState(active_intent=Intent.ORDER_STATUS, workflow=WorkflowState
     ],
 )
 def test_non_transactional_intents(intent: Intent, step: NextStep) -> None:
-    decision = decide(IDLE, routed(intent), authenticated=False)
+    decision = decide(IDLE, routed(intent), authenticated=True)
 
     assert decision.step is step
     assert decision.state.active_intent is intent
@@ -116,6 +116,17 @@ def test_remembered_order_is_reused_for_follow_up_about_the_same_order() -> None
     assert decision.state.slots["order_id"] == "NE-100250"
 
 
+def test_third_party_request_is_refused_regardless_of_intent_or_login() -> None:
+    routing = routed(Intent.ORDER_CANCEL, order_id="NE-100260").model_copy(
+        update={"third_party": True}
+    )
+
+    decision = decide(IDLE, routing, authenticated=True)
+
+    assert decision.step is NextStep.REFUSE_THIRD_PARTY
+    assert decision.state == IDLE
+
+
 def test_topic_switch_while_waiting_abandons_the_workflow_explicitly() -> None:
     decision = decide(WAITING, routed(Intent.SHIPPING_INFO), authenticated=True)
 
@@ -135,3 +146,8 @@ def test_topic_switch_while_waiting_abandons_the_workflow_explicitly() -> None:
 )
 def test_order_id_extraction(text: str, expected: str | None) -> None:
     assert extract_order_id(text) == expected
+
+
+@pytest.mark.parametrize("intent", [Intent.HUMAN_AGENT, Intent.COMPLAINT])
+def test_anonymous_handoff_gives_contact_channels_instead_of_a_ticket(intent: Intent) -> None:
+    assert decide(IDLE, routed(intent), authenticated=False).step is NextStep.HANDOFF_CONTACT

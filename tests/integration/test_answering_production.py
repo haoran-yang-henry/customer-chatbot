@@ -19,8 +19,10 @@ from customer_agent.domain.session import SessionState
 from customer_agent.infrastructure.clock import FixedClock
 from customer_agent.infrastructure.db.knowledge_repository import PostgresKnowledgeRepository
 from customer_agent.infrastructure.knowledge_files import load_knowledge_directory
+from customer_agent.infrastructure.memory import InMemoryAuditLog, InMemoryTicketService
 from customer_agent.infrastructure.prompts import load_prompt
 from tests.conftest import KNOWLEDGE_DIR, REFERENCE_DATE, TENANT_ID
+from tests.fakes import SeedOrderRepository
 
 pytestmark = pytest.mark.llm
 
@@ -42,7 +44,15 @@ async def agent(
         tenant_id=TENANT_ID,
         min_similarity=settings.min_answer_similarity,
     )
-    return ConversationOrchestrator(IntentRouter(llm, load_prompt("router", 1)), answers)
+    return ConversationOrchestrator(
+        IntentRouter(llm, load_prompt("router", settings.router_prompt_version)),
+        answers,
+        orders=SeedOrderRepository(),
+        tickets=InMemoryTicketService(),
+        audit=InMemoryAuditLog(),
+        clock=FixedClock(REFERENCE_DATE),
+        tenant_id=TENANT_ID,
+    )
 
 
 def ask(text: str) -> Conversation:
@@ -124,3 +134,21 @@ async def test_order_question_of_logged_in_customer_asks_for_order_number(
 
     assert turn.response.behavior is Behavior.CLARIFY
     assert turn.state.workflow == "awaiting_order_id"
+
+
+async def test_logged_in_customer_gets_order_specific_return_guidance(
+    agent: ConversationOrchestrator,
+) -> None:
+    response = await agent.respond(
+        Conversation(
+            messages=[
+                Message(
+                    role=Role.USER, content="Kann ich den Laptop aus NE-100198 noch zurückgeben?"
+                )
+            ],
+            customer_id="C-1001",
+        )
+    )
+
+    assert response.intent is Intent.RETURN_REQUEST
+    assert "abgelaufen" in response.answer and "Gewährleistung" in response.answer

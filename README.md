@@ -7,10 +7,11 @@ cancellation, returns) behind explicit authorization, policy checks and confirma
 Customers write German; the agent answers in German. Code and documentation are in English
 ([ADR-0003](docs/adr/0003-german-language-strategy.md)).
 
-> **Status: Day 4 of 8** — the agent routes each message to an intent (rules first, then an
-> LLM), keeps explicit conversation state in Postgres, resolves follow-up questions, asks for
-> missing order numbers, and answers German questions from the governed knowledge base with
-> citations ([API](docs/api.md)). Order lookup and human handoff follow on Day 5. See the
+> **Status: Day 5 of 8** — authenticated customers (Keycloak, OIDC) get order-specific guidance
+> (status, cancellation and return eligibility, refunds) from read-only order data, can be
+> handed over to a human with a ticket, and every tool call is audited. Knowledge questions are
+> answered from the governed knowledge base with citations ([API](docs/api.md)). Guardrails and
+> red teaming follow on Day 6. See the
 > [development plan](docs/development-plan.md).
 
 ## Documentation
@@ -37,7 +38,9 @@ make install           # dependencies + pre-commit hooks
 make check             # lint, type check, unit tests (no Docker, no API key)
 make test-integration  # repository tests against a throwaway Postgres (Testcontainers)
 make test-llm          # same + production scenarios with the real embedding model
-make up migrate        # start Postgres + pgvector, apply migrations
+make up migrate        # start Postgres + pgvector and Keycloak, apply migrations
+make seed              # load the mock order system (customers, orders)
+make token USER=anna.schneider  # access token for a test customer (see infra/keycloak/README.md)
 make ingest            # index data/knowledge (idempotent)
 make eval-retrieval    # Recall@5 / MRR for fulltext, vector and hybrid search
 make eval              # end-to-end evaluation of the real agent + groundedness judge
@@ -61,6 +64,7 @@ tests/                unit and data validation tests
 |---|---|---|
 | D1 | n/a (0 cases due) | Placeholder agent: 3/71 overall; harness and dataset validated |
 | D2 | n/a (0 cases due) | Retrieval only, see below |
+| D5 | **65/66 (98 %)** | Intent 65/65, tools 14/14, sources 36/36; groundedness 29/29 on knowledge answers (uncalibrated). Open: S-007 (Day 6) |
 | D4 | **45/47 (96 %)** | After review fixes (clean cache): intent accuracy 62/65 (95 %); groundedness 31/31 on Day-4 answers (uncalibrated). An earlier 47/47 was measured on a partly stale cache |
 | D3 | **32/32 (100 %)** | Real agent (`deepseek-v4-flash`, prompt `answer/v2`); groundedness 23/24 on Day-3 answers (judge, uncalibrated) |
 

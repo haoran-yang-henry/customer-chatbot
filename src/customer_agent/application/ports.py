@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, model_validator
 
 from customer_agent.domain.conversation import AgentResponse, Conversation, Message
 from customer_agent.domain.knowledge import KnowledgeChunk, KnowledgeDocumentMeta
+from customer_agent.domain.orders import Order
 from customer_agent.domain.retrieval import (
     ChunkHit,
     RetrievedDocument,
@@ -191,3 +192,44 @@ class SessionStore(Protocol):
         Raises ``ConcurrentTurnError`` if the stored version differs from ``expected_version``.
         """
         ...
+
+
+class OrderRepository(Protocol):
+    async def get_for_customer(
+        self, order_id: str, *, customer_id: str, tenant_id: str
+    ) -> Order | None:
+        """The order only if it belongs to this customer. A foreign order is indistinguishable
+        from a missing one (no existence oracle, threat model T06)."""
+        ...
+
+
+class NewTicket(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    tenant_id: str
+    customer_id: str | None
+    session_id: str
+    intent: str | None
+    order_id: str | None
+    summary: str
+
+
+class TicketService(Protocol):
+    async def create(self, ticket: NewTicket) -> str:
+        """Returns the public ticket number, e.g. ``T-000042``."""
+        ...
+
+
+class AuditEntry(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    tool: str
+    customer_id: str | None
+    session_id: str
+    request_id: str
+    arguments: dict[str, str]
+    outcome: str
+
+
+class AuditLog(Protocol):
+    async def record(self, entry: AuditEntry) -> None: ...

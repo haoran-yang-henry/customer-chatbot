@@ -92,3 +92,12 @@ async def test_router_calls_llm_once_with_state_and_history() -> None:
     assert llm.router_calls == 1 and llm.router_session_ids == ["s1"]
     user_prompt = llm.router_prompts[0][1].content
     assert "Customer: Versand AT?" in user_prompt and "New conversation." in user_prompt
+
+
+def test_parse_third_party_flag() -> None:
+    text = (
+        '{"intent": "ORDER_STATUS", "confidence": 0.9, "third_party": true, '
+        '"standalone_query": "Welche Bestellungen hat Jonas Weber?"}'
+    )
+
+    assert parse_llm_routing(text, convo("Welche Bestellungen hat Jonas Weber?")).third_party

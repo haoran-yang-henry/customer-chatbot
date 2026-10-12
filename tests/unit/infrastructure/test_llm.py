@@ -53,7 +53,16 @@ async def test_cache_answers_identical_requests_from_disk(tmp_path: Path) -> Non
 
 
 @pytest.mark.parametrize(
-    ("name", "version"), [("answer", 1), ("answer", 2), ("router", 1), ("router", 2), ("judge", 1)]
+    ("name", "version"),
+    [
+        ("answer", 1),
+        ("answer", 2),
+        ("answer", 3),
+        ("router", 1),
+        ("router", 2),
+        ("router", 3),
+        ("judge", 1),
+    ],
 )
 def test_shipped_prompts_load(name: str, version: int) -> None:
     prompt = load_prompt(name, version)

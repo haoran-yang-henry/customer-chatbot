@@ -6,7 +6,7 @@
 | **Owner** | Project author |
 | **Started** | 2026-10-05 |
 | **Planned duration** | 8 working days |
-| **Last updated** | 2026-10-05 |
+| **Last updated** | 2026-10-07 |
 
 ## 1. Purpose
 
@@ -278,6 +278,7 @@ the D8 CI gate.
 | 2026-10-06 | D2 done. Added real-model production tests (`make test-llm`); cosine similarity kept through RRF as relevance signal |
 | 2026-10-06 | D3 done. Logging foundation moved from D7 to D3; relevance gate (two-tier) from D2 measurements; LLM via OpenAI-compatible endpoint (ADR-0008); web UI cut (Swagger + curl suffice) |
 | 2026-10-06 | D4 additions: conversation-aware query rewriting (replaces joined user turns); decide `ORDER_CHANGE` vs `HUMAN_AGENT` (T-011); split API/orchestrator responsibilities further |
-| 2026-10-07 | D4 done. T-011 → `HUMAN_AGENT` (ADR-0009); server-side sessions (client sends `session_id` + message); AI disclosure in greeting (FR-05); `CA_LLM_REASONING_EFFORT=none` after empty-output findings |
-| 2026-10-07 | Engineering review: fixed cache key, embedding timeout, turn loss on disconnect, lost updates (optimistic locking, 409), unclosed HTTP clients, unvalidated request ids, missing stream usage logging. P1/P2 items scheduled into D5–D8 (see review notes in this conversation) |
 | 2026-10-06 | Backlog additions: weighted RRF / reranker after adding new retrieval cases ("Retoure" case); human labelling of `eval/calibration/groundedness-day3.jsonl` |
+| 2026-10-07 | D4 done. T-011 → `HUMAN_AGENT` (ADR-0009); server-side sessions (client sends `session_id` + message); AI disclosure in greeting (FR-05); `CA_LLM_REASONING_EFFORT=none` after empty-output findings |
+| 2026-10-07 | Engineering review: fixed cache key, embedding timeout, turn loss on disconnect, lost updates (optimistic locking, 409), unclosed HTTP clients, unvalidated request ids, missing stream usage logging. P1 items scheduled: RFC 9457 errors, pure ASGI middleware, nested settings and per-role model settings (D5); pip-audit, gitleaks, Trivy (D6); structured logging, Langfuse, Dockerfile, liveness/readiness probes (D7); Renovate, coverage gate, arc42 docs (D8). P2: LangGraph spike (backlog) |
+| 2026-10-07 | D5 done. Keycloak/OIDC (ADR-0010); read-only orders with ownership in SQL; deterministic order guidance; tickets and audit log; router v3 (`third_party`); answer prompt v3; per-role LLM settings; RFC 9457 errors; pure ASGI middleware; weighted RRF (full-text weight 0.25, confirmed on the new `retrieval_holdout.jsonl`). Nested settings skipped (would rename every existing `CA_*` variable) |

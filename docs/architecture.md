@@ -252,7 +252,7 @@ answered from knowledge, otherwise ask to log in / ask for the order number / or
 (Day 5 adds order data); support → handoff (ticket on Day 5); control → greeting (discloses the
 AI assistant) or polite refusal. Router confidence < 0.6 → clarification question.
 
-### 5.3 Cancellation request: guidance, then handoff on request (D5)
+### 5.3 Cancellation request: guidance, then handoff on request (D5 — implemented)
 
 ```mermaid
 sequenceDiagram
@@ -282,6 +282,14 @@ sequenceDiagram
         A-->>C: closing message
     end
 ```
+
+**As implemented:** tool calls are not proposed by the LLM at all. The router extracts the order
+number (regex) and the state machine selects the step; the orchestrator calls
+`get_order_status` (read-only, ownership in the SQL `WHERE`) or `create_ticket` and writes an
+audit entry for each call. Guidance texts are deterministic templates
+(`application/order_guidance.py`), because order facts must be exact. Requests about other
+people (`third_party` from the router) are refused before any lookup. Authentication:
+[ADR-0010](adr/0010-oidc-authentication-with-keycloak.md).
 
 The agent never changes an order ([ADR-0006](adr/0006-no-order-mutations-by-the-agent.md)).
 Ownership is checked inside `get_order_status` using the `customer_id` from the verified token;
