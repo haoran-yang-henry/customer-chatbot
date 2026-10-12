@@ -97,3 +97,11 @@ async def test_concurrent_turn_on_the_same_session_is_rejected() -> None:
         await chat.chat(created.session_id, "C-1001", "Wo ist meine Bestellung?")
 
     assert store.sessions[created.session_id].messages == []  # nothing half-written
+
+
+async def test_session_of_another_tenant_is_not_found() -> None:
+    store = InMemorySessionStore()
+    foreign = await store.create(tenant_id="other-shop", customer_id="C-1001")
+
+    with pytest.raises(SessionNotFoundError):
+        await service(store).chat(foreign.session_id, "C-1001", "Hallo")

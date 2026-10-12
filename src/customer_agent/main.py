@@ -11,27 +11,37 @@ from customer_agent.api import health
 from customer_agent.api.middleware import RequestContextMiddleware
 from customer_agent.api.problems import register_problem_handlers
 from customer_agent.application.chat import ChatService
+from customer_agent.application.ports import TokenVerifier
 from customer_agent.config import Settings, get_settings
 from customer_agent.observability import configure_logging, get_logger
 
 log = get_logger("http")
 
 
-def create_app(settings: Settings | None = None, chat: ChatService | None = None) -> FastAPI:
-    """``chat`` lets tests inject a fake; otherwise the lifespan builds the real one."""
+def create_app(
+    settings: Settings | None = None,
+    chat: ChatService | None = None,
+    verifier: TokenVerifier | None = None,
+) -> FastAPI:
+    """``chat``/``verifier`` let tests inject fakes; otherwise the lifespan builds real ones."""
     settings = settings or get_settings()
     configure_logging(settings.log_level)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        app.state.tenant_id = settings.tenant_id
         if chat is not None:
             app.state.chat = chat
+            app.state.verifier = verifier
             yield
             return
         from customer_agent.bootstrap import build_container
 
         container = build_container(settings)
         app.state.chat = container.chat
+        app.state.verifier = container.verifier
+        if container.verifier is None:
+            log.warning("authentication disabled (CA_AUTH_ISSUER unset): all requests anonymous")
         log.info("ready models=%s prompts=%s", container.models, container.prompts)
         try:
             yield

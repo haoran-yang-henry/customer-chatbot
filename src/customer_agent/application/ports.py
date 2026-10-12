@@ -17,6 +17,24 @@ from customer_agent.domain.retrieval import (
 from customer_agent.domain.session import SessionState
 
 
+class Principal(BaseModel):
+    """The authenticated customer, taken only from a verified token (FR-20, threat model T13)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    subject: str
+    customer_id: str
+    tenant_id: str
+
+
+class AuthenticationError(Exception):
+    """The presented token is missing required claims, expired, forged or for another audience."""
+
+
+class TokenVerifier(Protocol):
+    async def verify(self, token: str) -> Principal: ...
+
+
 class CustomerServiceAgent(Protocol):
     """Anything that can answer the next turn of a conversation: the real agent or a test double."""
 
@@ -143,6 +161,7 @@ class StoredSession(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     session_id: str
+    tenant_id: str
     customer_id: str | None
     state: SessionState
     messages: list[Message]

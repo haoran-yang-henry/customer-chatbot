@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help install lint format typecheck test test-integration test-llm check eval eval-retrieval migrate ingest run up down
+.PHONY: token help install lint format typecheck test test-integration test-llm check eval eval-retrieval migrate ingest run up down
 
 help:  ## Show available targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-10s %s\n", $$1, $$2}'
@@ -46,7 +46,10 @@ ingest:  ## Synchronise the knowledge index with data/knowledge (needs DB + API 
 run:  ## Start the API with auto-reload; live logs in this terminal (needs DB + both API keys)
 	uv run uvicorn --factory customer_agent.main:create_app --reload --no-access-log
 
-up:  ## Start local infrastructure (Postgres + pgvector)
+token:  ## Print an access token from the local Keycloak, e.g. make token USER=anna.schneider
+	@uv run customer-agent-token $(USER)
+
+up:  ## Start local infrastructure (Postgres + pgvector, Keycloak)
 	docker compose up -d --wait
 
 down:  ## Stop local infrastructure

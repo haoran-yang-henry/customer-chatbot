@@ -7,6 +7,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
+from customer_agent.api.auth import CurrentPrincipal
 from customer_agent.api.schemas import ChatRequest, ChatResponse
 from customer_agent.application.answering import TextDelta
 from customer_agent.application.chat import ChatService, ChatTurn, SessionNotFoundError
@@ -37,11 +38,12 @@ def _response(turn: ChatTurn, request_id: str) -> ChatResponse:
     )
 
 
-# customer_id is None until authentication arrives (Day 5); it never comes from the body.
+# The customer comes only from a verified token, never from the request body (T06, T13).
 @router.post("/chat")
-async def chat(body: ChatRequest, service: Chat) -> ChatResponse:
+async def chat(body: ChatRequest, service: Chat, principal: CurrentPrincipal) -> ChatResponse:
+    customer_id = principal.customer_id if principal else None
     try:
-        turn = await service.chat(body.session_id, None, body.message)
+        turn = await service.chat(body.session_id, customer_id, body.message)
     except SessionNotFoundError:
         raise _NOT_FOUND from None
     except ConcurrentTurnError:
@@ -58,18 +60,23 @@ def _sse(event: str, data: dict[str, object]) -> str:
     response_class=StreamingResponse,
     responses={
         200: {"content": {"text/event-stream": {}}},
+        401: {"description": "Invalid token"},
         404: {"description": "Unknown session"},
         409: {"description": "Concurrent turn on the same session"},
     },
 )
-async def chat_stream(body: ChatRequest, service: Chat) -> StreamingResponse:
+async def chat_stream(
+    body: ChatRequest, service: Chat, principal: CurrentPrincipal
+) -> StreamingResponse:
     """Server-Sent Events: ``delta`` events with text, then one authoritative ``final`` event.
 
     Clients must replace the streamed text with ``final.answer``: an output guardrail may
     substitute a fallback after streaming started.
     """
     request_id = request_id_var.get()
-    events = service.chat_stream(body.session_id, None, body.message)
+    events = service.chat_stream(
+        body.session_id, principal.customer_id if principal else None, body.message
+    )
     try:
         first = await anext(events)  # resolve the session before the 200 response starts
     except SessionNotFoundError:

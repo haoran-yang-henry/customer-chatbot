@@ -458,7 +458,7 @@ statuses: `pending_payment → paid → processing → shipped → delivered`, p
 | Language | German FTS config, multilingual embeddings, German prompts; see [ADR-0003](adr/0003-german-language-strategy.md) | D1–D3 |
 | Errors | RFC 9457 Problem Details; provider failures (`ProviderUnavailableError`) degrade to a German fallback answer, never `5xx` | D3/D5 |
 | Logging | `customer_agent.observability`: one format, request id via `ContextVar` (also while streaming), `key=value` messages with per-step timings; `CA_LOG_LEVEL` | D3 |
-| Authentication | JWT bearer token with `customer_id`, `tenant_id` | D5 |
+| Authentication | Keycloak (OIDC), RS256 JWT verified via JWKS; claims `customer_id`, `tenant_id` ([ADR-0010](adr/0010-oidc-authentication-with-keycloak.md)) | D5 |
 | Observability | OpenTelemetry traces, JSON logs with correlation ids, Prometheus metrics | D7 |
 | Resilience | Timeouts, retries with backoff, fallbacks to handoff | D7 |
 | Testing | Unit (domain, policies) → integration (Postgres) → eval (LLM) → e2e; see [ADR-0004](adr/0004-evaluation-first-with-versioned-datasets.md) | D1+ |

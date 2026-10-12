@@ -44,6 +44,11 @@ class Settings(BaseSettings):
     answer_reasoning_effort: str | None = None
     llm_cache_dir: Path | None = None  # evaluation only, see infrastructure/llm_cache.py
 
+    # Authentication (ADR-0010). Unset issuer = no authentication: every request is anonymous.
+    auth_issuer: str | None = None  # e.g. http://localhost:8080/realms/nordelektro
+    auth_audience: str = "customer-agent-api"
+    auth_jwks_url: str | None = None  # default: <issuer>/protocol/openid-connect/certs
+
     # Retrieval: RRF weight of the full-text list relative to the vector list (1.0 = equal).
     # 0.25: chosen on core.jsonl, confirmed on retrieval_holdout.jsonl (Day 5, architecture §6.4).
     retrieval_fulltext_weight: float = 0.25
@@ -64,6 +69,8 @@ class Settings(BaseSettings):
         "llm_api_key",
         "llm_base_url",
         "llm_cache_dir",
+        "auth_issuer",
+        "auth_jwks_url",
         "llm_reasoning_effort",
         "router_llm_model",
         "router_reasoning_effort",

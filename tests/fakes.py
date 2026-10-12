@@ -147,6 +147,7 @@ class InMemorySessionStore:
     async def create(self, *, tenant_id: str, customer_id: str | None) -> StoredSession:
         session = StoredSession(
             session_id=f"s{len(self.sessions) + 1}",
+            tenant_id=tenant_id,
             customer_id=customer_id,
             state=SessionState(),
             messages=[],

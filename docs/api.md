@@ -13,8 +13,12 @@
   (1–64 characters `A-Z a-z 0-9 . _ -`; anything else is replaced by a generated id); it is used
   in all log lines of that request.
 - Errors are RFC 9457 Problem Details (`application/problem+json`) with an added `request_id`.
-- Authentication arrives on Day 5 (JWT bearer). Until then all requests are anonymous;
-  `customer_id` is never accepted from the request body.
+- **Authentication** ([ADR-0010](adr/0010-oidc-authentication-with-keycloak.md)): optional
+  `Authorization: Bearer <access token>` from the `nordelektro` Keycloak realm. Without a token
+  the request is anonymous (knowledge questions only; order questions get a login prompt). An
+  invalid or expired token is `401` with `WWW-Authenticate: Bearer`; a token for another tenant
+  is `403`. `customer_id` is never accepted from the request body. Local token:
+  `make token USER=anna.schneider`.
 
 ## `GET /health`
 
@@ -57,7 +61,8 @@ Sends one customer message. The server owns the transcript and the conversation 
 
 `intent` is the router's classification (see [intent taxonomy](intent-taxonomy.md)) or `null`.
 
-**Errors** — `404` unknown session (also for a session of another customer, from Day 5);
+**Errors** — `401` invalid token; `403` token for another tenant; `404` unknown session (also
+a session of another customer);
 `409` another message of the same session was processed at the same time (retry);
 `422` invalid request. Provider outages do **not** produce `5xx`; they degrade to
 `behavior: "no_answer"`.

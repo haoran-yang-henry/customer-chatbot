@@ -26,7 +26,7 @@ MAX_CONTEXT_MESSAGES = 20
 
 
 class SessionNotFoundError(LookupError):
-    """Unknown session, or a session that belongs to another customer (indistinguishable)."""
+    """Unknown session, or one of another customer or tenant (indistinguishable)."""
 
 
 class ChatTurn(BaseModel):
@@ -57,7 +57,11 @@ class ChatService:
             log.info("created session=%s", session.session_id)
             return session
         loaded = await self._sessions.load(session_id)
-        if loaded is None or loaded.customer_id != customer_id:
+        if (
+            loaded is None
+            or loaded.tenant_id != self._tenant_id
+            or loaded.customer_id != customer_id
+        ):
             raise SessionNotFoundError(session_id)
         return loaded
 

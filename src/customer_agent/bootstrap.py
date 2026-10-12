@@ -12,10 +12,11 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async
 from customer_agent.application.answering import AnswerService
 from customer_agent.application.chat import ChatService
 from customer_agent.application.orchestrator import ConversationOrchestrator
-from customer_agent.application.ports import Clock, EmbeddingProvider, LLMProvider
+from customer_agent.application.ports import Clock, EmbeddingProvider, LLMProvider, TokenVerifier
 from customer_agent.application.retrieval import RetrievalService
 from customer_agent.application.routing import IntentRouter
 from customer_agent.config import Settings
+from customer_agent.infrastructure.auth import JwtVerifier, jwks_resolver
 from customer_agent.infrastructure.clock import SystemClock
 from customer_agent.infrastructure.db.knowledge_repository import PostgresKnowledgeRepository
 from customer_agent.infrastructure.db.models import EMBEDDING_DIMENSIONS
@@ -97,6 +98,16 @@ def create_llm_provider(settings: Settings) -> LLMProvider:
     return create_llm_providers(settings)["answer"]
 
 
+def create_token_verifier(settings: Settings) -> TokenVerifier | None:
+    if settings.auth_issuer is None:
+        return None
+    issuer = settings.auth_issuer.rstrip("/")
+    jwks_url = settings.auth_jwks_url or f"{issuer}/protocol/openid-connect/certs"
+    return JwtVerifier(
+        issuer=issuer, audience=settings.auth_audience, resolve_key=jwks_resolver(jwks_url)
+    )
+
+
 @dataclass
 class Container:
     """Long-lived objects of one process; ``aclose`` releases connections."""
@@ -106,6 +117,7 @@ class Container:
     chat: ChatService
     llms: dict[str, LLMProvider]
     embeddings: EmbeddingProvider
+    verifier: TokenVerifier | None
     prompts: dict[str, str]
 
     @property
@@ -149,5 +161,6 @@ def build_container(settings: Settings, clock: Clock | None = None) -> Container
         chat=ChatService(agent, sessions, tenant_id=settings.tenant_id),
         llms=llms,
         embeddings=embeddings,
+        verifier=create_token_verifier(settings),
         prompts={"answer": answer_prompt.ref, "router": router_prompt.ref},
     )

@@ -37,7 +37,11 @@ class PostgresSessionStore:
         async with self._sessions.begin() as session:
             session.add(row)
         return StoredSession(
-            session_id=row.id, customer_id=customer_id, state=SessionState(), messages=[]
+            session_id=row.id,
+            tenant_id=tenant_id,
+            customer_id=customer_id,
+            state=SessionState(),
+            messages=[],
         )
 
     async def load(self, session_id: str) -> StoredSession | None:
@@ -52,6 +56,7 @@ class PostgresSessionStore:
             )
             return StoredSession(
                 session_id=row.id,
+                tenant_id=row.tenant_id,
                 customer_id=row.customer_id,
                 state=_state(row),
                 messages=[Message(role=Role(m.role), content=m.content) for m in messages],

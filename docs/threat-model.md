@@ -88,7 +88,7 @@ verify it. "Residual" is reassessed on Day 6.
 | T10 | **PII leakage in responses or logs** | I / LLM02 | A1 | Output PII redaction; log redaction; no raw transcripts in traces by default | D6, D7 | S-008, log tests |
 | T11 | **Improper output handling** (HTML/script in answer rendered in UI) | T / LLM05 | Users | Render answers as text/escaped Markdown; no raw HTML | D3 | UI test |
 | T12 | **Denial of wallet / service**: long inputs, floods, loops | D / LLM10 | A6 | Input length limit; per-session and per-IP rate limit; max tool iterations; token budget per turn | D6, D7 | Load test |
-| T13 | **Session hijacking / spoofing** | S | A1, A2 | Signed JWT; session bound to `customer_id`; short expiry | D5 | Unit tests |
+| T13 | **Session hijacking / spoofing** | S | A1, A2 | **Implemented D5:** RS256 JWT via JWKS (no `none`/HMAC, algorithm-confusion test), `iss`/`aud`/`exp` required, 15 min token lifetime; sessions bound to `customer_id` (404 otherwise) | D5 | `test_auth.py`, API tests |
 | T14 | **Repudiation of actions** | R | A7 | Append-only audit log with request and trace ids | D5 | Unit tests |
 | T15 | **Embedding / vector store weaknesses** (cross-tenant retrieval) | I / LLM08 | A3 | Tenant and ACL filters applied inside the SQL query, not after retrieval | D2 | Integration test |
 | T16 | **Misinformation** (hallucinated policy, price or spec) | — / LLM09 | A4 | Evidence-only answering; citation requirement; "no answer" path; groundedness eval | D3 | K-*, N-* cases |
