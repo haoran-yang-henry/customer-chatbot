@@ -126,7 +126,11 @@ def build_container(settings: Settings, clock: Clock | None = None) -> Container
     llms = create_llm_providers(settings)
     answer_prompt = load_prompt("answer", settings.answer_prompt_version)
     router_prompt = load_prompt("router", settings.router_prompt_version)
-    retrieval = RetrievalService(create_knowledge_repository(engine), embeddings)
+    retrieval = RetrievalService(
+        create_knowledge_repository(engine),
+        embeddings,
+        fulltext_weight=settings.retrieval_fulltext_weight,
+    )
     answers = AnswerService(
         retrieval,
         llms["answer"],

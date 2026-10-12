@@ -44,6 +44,10 @@ class Settings(BaseSettings):
     answer_reasoning_effort: str | None = None
     llm_cache_dir: Path | None = None  # evaluation only, see infrastructure/llm_cache.py
 
+    # Retrieval: RRF weight of the full-text list relative to the vector list (1.0 = equal).
+    # 0.25: chosen on core.jsonl, confirmed on retrieval_holdout.jsonl (Day 5, architecture §6.4).
+    retrieval_fulltext_weight: float = 0.25
+
     # Answering (Day 3)
     answer_prompt_version: int = 2
     router_prompt_version: int = 2

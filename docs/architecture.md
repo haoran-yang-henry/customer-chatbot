@@ -421,12 +421,28 @@ Day 7); the other tables arrive with their use cases. Design notes:
    **OR-combined** and ranked with `ts_rank_cd`. AND semantics (`websearch_to_tsquery`) almost
    never match a full natural-language question.
 2. Semantic: cosine distance on the query embedding.
-3. Both lists (20 candidates each) are fused with **Reciprocal Rank Fusion** (k = 60) and
-   aggregated to documents (document score = best chunk). Results keep their `trust_level`.
+3. Both lists (20 candidates each, searched concurrently) are fused with **weighted Reciprocal
+   Rank Fusion** (k = 60, score = Σ wᵢ / (k + rank); full-text weight 0.25, vector 1.0,
+   `CA_RETRIEVAL_FULLTEXT_WEIGHT`) and aggregated to documents (document score = best chunk).
+   Results keep their `trust_level`.
    RRF scores only express rank, so each hit also keeps its **cosine similarity** — the absolute
    relevance signal for "no answer" decisions (measured on Day 2: answerable ≥ 0.575, not in the
    knowledge base ≤ 0.461, off-topic ≈ 0.30; small sample, threshold to be set on Day 3).
 4. Every query applies the scope filters (status, validity on *today*, tenant, ACL) in SQL.
+
+**Full-text weight (Day 5).** With equal weights, frequent policy words ("Rücksendung",
+"Bestellung") let lexically similar documents outrank the right one (T-002). The weight was
+chosen on `core.jsonl` and then confirmed on `retrieval_holdout.jsonl` (28 new questions, none
+shared with `core.jsonl`), hybrid mode, Recall@5 / MRR:
+
+| Full-text weight | `core.jsonl` (36 cases) | `retrieval_holdout.jsonl` (28 cases) |
+|---|---|---|
+| 1.0 (plain RRF) | 0.972 / 0.873 | 1.000 / 0.833 |
+| 0.5 | 1.000 / 0.926 | 1.000 / 0.869 |
+| **0.25** | **1.000 / 0.954** | **1.000 / 0.872** |
+
+The gain on the holdout set is smaller than on the set the weight was tuned on — expected, and
+the reason for keeping a holdout. Results: `eval/results/day5-retrieval*.json`.
 
 ### 6.5 Seed data
 

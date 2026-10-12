@@ -53,6 +53,19 @@ class TestReciprocalRankFusion:
         assert fused[0].similarity == 0.8
         assert fused[0].score == pytest.approx(2 / (RRF_K + 1))
 
+    def test_weights_shift_the_fusion_towards_the_trusted_list(self) -> None:
+        lexical, semantic = [hit(1), hit(2)], [hit(2), hit(1)]
+
+        equal = reciprocal_rank_fusion([lexical, semantic])
+        vector_heavy = reciprocal_rank_fusion([lexical, semantic], weights=[0.5, 1.0])
+
+        assert {h.chunk_id for h in equal[:1]} <= {1, 2}  # tie broken by insertion order
+        assert vector_heavy[0].chunk_id == 2
+
+    def test_weights_must_match_lists(self) -> None:
+        with pytest.raises(ValueError, match="one weight"):
+            reciprocal_rank_fusion([[hit(1)]], weights=[1.0, 1.0])
+
     def test_empty_input_gives_empty_result(self) -> None:
         assert reciprocal_rank_fusion([[], []]) == []
 

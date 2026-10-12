@@ -1,5 +1,6 @@
 """Retrieval use case: hybrid search with Reciprocal Rank Fusion, aggregated to documents."""
 
+import asyncio
 from collections import defaultdict
 from collections.abc import Sequence
 
@@ -30,14 +31,22 @@ def umlaut_variant(text: str) -> str | None:
 
 
 def reciprocal_rank_fusion(
-    ranked_lists: Sequence[Sequence[ChunkHit]], k: int = RRF_K
+    ranked_lists: Sequence[Sequence[ChunkHit]],
+    k: int = RRF_K,
+    weights: Sequence[float] | None = None,
 ) -> list[ChunkHit]:
-    """Fuse ranked lists by rank only: score = Σ 1 / (k + rank). Raw scores are not comparable."""
+    """Fuse ranked lists by rank only: score = Σ wᵢ / (k + rank). Raw scores are not comparable.
+
+    ``weights`` (one per list, default 1.0) express how much each retriever is trusted.
+    """
+    weights = weights or [1.0] * len(ranked_lists)
+    if len(weights) != len(ranked_lists):
+        raise ValueError("one weight per ranked list")
     fused: dict[int, float] = defaultdict(float)
     hits: dict[int, ChunkHit] = {}
-    for ranked in ranked_lists:
+    for ranked, weight in zip(ranked_lists, weights, strict=True):
         for rank, hit in enumerate(ranked, start=1):
-            fused[hit.chunk_id] += 1.0 / (k + rank)
+            fused[hit.chunk_id] += weight / (k + rank)
             known = hits.get(hit.chunk_id)
             if known is None or (known.similarity is None and hit.similarity is not None):
                 hits[hit.chunk_id] = hit  # keep the copy that carries the vector similarity
@@ -65,9 +74,20 @@ def aggregate_by_document(hits: Sequence[ChunkHit]) -> list[RetrievedDocument]:
 
 
 class RetrievalService:
-    def __init__(self, search: KnowledgeSearch, embeddings: EmbeddingProvider) -> None:
+    def __init__(
+        self,
+        search: KnowledgeSearch,
+        embeddings: EmbeddingProvider,
+        *,
+        fulltext_weight: float = 1.0,
+    ) -> None:
         self._search = search
         self._embeddings = embeddings
+        self._fulltext_weight = fulltext_weight
+
+    async def _semantic(self, query: str, scope: SearchScope) -> list[ChunkHit]:
+        vector = await self._embeddings.embed_query(query)
+        return await self._search.search_vector(vector, scope, CANDIDATES_PER_LIST)
 
     async def retrieve(
         self,
@@ -80,15 +100,27 @@ class RetrievalService:
         query = query.strip()[:MAX_QUERY_CHARS]
         if not query:
             return []
-        ranked_lists: list[list[ChunkHit]] = []
-        if mode in (SearchMode.FULLTEXT, SearchMode.HYBRID):
-            lexical_query = " ".join(filter(None, [query, umlaut_variant(query)]))
-            ranked_lists.append(
-                await self._search.search_fulltext(lexical_query, scope, CANDIDATES_PER_LIST)
+        lexical_query = " ".join(filter(None, [query, umlaut_variant(query)]))
+        # Both branches run concurrently; if one fails, the TaskGroup cancels the other.
+        async with asyncio.TaskGroup() as group:
+            lexical = (
+                group.create_task(
+                    self._search.search_fulltext(lexical_query, scope, CANDIDATES_PER_LIST)
+                )
+                if mode in (SearchMode.FULLTEXT, SearchMode.HYBRID)
+                else None
             )
-        if mode in (SearchMode.VECTOR, SearchMode.HYBRID):
-            vector = await self._embeddings.embed_query(query)
-            ranked_lists.append(
-                await self._search.search_vector(vector, scope, CANDIDATES_PER_LIST)
+            semantic = (
+                group.create_task(self._semantic(query, scope))
+                if mode in (SearchMode.VECTOR, SearchMode.HYBRID)
+                else None
             )
-        return aggregate_by_document(reciprocal_rank_fusion(ranked_lists))[:top_k]
+        ranked_lists, weights = [], []
+        if lexical is not None:
+            ranked_lists.append(lexical.result())
+            weights.append(self._fulltext_weight)
+        if semantic is not None:
+            ranked_lists.append(semantic.result())
+            weights.append(1.0)
+        fused = reciprocal_rank_fusion(ranked_lists, weights=weights)
+        return aggregate_by_document(fused)[:top_k]

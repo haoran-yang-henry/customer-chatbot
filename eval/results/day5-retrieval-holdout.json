@@ -1,0 +1,629 @@
+{
+  "mode": "hybrid",
+  "embedding_model": "text-embedding-3-small",
+  "k": 5,
+  "cases": 28,
+  "recall_at_k": 1.0,
+  "mrr": 0.8720238095238095,
+  "by_category": {
+    "normal": 1.0
+  },
+  "results": [
+    {
+      "case_id": "R-001",
+      "category": "normal",
+      "query": "Muss ich für die Retoure was zahlen?",
+      "expected": [
+        "policy-returns-v5"
+      ],
+      "retrieved": [
+        "faq-refund-timeline",
+        "info-shipping-international",
+        "policy-returns-v5",
+        "info-shipping-costs",
+        "policy-warranty",
+        "faq-delivery-problems",
+        "policy-order-cancellation",
+        "faq-invoice",
+        "faq-payment-failed",
+        "policy-return-exceptions"
+      ],
+      "recall": 1.0,
+      "reciprocal_rank": 0.3333333333333333
+    },
+    {
+      "case_id": "R-002",
+      "category": "normal",
+      "query": "Wie lange kann ich eine Retoure anmelden?",
+      "expected": [
+        "policy-returns-v5"
+      ],
+      "retrieved": [
+        "policy-returns-v5",
+        "faq-refund-timeline",
+        "policy-warranty",
+        "faq-delivery-problems",
+        "faq-invoice",
+        "policy-order-cancellation",
+        "policy-return-exceptions",
+        "policy-complaints",
+        "faq-account",
+        "faq-payment-failed"
+      ],
+      "recall": 1.0,
+      "reciprocal_rank": 1.0
+    },
+    {
+      "case_id": "R-003",
+      "category": "normal",
+      "query": "Retourenlabel ausdrucken, wo finde ich das?",
+      "expected": [
+        "policy-returns-v5"
+      ],
+      "retrieved": [
+        "policy-returns-v5",
+        "faq-delivery-problems",
+        "faq-invoice",
+        "policy-return-exceptions",
+        "faq-refund-timeline",
+        "policy-warranty",
+        "faq-account",
+        "faq-order-change",
+        "info-shipping-costs",
+        "policy-complaints"
+      ],
+      "recall": 1.0,
+      "reciprocal_rank": 1.0
+    },
+    {
+      "case_id": "R-004",
+      "category": "normal",
+      "query": "Wie lange habe ich Zeit, um eine Bestellung zurückzuschicken?",
+      "expected": [
+        "policy-returns-v5"
+      ],
+      "retrieved": [
+        "policy-order-cancellation",
+        "policy-returns-v5",
+        "faq-refund-timeline",
+        "faq-payment-failed",
+        "policy-warranty",
+        "faq-order-change",
+        "faq-account",
+        "faq-invoice",
+        "faq-delivery-problems",
+        "info-shipping-options"
+      ],
+      "recall": 1.0,
+      "reciprocal_rank": 0.5
+    },
+    {
+      "case_id": "R-005",
+      "category": "normal",
+      "query": "Ich möchte die Kopfhörer aus meiner Bestellung zurückgeben",
+      "expected": [
+        "policy-returns-v5"
+      ],
+      "retrieved": [
+        "policy-return-exceptions",
+        "policy-returns-v5",
+        "product-klangwerk-buds-s",
+        "policy-order-cancellation",
+        "faq-refund-timeline",
+        "faq-order-change",
+        "product-klangwerk-anc-700",
+        "faq-account",
+        "policy-warranty",
+        "faq-payment-failed"
+      ],
+      "recall": 1.0,
+      "reciprocal_rank": 0.5
+    },
+    {
+      "case_id": "R-006",
+      "category": "normal",
+      "query": "retoure kostn?",
+      "expected": [
+        "policy-returns-v5"
+      ],
+      "retrieved": [
+        "policy-returns-v5",
+        "faq-refund-timeline",
+        "policy-order-cancellation",
+        "info-shipping-costs",
+        "policy-warranty",
+        "faq-delivery-problems",
+        "policy-complaints",
+        "faq-invoice",
+        "policy-return-exceptions",
+        "product-nordbook-air-14"
+      ],
+      "recall": 1.0,
+      "reciprocal_rank": 1.0
+    },
+    {
+      "case_id": "R-007",
+      "category": "normal",
+      "query": "Bis wann kann ich das Teil noch zurückbringen?",
+      "expected": [
+        "policy-returns-v5"
+      ],
+      "retrieved": [
+        "faq-refund-timeline",
+        "policy-complaints",
+        "policy-returns-v5",
+        "policy-warranty",
+        "policy-return-exceptions",
+        "faq-delivery-problems",
+        "policy-order-cancellation",
+        "faq-order-change",
+        "info-customer-service-contact",
+        "info-shipping-costs"
+      ],
+      "recall": 1.0,
+      "reciprocal_rank": 0.3333333333333333
+    },
+    {
+      "case_id": "R-008",
+      "category": "normal",
+      "query": "Rücksendekosten Österreich",
+      "expected": [
+        "policy-returns-v5"
+      ],
+      "retrieved": [
+        "policy-returns-v5",
+        "info-shipping-costs",
+        "info-shipping-international",
+        "faq-delivery-problems",
+        "faq-refund-timeline",
+        "faq-invoice",
+        "policy-warranty",
+        "policy-order-cancellation",
+        "faq-order-change",
+        "policy-return-exceptions"
+      ],
+      "recall": 1.0,
+      "reciprocal_rank": 1.0
+    },
+    {
+      "case_id": "R-009",
+      "category": "normal",
+      "query": "kann ich mit klarna zahlen",
+      "expected": [
+        "info-payment-methods"
+      ],
+      "retrieved": [
+        "info-payment-methods",
+        "faq-payment-failed",
+        "faq-refund-timeline",
+        "info-shipping-international",
+        "policy-order-cancellation",
+        "faq-account",
+        "info-customer-service-contact",
+        "info-shipping-costs",
+        "policy-returns-v5",
+        "faq-delivery-problems"
+      ],
+      "recall": 1.0,
+      "reciprocal_rank": 1.0
+    },
+    {
+      "case_id": "R-010",
+      "category": "normal",
+      "query": "Nimmt ihr Nachnahme?",
+      "expected": [
+        "info-payment-methods"
+      ],
+      "retrieved": [
+        "info-payment-methods",
+        "policy-complaints",
+        "policy-returns-v5",
+        "faq-refund-timeline",
+        "policy-order-cancellation",
+        "faq-invoice",
+        "faq-delivery-problems",
+        "faq-order-change",
+        "info-shipping-costs",
+        "faq-payment-failed"
+      ],
+      "recall": 1.0,
+      "reciprocal_rank": 1.0
+    },
+    {
+      "case_id": "R-011",
+      "category": "normal",
+      "query": "Akzeptiert ihr American Express?",
+      "expected": [
+        "info-payment-methods"
+      ],
+      "retrieved": [
+        "info-payment-methods",
+        "faq-payment-failed",
+        "faq-delivery-problems",
+        "policy-order-cancellation",
+        "info-shipping-costs",
+        "info-shipping-international",
+        "faq-refund-timeline",
+        "policy-return-exceptions",
+        "faq-invoice",
+        "info-customer-service-contact"
+      ],
+      "recall": 1.0,
+      "reciprocal_rank": 1.0
+    },
+    {
+      "case_id": "R-012",
+      "category": "normal",
+      "query": "Was passiert, wenn mein Paket kaputt ankommt?",
+      "expected": [
+        "faq-delivery-problems"
+      ],
+      "retrieved": [
+        "faq-delivery-problems",
+        "policy-returns-v5",
+        "policy-order-cancellation",
+        "policy-warranty",
+        "policy-complaints",
+        "faq-payment-failed",
+        "faq-order-change",
+        "faq-refund-timeline",
+        "info-shipping-options",
+        "info-shipping-costs"
+      ],
+      "recall": 1.0,
+      "reciprocal_rank": 1.0
+    },
+    {
+      "case_id": "R-013",
+      "category": "normal",
+      "query": "Wie lange dauert es, bis das Geld wieder auf meinem Konto ist?",
+      "expected": [
+        "faq-refund-timeline"
+      ],
+      "retrieved": [
+        "faq-refund-timeline",
+        "faq-payment-failed",
+        "faq-account",
+        "faq-invoice",
+        "policy-order-cancellation",
+        "policy-returns-v5",
+        "info-payment-methods",
+        "faq-delivery-problems",
+        "policy-warranty",
+        "policy-complaints"
+      ],
+      "recall": 1.0,
+      "reciprocal_rank": 1.0
+    },
+    {
+      "case_id": "R-014",
+      "category": "normal",
+      "query": "Schickt ihr auch nach Wien?",
+      "expected": [
+        "info-shipping-international"
+      ],
+      "retrieved": [
+        "info-shipping-international",
+        "info-shipping-costs",
+        "info-shipping-options",
+        "policy-returns-v5",
+        "faq-order-change",
+        "faq-delivery-problems",
+        "policy-complaints",
+        "faq-invoice",
+        "product-voltpack-20",
+        "info-payment-methods"
+      ],
+      "recall": 1.0,
+      "reciprocal_rank": 1.0
+    },
+    {
+      "case_id": "R-015",
+      "category": "normal",
+      "query": "Grüezi, was kostet de Versand i d'Schwiiz?",
+      "expected": [
+        "info-shipping-international"
+      ],
+      "retrieved": [
+        "info-shipping-international",
+        "info-shipping-costs",
+        "faq-invoice",
+        "info-shipping-options",
+        "faq-order-change",
+        "policy-returns-v5",
+        "faq-delivery-problems",
+        "faq-refund-timeline",
+        "policy-warranty",
+        "policy-order-cancellation"
+      ],
+      "recall": 1.0,
+      "reciprocal_rank": 1.0
+    },
+    {
+      "case_id": "R-016",
+      "category": "normal",
+      "query": "Do you ship to Austria?",
+      "expected": [
+        "info-shipping-international"
+      ],
+      "retrieved": [
+        "info-shipping-international",
+        "info-shipping-costs",
+        "policy-returns-v5",
+        "info-shipping-options",
+        "faq-order-change",
+        "info-customer-service-contact",
+        "faq-delivery-problems",
+        "info-payment-methods",
+        "policy-order-cancellation",
+        "product-nordbook-air-14"
+      ],
+      "recall": 1.0,
+      "reciprocal_rank": 1.0
+    },
+    {
+      "case_id": "R-017",
+      "category": "normal",
+      "query": "Hält der Akku von den Over-Ear-Kopfhörern lange?",
+      "expected": [
+        "product-klangwerk-anc-700"
+      ],
+      "retrieved": [
+        "product-klangwerk-anc-700",
+        "product-klangwerk-buds-s",
+        "policy-return-exceptions",
+        "product-voltpack-20",
+        "policy-returns-v5",
+        "faq-guarantee-vs-warranty",
+        "info-payment-methods",
+        "product-nordbook-air-14",
+        "product-velto-watch-3",
+        "info-customer-service-contact"
+      ],
+      "recall": 1.0,
+      "reciprocal_rank": 1.0
+    },
+    {
+      "case_id": "R-018",
+      "category": "normal",
+      "query": "KW-ANC700 Akkulaufzeit",
+      "expected": [
+        "product-klangwerk-anc-700"
+      ],
+      "retrieved": [
+        "product-klangwerk-anc-700",
+        "product-klangwerk-buds-s",
+        "product-nordbook-air-14",
+        "product-velto-watch-3",
+        "product-voltpack-20",
+        "info-customer-service-contact",
+        "policy-returns-v5",
+        "info-payment-methods",
+        "product-velto-x2",
+        "policy-privacy"
+      ],
+      "recall": 1.0,
+      "reciprocal_rank": 1.0
+    },
+    {
+      "case_id": "R-019",
+      "category": "normal",
+      "query": "Kann ich mit der Uhr schwimmen gehen?",
+      "expected": [
+        "product-velto-watch-3"
+      ],
+      "retrieved": [
+        "product-velto-watch-3",
+        "community-velto-watch-pairing-tip",
+        "info-customer-service-contact",
+        "product-klangwerk-buds-s",
+        "policy-return-exceptions",
+        "policy-returns-v5",
+        "faq-account",
+        "product-klangwerk-anc-700",
+        "policy-warranty",
+        "product-voltpack-20"
+      ],
+      "recall": 1.0,
+      "reciprocal_rank": 1.0
+    },
+    {
+      "case_id": "R-020",
+      "category": "normal",
+      "query": "Wie schwer ist das NordBook?",
+      "expected": [
+        "product-nordbook-air-14"
+      ],
+      "retrieved": [
+        "product-nordbook-air-14",
+        "info-payment-methods",
+        "product-velto-x2",
+        "product-voltpack-20",
+        "info-customer-service-contact",
+        "product-klangwerk-anc-700",
+        "info-shipping-costs",
+        "product-velto-watch-3",
+        "policy-returns-v5",
+        "faq-refund-timeline"
+      ],
+      "recall": 1.0,
+      "reciprocal_rank": 1.0
+    },
+    {
+      "case_id": "R-021",
+      "category": "normal",
+      "query": "Passwort vergessen, was tun?",
+      "expected": [
+        "faq-account"
+      ],
+      "retrieved": [
+        "faq-account",
+        "faq-delivery-problems",
+        "faq-payment-failed",
+        "policy-complaints",
+        "info-customer-service-contact",
+        "policy-returns-v5",
+        "faq-order-change",
+        "community-velto-watch-pairing-tip",
+        "policy-order-cancellation",
+        "policy-warranty"
+      ],
+      "recall": 1.0,
+      "reciprocal_rank": 1.0
+    },
+    {
+      "case_id": "R-022",
+      "category": "normal",
+      "query": "Ich hätte gern eine Rechnung für meine Firma",
+      "expected": [
+        "faq-invoice"
+      ],
+      "retrieved": [
+        "faq-invoice",
+        "faq-refund-timeline",
+        "info-payment-methods",
+        "policy-complaints",
+        "faq-account",
+        "policy-returns-v5",
+        "info-customer-service-contact",
+        "policy-order-cancellation",
+        "faq-payment-failed",
+        "info-shipping-costs"
+      ],
+      "recall": 1.0,
+      "reciprocal_rank": 1.0
+    },
+    {
+      "case_id": "R-023",
+      "category": "normal",
+      "query": "Mein Laptop ist nach 8 Monaten kaputt gegangen",
+      "expected": [
+        "policy-warranty"
+      ],
+      "retrieved": [
+        "product-nordbook-air-14",
+        "policy-warranty",
+        "info-customer-service-contact",
+        "info-payment-methods",
+        "faq-delivery-problems",
+        "policy-returns-v5",
+        "faq-refund-timeline",
+        "policy-complaints",
+        "faq-payment-failed",
+        "policy-return-exceptions"
+      ],
+      "recall": 1.0,
+      "reciprocal_rank": 0.5
+    },
+    {
+      "case_id": "R-024",
+      "category": "normal",
+      "query": "Hotline Öffnungszeiten Samstag",
+      "expected": [
+        "info-customer-service-contact"
+      ],
+      "retrieved": [
+        "info-customer-service-contact",
+        "policy-complaints",
+        "policy-privacy",
+        "policy-returns-v5",
+        "faq-invoice",
+        "faq-account",
+        "faq-order-change",
+        "faq-delivery-problems",
+        "faq-payment-failed",
+        "policy-order-cancellation"
+      ],
+      "recall": 1.0,
+      "reciprocal_rank": 1.0
+    },
+    {
+      "case_id": "R-025",
+      "category": "normal",
+      "query": "Wie storniere ich meine Bestellung?",
+      "expected": [
+        "policy-order-cancellation"
+      ],
+      "retrieved": [
+        "policy-order-cancellation",
+        "faq-order-change",
+        "faq-payment-failed",
+        "faq-refund-timeline",
+        "faq-account",
+        "policy-returns-v5",
+        "policy-warranty",
+        "faq-invoice",
+        "faq-delivery-problems",
+        "policy-complaints"
+      ],
+      "recall": 1.0,
+      "reciprocal_rank": 1.0
+    },
+    {
+      "case_id": "R-026",
+      "category": "normal",
+      "query": "Kann man die Lieferadresse nachträglich ändern?",
+      "expected": [
+        "faq-order-change"
+      ],
+      "retrieved": [
+        "faq-order-change",
+        "faq-invoice",
+        "faq-delivery-problems",
+        "policy-order-cancellation",
+        "faq-account",
+        "info-shipping-international",
+        "policy-returns-v5",
+        "policy-warranty",
+        "info-shipping-costs",
+        "faq-payment-failed"
+      ],
+      "recall": 1.0,
+      "reciprocal_rank": 1.0
+    },
+    {
+      "case_id": "R-027",
+      "category": "normal",
+      "query": "Darf ich In-Ear-Kopfhörer nach dem Öffnen zurückschicken?",
+      "expected": [
+        "policy-return-exceptions"
+      ],
+      "retrieved": [
+        "policy-return-exceptions",
+        "product-klangwerk-buds-s",
+        "product-klangwerk-anc-700",
+        "policy-returns-v5",
+        "faq-refund-timeline",
+        "faq-delivery-problems",
+        "policy-warranty",
+        "faq-account",
+        "policy-order-cancellation",
+        "policy-complaints"
+      ],
+      "recall": 1.0,
+      "reciprocal_rank": 1.0
+    },
+    {
+      "case_id": "R-028",
+      "category": "normal",
+      "query": "Expressversand Kosten",
+      "expected": [
+        "info-shipping-options"
+      ],
+      "retrieved": [
+        "info-shipping-costs",
+        "info-shipping-international",
+        "policy-returns-v5",
+        "info-shipping-options",
+        "faq-invoice",
+        "faq-delivery-problems",
+        "faq-order-change",
+        "faq-refund-timeline",
+        "policy-order-cancellation",
+        "policy-warranty"
+      ],
+      "recall": 1.0,
+      "reciprocal_rank": 0.25
+    }
+  ]
+}

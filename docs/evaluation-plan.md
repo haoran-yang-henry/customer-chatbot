@@ -34,6 +34,7 @@
 | File | Content | Introduced |
 |---|---|---|
 | `eval/datasets/core.jsonl` | Main German dataset (~70 cases) | D1 |
+| `eval/datasets/retrieval_holdout.jsonl` | Held-out retrieval questions (28 cases) to confirm retrieval tuning | D5 |
 | `eval/datasets/redteam.jsonl` | Extended adversarial set (~30 cases) | D6 |
 
 Datasets are versioned in git. A case's `id` never changes meaning; to change expectations,
@@ -122,6 +123,10 @@ and hybrid search and reports Recall@5 and MRR (ranking depth 10) per mode and p
 - Metrics are document-level: chunks are aggregated to their document before scoring.
 - With 37 cases, one miss moves Recall@5 by ~0.03. Tuning retrieval parameters against this set
   overfits it; parameter changes should be confirmed on new cases first.
+- Since Day 5 that confirmation set exists: `retrieval_holdout.jsonl` (28 questions, none
+  shared with `core.jsonl`, enforced by a data test). Run it with
+  `uv run customer-agent-eval-retrieval --dataset eval/datasets/retrieval_holdout.jsonl`. First
+  use: the full-text weight in RRF ([architecture §6.4](architecture.md#64-retrieval)).
 
 ## 5. LLM-as-judge
 

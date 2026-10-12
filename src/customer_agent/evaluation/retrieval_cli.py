@@ -22,6 +22,11 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--dataset", type=Path, required=True)
     parser.add_argument("--mode", choices=[*SearchMode, "all"], default="all")
     parser.add_argument("--k", type=int, default=5)
+    parser.add_argument(
+        "--fulltext-weight",
+        type=float,
+        help="RRF weight of the full-text list (vector = 1.0); default from settings",
+    )
     parser.add_argument("--out", type=Path, help="Write the hybrid (or single-mode) report here.")
     return parser.parse_args(argv)
 
@@ -44,7 +49,14 @@ async def _run(args: argparse.Namespace) -> list[RetrievalReport]:
     embeddings = None
     try:
         embeddings = create_embedding_provider(settings)
-        service = RetrievalService(create_knowledge_repository(engine), embeddings)
+        weight = (
+            args.fulltext_weight
+            if args.fulltext_weight is not None
+            else settings.retrieval_fulltext_weight
+        )
+        service = RetrievalService(
+            create_knowledge_repository(engine), embeddings, fulltext_weight=weight
+        )
         return [
             await run_retrieval_evaluation(
                 cases, service, scope, mode=m, embedding_model=embeddings.model_name, k=args.k

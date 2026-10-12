@@ -11,9 +11,9 @@ from customer_agent.infrastructure.knowledge_files import load_knowledge_directo
 from tests.conftest import CORE_DATASET, KNOWLEDGE_DIR, REFERENCE_DATE, SEED_DIR, TENANT_ID
 
 
-@pytest.fixture(scope="module")
-def cases() -> list[EvalCase]:
-    return load_dataset(CORE_DATASET)
+@pytest.fixture(scope="module", params=["core.jsonl", "retrieval_holdout.jsonl"])
+def cases(request: pytest.FixtureRequest) -> list[EvalCase]:
+    return load_dataset(CORE_DATASET.parent / request.param)
 
 
 @pytest.fixture(scope="module")
@@ -21,10 +21,17 @@ def documents_by_id() -> dict[str, KnowledgeDocument]:
     return {doc.meta.id: doc for doc in load_knowledge_directory(KNOWLEDGE_DIR)}
 
 
-def test_every_category_is_covered(cases: list[EvalCase]) -> None:
-    counts = Counter(case.category for case in cases)
+def test_every_category_is_covered() -> None:
+    counts = Counter(case.category for case in load_dataset(CORE_DATASET))
 
     assert set(counts) == set(Category)
+
+
+def test_holdout_shares_no_question_with_core() -> None:
+    core = {c.turns[-1].content for c in load_dataset(CORE_DATASET)}
+    holdout = load_dataset(CORE_DATASET.parent / "retrieval_holdout.jsonl")
+
+    assert not core & {c.turns[-1].content for c in holdout}
 
 
 def test_expected_sources_are_retrievable_and_trusted(
