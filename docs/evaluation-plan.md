@@ -248,11 +248,13 @@ The end-of-day run is copied to `eval/results/dayN.json` and committed.
 |---|---|---|
 | Pull request | Smoke subset (~20 cases, tagged in D8) | Gated pass rate ≥ threshold; no adversarial failures |
 | Nightly / manual | Full `core.jsonl` + `redteam.jsonl` | Report only; regressions open an issue |
+| Every push and pull request (Day 6) | Security job: gitleaks (full git history), Trivy (dependencies, secrets, misconfigurations in the tree; HIGH/CRITICAL), pip-audit (locked dependencies) | Any finding fails the build |
 
 CI still runs the harness against the placeholder agent (no secrets in CI yet), which verifies
 that dataset and harness stay valid. The real-agent smoke gate is added on Day 8.
 `make eval` runs the real agent locally with an on-disk LLM cache (`.cache/llm`);
-`make eval-redteam` does the same for the red-team set.
+`make eval-redteam` does the same for the red-team set, and `make audit` runs the security
+scans of the CI job.
 
 ## 8. Dataset governance
 

@@ -11,9 +11,10 @@ Customers write German; the agent answers in German. Code and documentation are 
 > injection heuristics and an LLM classifier in front of the router, personal data masked
 > before any model or log sees it, untrusted documents quoted as data, answers checked for
 > leaks, language and unverifiable links or codes. Measured on a red-team set (attack success
-> 2.7 %, no false positives). Authenticated customers (Keycloak, OIDC) get order-specific
-> guidance from read-only order data and can be handed over to a human with a ticket
-> ([API](docs/api.md)). Observability and resilience follow on Day 7. See the [development plan](docs/development-plan.md).
+> 2.7 %, no false positives); CI scans for secrets and vulnerable dependencies. Authenticated
+> customers (Keycloak, OIDC) get order-specific guidance from read-only order data and can be
+> handed over to a human with a ticket ([API](docs/api.md)). Observability and resilience
+> follow on Day 7. See the [development plan](docs/development-plan.md).
 
 ## Documentation
 
@@ -46,6 +47,7 @@ make ingest            # index data/knowledge (idempotent)
 make eval-retrieval    # Recall@5 / MRR for fulltext, vector and hybrid search
 make eval              # end-to-end evaluation of the real agent + groundedness judge
 make eval-redteam      # red-team set: attack success and guardrail false-positive rates
+make audit             # gitleaks, Trivy and pip-audit, as in the CI security job
 make run               # API on http://localhost:8000 (docs at /docs), live logs in the terminal
 ```
 

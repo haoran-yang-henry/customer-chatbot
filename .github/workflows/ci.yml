@@ -9,13 +9,21 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Least privilege: no job writes to the repository (Day 6 hardening).
+permissions:
+  contents: read
+
+# Actions are pinned to commit SHAs (tags can be moved by whoever controls the action
+# repository); the comment names the release. Container images are pinned by digest.
 jobs:
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
         with:
           enable-cache: true
       - name: Install dependencies
@@ -31,8 +39,37 @@ jobs:
       - name: Integration tests (Testcontainers, Docker is preinstalled on the runner)
         run: uv run pytest -m integration
       - name: Evaluation harness smoke test (placeholder agent; real-agent gate on Day 8)
-        run: uv run customer-agent-eval --dataset eval/datasets/core.jsonl --day 1 --out eval-result.json
-      - uses: actions/upload-artifact@v4
+        run: |
+          uv run customer-agent-eval --dataset eval/datasets/core.jsonl --day 1 --out eval-result.json
+          uv run customer-agent-eval --dataset eval/datasets/redteam.jsonl --day 1 --out redteam-result.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: eval-result
-          path: eval-result.json
+          path: |
+            eval-result.json
+            redteam-result.json
+
+  security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0 # gitleaks scans the whole history, not just the last commit
+          persist-credentials: false
+      - name: Secrets in git history (gitleaks)
+        run: >-
+          docker run --rm -v "$PWD:/repo:ro"
+          zricethezav/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
+          git /repo --redact --no-banner
+      - name: Vulnerabilities, secrets and misconfigurations in the tree (Trivy)
+        run: >-
+          docker run --rm -v "$PWD:/repo:ro"
+          aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969
+          fs --scanners vuln,secret,misconfig --severity HIGH,CRITICAL --exit-code 1
+          --skip-version-check /repo
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+      - name: Known vulnerabilities in locked dependencies (pip-audit)
+        run: |
+          uv export --locked --format requirements-txt --no-emit-project --all-groups -o requirements-audit.txt
+          uvx --from pip-audit==2.10.1 pip-audit -r requirements-audit.txt --require-hashes --disable-pip

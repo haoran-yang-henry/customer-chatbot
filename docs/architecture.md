@@ -497,6 +497,7 @@ statuses: `pending_payment → paid → processing → shipped → delivered`, p
 | Logging | `customer_agent.observability`: one format, request id via `ContextVar` (also while streaming), `key=value` messages with per-step timings; `CA_LOG_LEVEL` | D3 |
 | Authentication | Keycloak (OIDC), RS256 JWT verified via JWKS; claims `customer_id`, `tenant_id` ([ADR-0010](adr/0010-oidc-authentication-with-keycloak.md)) | D5 |
 | Guardrails | Input heuristics, LLM classifier, untrusted evidence quoted, output checks; personal data masked before models, transcript and logs ([ADR-0011](adr/0011-layered-guardrails.md)) | D6 |
+| Supply chain | `uv.lock` with hashes; CI security job: gitleaks (history), Trivy (tree), pip-audit (lock); GitHub Actions pinned by commit SHA, container images by digest; least-privilege `GITHUB_TOKEN` | D6 |
 | Observability | OpenTelemetry traces, JSON logs with correlation ids, Prometheus metrics | D7 |
 | Resilience | Timeouts, retries with backoff, fallbacks to handoff | D7 |
 | Testing | Unit (domain, policies) → integration (Postgres) → eval (LLM) → e2e; see [ADR-0004](adr/0004-evaluation-first-with-versioned-datasets.md) | D1+ |
