@@ -219,6 +219,10 @@ class TicketService(Protocol):
         """Returns the public ticket number, e.g. ``T-000042``."""
         ...
 
+    async def recent(self, *, customer_id: str, tenant_id: str) -> list[str]:
+        """Ticket numbers of this customer from the last 24 hours, newest first (rate limit)."""
+        ...
+
 
 class AuditEntry(BaseModel):
     model_config = ConfigDict(frozen=True)

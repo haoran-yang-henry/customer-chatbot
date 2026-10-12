@@ -61,7 +61,9 @@ async def test_cache_answers_identical_requests_from_disk(tmp_path: Path) -> Non
         ("router", 1),
         ("router", 2),
         ("router", 3),
+        ("router", 4),
         ("judge", 1),
+        ("guard", 1),
     ],
 )
 def test_shipped_prompts_load(name: str, version: int) -> None:

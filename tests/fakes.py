@@ -24,6 +24,7 @@ from customer_agent.domain.session import SessionState
 from customer_agent.infrastructure.memory import InMemoryAuditLog, InMemoryTicketService
 
 if TYPE_CHECKING:
+    from customer_agent.application.guardrails.classifier import PromptAttackClassifier
     from customer_agent.application.orchestrator import ConversationOrchestrator
 
 
@@ -216,6 +217,8 @@ def make_orchestrator(
     tickets: InMemoryTicketService | None = None,
     audit: InMemoryAuditLog | None = None,
     today: date = date(2026, 10, 5),
+    classifier: "PromptAttackClassifier | None" = None,
+    max_tickets_per_day: int = 3,
 ) -> "ConversationOrchestrator":
     from customer_agent.application.answering import AnswerService
     from customer_agent.application.orchestrator import ConversationOrchestrator
@@ -231,11 +234,13 @@ def make_orchestrator(
         min_similarity=0.35,
     )
     return ConversationOrchestrator(
-        IntentRouter(llm, load_prompt("router", 3)),
+        IntentRouter(llm, load_prompt("router", 4)),
         answers,
         orders=orders or SeedOrderRepository(),
         tickets=tickets or InMemoryTicketService(),
         audit=audit or InMemoryAuditLog(),
         clock=FixedClock(today),
         tenant_id="nordelektro",
+        classifier=classifier,
+        max_tickets_per_day=max_tickets_per_day,
     )

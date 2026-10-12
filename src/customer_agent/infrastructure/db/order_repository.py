@@ -1,11 +1,11 @@
 """PostgreSQL adapters for orders (read-only), tickets and the audit log."""
 
 from collections.abc import Sequence
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -59,6 +59,20 @@ class PostgresTicketService:
             session.add(row)
             await session.flush()  # assigns the identity value
             return f"T-{row.id:06d}"
+
+    async def recent(self, *, customer_id: str, tenant_id: str) -> list[str]:
+        # The database clock decides "the last 24 hours", like it stamps created_at.
+        stmt = (
+            select(TicketRow.id)
+            .where(
+                TicketRow.customer_id == customer_id,
+                TicketRow.tenant_id == tenant_id,
+                TicketRow.created_at > func.now() - timedelta(hours=24),
+            )
+            .order_by(TicketRow.id.desc())
+        )
+        async with self._sessions() as session:
+            return [f"T-{ticket_id:06d}" for ticket_id in await session.scalars(stmt)]
 
 
 class PostgresAuditLog:

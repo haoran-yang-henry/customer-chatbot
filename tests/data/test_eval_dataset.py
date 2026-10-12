@@ -11,7 +11,7 @@ from customer_agent.infrastructure.knowledge_files import load_knowledge_directo
 from tests.conftest import CORE_DATASET, KNOWLEDGE_DIR, REFERENCE_DATE, SEED_DIR, TENANT_ID
 
 
-@pytest.fixture(scope="module", params=["core.jsonl", "retrieval_holdout.jsonl"])
+@pytest.fixture(scope="module", params=["core.jsonl", "retrieval_holdout.jsonl", "redteam.jsonl"])
 def cases(request: pytest.FixtureRequest) -> list[EvalCase]:
     return load_dataset(CORE_DATASET.parent / request.param)
 

@@ -7,12 +7,13 @@ cancellation, returns) behind explicit authorization, policy checks and confirma
 Customers write German; the agent answers in German. Code and documentation are in English
 ([ADR-0003](docs/adr/0003-german-language-strategy.md)).
 
-> **Status: Day 5 of 8** — authenticated customers (Keycloak, OIDC) get order-specific guidance
-> (status, cancellation and return eligibility, refunds) from read-only order data, can be
-> handed over to a human with a ticket, and every tool call is audited. Knowledge questions are
-> answered from the governed knowledge base with citations ([API](docs/api.md)). Guardrails and
-> red teaming follow on Day 6. See the
-> [development plan](docs/development-plan.md).
+> **Status: Day 6 of 8** — layered guardrails ([ADR-0011](docs/adr/0011-layered-guardrails.md)):
+> injection heuristics and an LLM classifier in front of the router, personal data masked
+> before any model or log sees it, untrusted documents quoted as data, answers checked for
+> leaks, language and unverifiable links or codes. Measured on a red-team set (attack success
+> 2.7 %, no false positives). Authenticated customers (Keycloak, OIDC) get order-specific
+> guidance from read-only order data and can be handed over to a human with a ticket
+> ([API](docs/api.md)). Observability and resilience follow on Day 7. See the [development plan](docs/development-plan.md).
 
 ## Documentation
 
@@ -44,6 +45,7 @@ make token USER=anna.schneider  # access token for a test customer (see infra/ke
 make ingest            # index data/knowledge (idempotent)
 make eval-retrieval    # Recall@5 / MRR for fulltext, vector and hybrid search
 make eval              # end-to-end evaluation of the real agent + groundedness judge
+make eval-redteam      # red-team set: attack success and guardrail false-positive rates
 make run               # API on http://localhost:8000 (docs at /docs), live logs in the terminal
 ```
 
@@ -64,6 +66,7 @@ tests/                unit and data validation tests
 |---|---|---|
 | D1 | n/a (0 cases due) | Placeholder agent: 3/71 overall; harness and dataset validated |
 | D2 | n/a (0 cases due) | Retrieval only, see below |
+| D6 | **69/71 (97 %)** | Adversarial 8/8 (S-007 fixed). Red team: attack success 1/37 (2.7 %; 3/37 without the LLM classifier), guardrail false positives 0/12 (core: 0/63), no harmful output. Open: A-004, G-004 (router intents, nothing disclosed) |
 | D5 | **65/66 (98 %)** | Intent 65/65, tools 14/14, sources 36/36; groundedness 29/29 on knowledge answers (uncalibrated). Open: S-007 (Day 6) |
 | D4 | **45/47 (96 %)** | After review fixes (clean cache): intent accuracy 62/65 (95 %); groundedness 31/31 on Day-4 answers (uncalibrated). An earlier 47/47 was measured on a partly stale cache |
 | D3 | **32/32 (100 %)** | Real agent (`deepseek-v4-flash`, prompt `answer/v2`); groundedness 23/24 on Day-3 answers (judge, uncalibrated) |
@@ -75,6 +78,9 @@ tests/                unit and data validation tests
 | Full-text (German FTS) | 0.865 | 0.743 |
 | Vector | 0.973 | 0.944 |
 | Hybrid (RRF) | **0.973** | 0.876 |
+
+Day 5: weighted RRF (full-text weight 0.25) reaches 1.000 / 0.954 on 36 cases and 1.000 / 0.872
+on the held-out set ([architecture §6.4](docs/architecture.md#64-retrieval)).
 
 ## Roadmap
 

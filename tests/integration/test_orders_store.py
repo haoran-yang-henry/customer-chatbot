@@ -70,6 +70,35 @@ async def test_tickets_get_sequential_public_numbers(db: async_sessionmaker) -> 
     assert first.startswith("T-") and int(second[2:]) == int(first[2:]) + 1
 
 
+async def test_recent_tickets_are_per_customer_and_tenant_newest_first(
+    db: async_sessionmaker,  # type: ignore[type-arg]
+    engine: AsyncEngine,
+) -> None:
+    tickets = PostgresTicketService(db)
+
+    def new(customer_id: str, tenant_id: str = TENANT_ID) -> NewTicket:
+        return NewTicket(
+            tenant_id=tenant_id,
+            customer_id=customer_id,
+            session_id="s",
+            intent="HUMAN_AGENT",
+            order_id=None,
+            summary="x",
+        )
+
+    old = await tickets.create(new("C-1001"))
+    async with engine.begin() as connection:  # older than the 24-hour window
+        await connection.execute(
+            text("UPDATE tickets SET created_at = now() - interval '25 hours' WHERE id = :id"),
+            {"id": int(old[2:])},
+        )
+    first, second = await tickets.create(new("C-1001")), await tickets.create(new("C-1001"))
+    await tickets.create(new("C-1002"))
+    await tickets.create(new("C-1001", tenant_id="other-shop"))
+
+    assert await tickets.recent(customer_id="C-1001", tenant_id=TENANT_ID) == [second, first]
+
+
 async def test_audit_entries_are_appended(db: async_sessionmaker, engine: AsyncEngine) -> None:  # type: ignore[type-arg]
     entry = AuditEntry(
         tool="get_order_status",

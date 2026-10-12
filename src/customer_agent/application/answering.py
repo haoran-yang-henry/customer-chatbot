@@ -18,10 +18,13 @@ from customer_agent.application.citations import (
     is_no_answer,
 )
 from customer_agent.application.fallbacks import fallback
-from customer_agent.application.guardrails import check_output
+from customer_agent.application.guardrails import Evidence, check_output
+from customer_agent.application.guardrails.evidence import quote_untrusted
 from customer_agent.application.ports import ChatMessage, Clock, LLMProvider, Retriever
 from customer_agent.application.prompts import PromptTemplate
 from customer_agent.domain.conversation import AgentResponse, Behavior, Conversation, Role
+from customer_agent.domain.guardrails import GuardrailAction
+from customer_agent.domain.knowledge import TrustLevel
 from customer_agent.domain.retrieval import RetrievedDocument, SearchScope
 from customer_agent.observability import elapsed_ms, get_logger
 
@@ -60,14 +63,34 @@ def stateless_session_id(conversation: Conversation) -> str:
     return hashlib.sha256(seed.encode()).hexdigest()[:32]
 
 
+def _text(doc: RetrievedDocument) -> str:
+    return "\n\n".join(chunk.content for chunk in doc.chunks)
+
+
 def format_evidence(documents: list[RetrievedDocument]) -> str:
+    """Untrusted documents are quoted, with instruction-like lines dropped (T02, Day 6)."""
     blocks = []
     for doc in documents:
-        text = "\n\n".join(chunk.content for chunk in doc.chunks)
+        text = _text(doc)
+        if doc.trust_level is TrustLevel.UNTRUSTED:
+            text, dropped = quote_untrusted(text)
+            if dropped:
+                log.warning("untrusted document=%s dropped_lines=%d", doc.document_id, dropped)
         blocks.append(
             f'<document id="{doc.document_id}" trust="{doc.trust_level}">\n{text}\n</document>'
         )
     return "\n\n".join(blocks)
+
+
+def answer_evidence(documents: list[RetrievedDocument], conversation: Conversation) -> Evidence:
+    """What the answer may repeat verbatim (links, codes, numbers): see guardrails.output."""
+    trusted = [d for d in documents if d.trust_level is not TrustLevel.UNTRUSTED]
+    untrusted = [d for d in documents if d.trust_level is TrustLevel.UNTRUSTED]
+    return Evidence(
+        trusted="\n".join(_text(d) for d in trusted),
+        untrusted="\n".join(_text(d) for d in untrusted),
+        customer=search_query(conversation),
+    )
 
 
 def format_history(conversation: Conversation) -> str:
@@ -81,6 +104,7 @@ def format_history(conversation: Conversation) -> str:
 @dataclass(frozen=True)
 class _Prepared:
     documents: list[RetrievedDocument]
+    evidence: Evidence
     messages: list[ChatMessage]
     session_id: str
 
@@ -134,6 +158,7 @@ class AnswerService:
         )
         return _Prepared(
             documents=documents,
+            evidence=answer_evidence(documents, conversation),
             messages=[
                 ChatMessage(role="system", content=self._prompt.system),
                 ChatMessage(role="user", content=user),
@@ -141,19 +166,26 @@ class AnswerService:
             session_id=session or stateless_session_id(conversation),
         )
 
-    def _finish(self, raw: str, documents: list[RetrievedDocument]) -> AgentResponse:
+    def _finish(self, raw: str, prepared: _Prepared) -> AgentResponse:
         if is_no_answer(raw):
             log.info("no_answer reason=model_declined")
             return fallback(["model_declined"])
-        offered = {d.document_id for d in documents}
+        offered = {d.document_id for d in prepared.documents}
         answer, cited = extract_citations(raw)
-        decision = check_output(answer, cited, offered)
+        decision = check_output(
+            answer, cited, offered, prompt=self._prompt.system, evidence=prepared.evidence
+        )
         if decision.blocked:
             log.warning("output blocked reasons=%s", ",".join(decision.reasons))
             return fallback(decision.reasons)
+        if decision.action is GuardrailAction.REDACT and decision.content is not None:
+            log.warning("output redacted reasons=%s", ",".join(decision.reasons))
+            answer = decision.content
         sources = [c for c in cited if c in offered]
         log.info("answer sources=%s chars=%d", ",".join(sources), len(answer))
-        return AgentResponse(answer=answer, behavior=Behavior.ANSWER, sources=sources)
+        return AgentResponse(
+            answer=answer, behavior=Behavior.ANSWER, sources=sources, reasons=decision.reasons
+        )
 
     async def answer(
         self,
@@ -172,7 +204,7 @@ class AnswerService:
             temperature=TEMPERATURE,
             session_id=prepared.session_id,
         )
-        return self._finish(result.text, prepared.documents)
+        return self._finish(result.text, prepared)
 
     async def answer_stream(
         self,
@@ -196,4 +228,4 @@ class AnswerService:
                 yield TextDelta(text=text)
         if text := stream_filter.flush():
             yield TextDelta(text=text)
-        yield FinalAnswer(response=self._finish(stream_filter.raw, prepared.documents))
+        yield FinalAnswer(response=self._finish(stream_filter.raw, prepared))

@@ -1,9 +1,11 @@
 """Conversation orchestrator: the ``CustomerServiceAgent`` behind the API and the evaluation.
 
-One turn: input guardrail → intent router → state machine (``decide``) → handler. Order
-guidance with real order data (Day 5) and full guardrails (Day 6) plug in here.
+One turn: input guardrail → intent router ‖ attack classifier → state machine (``decide``) →
+handler (knowledge answer with output guardrail, order guidance, handoff). Guardrails judge;
+this class decides what the customer sees (ADR-0011).
 """
 
+import asyncio
 from collections.abc import AsyncIterator
 
 from pydantic import BaseModel, ConfigDict
@@ -14,8 +16,17 @@ from customer_agent.application.answering import (
     TextDelta,
     stateless_session_id,
 )
-from customer_agent.application.fallbacks import contact_reply, fallback, handoff_reply, step_reply
-from customer_agent.application.guardrails import check_input
+from customer_agent.application.fallbacks import (
+    PAYMENT_DATA_NOTICE,
+    contact_reply,
+    fallback,
+    handoff_pending_reply,
+    handoff_reply,
+    step_reply,
+    with_payment_data_notice,
+)
+from customer_agent.application.guardrails import PAYMENT_DATA_REASONS, check_input
+from customer_agent.application.guardrails.classifier import PromptAttackClassifier
 from customer_agent.application.order_guidance import order_guidance, order_not_found
 from customer_agent.application.ports import (
     AuditEntry,
@@ -26,8 +37,9 @@ from customer_agent.application.ports import (
     ProviderUnavailableError,
     TicketService,
 )
-from customer_agent.application.routing import IntentRouter
-from customer_agent.domain.conversation import AgentResponse, Conversation
+from customer_agent.application.routing import IntentRouter, route_by_rules
+from customer_agent.domain.conversation import AgentResponse, Conversation, Message, Role
+from customer_agent.domain.guardrails import GuardrailDecision
 from customer_agent.domain.intents import Intent
 from customer_agent.domain.routing import RoutingResult
 from customer_agent.domain.session import Decision, NextStep, SessionState, decide
@@ -37,12 +49,14 @@ log = get_logger("chat")
 
 
 class TurnResult(BaseModel):
-    """The agent's reply plus the session state to persist for the next turn."""
+    """The agent's reply plus what to persist for the next turn: the session state and the
+    customer message as the guardrail left it (personal data masked, never the raw text)."""
 
     model_config = ConfigDict(frozen=True)
 
     response: AgentResponse
     state: SessionState
+    user_text: str
 
 
 TurnEvent = TextDelta | TurnResult
@@ -59,6 +73,8 @@ class ConversationOrchestrator:
         audit: AuditLog,
         clock: Clock,
         tenant_id: str,
+        classifier: PromptAttackClassifier | None = None,
+        max_tickets_per_day: int | None = 3,  # None: no limit
     ) -> None:
         self._router = router
         self._answers = answers
@@ -67,6 +83,8 @@ class ConversationOrchestrator:
         self._audit = audit
         self._clock = clock
         self._tenant_id = tenant_id
+        self._classifier = classifier
+        self._max_tickets_per_day = max_tickets_per_day
 
     # --- CustomerServiceAgent (stateless; used by the evaluation) -------------------------
 
@@ -89,20 +107,72 @@ class ConversationOrchestrator:
     async def handle_stream(
         self, conversation: Conversation, state: SessionState, *, session_id: str
     ) -> AsyncIterator[TurnEvent]:
-        decision = check_input(conversation.messages[-1].content)
-        if decision.blocked:
-            log.info("input blocked reasons=%s", ",".join(decision.reasons))
-            yield TurnResult(response=fallback(decision.reasons), state=state)
+        raw = conversation.messages[-1].content
+        screen = check_input(raw)
+        text = screen.content if screen.content is not None else raw
+        if screen.blocked:
+            log.info("input blocked reasons=%s", ",".join(screen.reasons))
+            yield TurnResult(
+                response=_blocked_input_reply(screen),
+                state=state,
+                user_text=text or "[leere Nachricht]",
+            )
             return
+        if screen.reasons:
+            log.info("input redacted reasons=%s", ",".join(screen.reasons))
+        # From here on only the sanitised message exists: router, answer model, transcript.
+        sanitized = Message(role=Role.USER, content=text)
+        conversation = conversation.model_copy(
+            update={"messages": [*conversation.messages[:-1], sanitized]}
+        )
+        notice = not PAYMENT_DATA_REASONS.isdisjoint(screen.reasons)
+        if notice:
+            yield TextDelta(text=f"{PAYMENT_DATA_NOTICE}\n\n")
+        async for event in self._turn(conversation, state, session_id):
+            if notice and isinstance(event, TurnResult):
+                event = event.model_copy(
+                    update={"response": with_payment_data_notice(event.response)}
+                )
+            yield event
+
+    async def _turn(
+        self, conversation: Conversation, state: SessionState, session_id: str
+    ) -> AsyncIterator[TurnEvent]:
+        text = conversation.messages[-1].content
         try:
-            routing = await self._router.route(conversation, state, session_id=session_id)
+            routing, verdict = await self._route_and_screen(conversation, state, session_id)
+            if verdict is not None and verdict.blocked:
+                log.warning("input blocked by classifier reasons=%s", ",".join(verdict.reasons))
+                yield TurnResult(response=_vetoed(verdict, routing), state=state, user_text=text)
+                return
             step = decide(state, routing, authenticated=conversation.customer_id is not None)
             log.info("step=%s intent=%s workflow=%s", step.step, step.intent, step.state.workflow)
             async for event in self._execute(conversation, routing, step, session_id):
                 yield event
         except ProviderUnavailableError as exc:
             log.error("provider unavailable: %s", exc)
-            yield TurnResult(response=fallback(["provider_unavailable"]), state=state)
+            yield TurnResult(
+                response=fallback(["provider_unavailable"]), state=state, user_text=text
+            )
+
+    async def _route_and_screen(
+        self, conversation: Conversation, state: SessionState, session_id: str
+    ) -> tuple[RoutingResult, GuardrailDecision | None]:
+        """Router and classifier run concurrently: the classifier costs a call, not latency.
+        Rule-routed messages (a greeting, a bare order number) skip the classifier."""
+        if self._classifier is None or route_by_rules(conversation, state) is not None:
+            return await self._router.route(conversation, state, session_id=session_id), None
+        try:
+            async with asyncio.TaskGroup() as group:
+                routed = group.create_task(
+                    self._router.route(conversation, state, session_id=session_id)
+                )
+                screened = group.create_task(
+                    self._classifier.classify(conversation, session_id=session_id)
+                )
+        except ExceptionGroup as errors:  # keep ProviderUnavailableError catchable
+            raise errors.exceptions[0] from None
+        return routed.result(), screened.result()
 
     async def _execute(
         self,
@@ -114,7 +184,9 @@ class ConversationOrchestrator:
         def result(response: AgentResponse) -> TurnResult:
             final = response.model_copy(update={"intent": step.intent})
             log.info("behavior=%s sources=%s", final.behavior, ",".join(final.sources) or "-")
-            return TurnResult(response=final, state=step.state)
+            return TurnResult(
+                response=final, state=step.state, user_text=conversation.messages[-1].content
+            )
 
         match step.step:
             case NextStep.ORDER_GUIDANCE:
@@ -171,6 +243,23 @@ class ConversationOrchestrator:
     ) -> AgentResponse:
         order_id = routing.order_id or step.state.slots.get("order_id")
         message = conversation.messages[-1].content
+        customer_id = conversation.customer_id
+        if customer_id is not None and self._max_tickets_per_day is not None:
+            recent = await self._tickets.recent(customer_id=customer_id, tenant_id=self._tenant_id)
+            if len(recent) >= self._max_tickets_per_day:
+                # Rate limit on the only state-changing tool (T12): point to the open ticket.
+                await self._audit.record(
+                    AuditEntry(
+                        tool="create_ticket",
+                        customer_id=customer_id,
+                        session_id=session_id,
+                        request_id=request_id_var.get(),
+                        arguments={"order_id": order_id or "-", "intent": str(step.intent)},
+                        outcome=f"rate_limited:{recent[0]}",
+                    )
+                )
+                log.warning("ticket limit reached recent=%d", len(recent))
+                return handoff_pending_reply(recent[0], intent=step.intent)
         ticket_id = await self._tickets.create(
             NewTicket(
                 tenant_id=self._tenant_id,
@@ -193,3 +282,23 @@ class ConversationOrchestrator:
         )
         log.info("handoff ticket=%s intent=%s order_id=%s", ticket_id, step.intent, order_id)
         return handoff_reply(ticket_id, intent=step.intent)
+
+
+def _blocked_input_reply(screen: GuardrailDecision) -> AgentResponse:
+    response = fallback(screen.reasons)
+    if "prompt_injection" in screen.reasons:
+        # Taxonomy: attempts to change the assistant's instructions are OUT_OF_SCOPE.
+        return response.model_copy(update={"intent": Intent.OUT_OF_SCOPE})
+    return response
+
+
+def _vetoed(verdict: GuardrailDecision, routing: RoutingResult) -> AgentResponse:
+    """The classifier vetoes the step (no lookup, no ticket, no answer); the most specific
+    refusal the router's flags allow still applies."""
+    if routing.third_party:
+        response = step_reply("refuse_third_party")
+    elif routing.money_demand:
+        response = step_reply("refuse_money_demand")
+    else:
+        response = fallback(verdict.reasons)
+    return response.model_copy(update={"intent": routing.intent, "reasons": verdict.reasons})

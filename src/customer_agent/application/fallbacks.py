@@ -4,8 +4,17 @@ from customer_agent.domain.conversation import AgentResponse, Behavior
 from customer_agent.domain.intents import Intent
 
 _HANDOFF = "Gern verbinde ich Sie mit einem Mitarbeiter unseres Kundenservice."
+_SUPPORTED_TOPICS = (
+    "Gern beantworte ich Fragen zu Bestellungen, Versand, Rücksendungen, Zahlung, Garantie und "
+    "unseren Produkten."
+)
+# Same wording as any out-of-scope request: a refusal must not tell an attacker which detector
+# fired or how close the attempt came.
+_REFUSE = f"Dabei kann ich Ihnen leider nicht helfen. {_SUPPORTED_TOPICS}"
 
 _BY_REASON: dict[str, tuple[Behavior, str]] = {
+    "prompt_injection": (Behavior.REFUSE, _REFUSE),
+    "prompt_injection_llm": (Behavior.REFUSE, _REFUSE),
     "empty_input": (Behavior.CLARIFY, "Wie kann ich Ihnen helfen?"),
     "input_too_long": (
         Behavior.CLARIFY,
@@ -32,10 +41,13 @@ _STEP_REPLIES: dict[str, tuple[Behavior, str]] = {
         Behavior.ANSWER,
         "Guten Tag! Ich bin der digitale Assistent von NordElektro. Wie kann ich Ihnen helfen?",
     ),
-    "refuse_out_of_scope": (
+    "refuse_out_of_scope": (Behavior.REFUSE, _REFUSE),
+    # Money cannot be granted by the agent (ADR-0006), whatever is claimed (S-007, T07).
+    "refuse_money_demand": (
         Behavior.REFUSE,
-        "Dabei kann ich Ihnen leider nicht helfen. Gern beantworte ich Fragen zu Bestellungen, "
-        "Versand, Rücksendungen, Zahlung, Garantie und unseren Produkten.",
+        "Erstattungen, Gutschriften, Gutscheine oder Rabatte kann ich leider weder veranlassen "
+        "noch zusagen – auch nicht auf Grundlage von Absprachen, die ich nicht überprüfen kann. "
+        "Wenn Sie möchten, verbinde ich Sie gern mit einem Mitarbeiter, der Ihr Anliegen prüft.",
     ),
     "ask_order_id": (
         Behavior.CLARIFY,
@@ -102,6 +114,29 @@ def handoff_reply(ticket_id: str, *, intent: Intent | None) -> AgentResponse:
         intent=intent,
         tool_calls=["create_ticket"],
     )
+
+
+def handoff_pending_reply(ticket_id: str, *, intent: Intent | None) -> AgentResponse:
+    """The customer reached the ticket limit (Day 6): point to the open ticket instead of
+    opening another one, so a loop or a script cannot flood the service team."""
+    return AgentResponse(
+        answer=(
+            f"Ihr Anliegen liegt unseren Mitarbeitern bereits vor (Ticketnummer {ticket_id}). "
+            "Sie erhalten eine Rückmeldung, sobald sich ein Kollege darum gekümmert hat."
+        ),
+        behavior=Behavior.ESCALATE,
+        intent=intent,
+    )
+
+
+PAYMENT_DATA_NOTICE = (
+    "Hinweis: Bitte senden Sie keine Bank- oder Kartendaten und keine Zugangsdaten über den Chat. "
+    "Ich habe sie aus Ihrer Nachricht entfernt; sie werden nicht gespeichert."
+)
+
+
+def with_payment_data_notice(response: AgentResponse) -> AgentResponse:
+    return response.model_copy(update={"answer": f"{PAYMENT_DATA_NOTICE}\n\n{response.answer}"})
 
 
 def contact_reply(*, intent: Intent | None) -> AgentResponse:

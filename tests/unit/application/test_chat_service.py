@@ -98,3 +98,14 @@ async def test_session_of_another_tenant_is_not_found() -> None:
 
     with pytest.raises(SessionNotFoundError):
         await service(store).chat(foreign.session_id, "C-1001", "Hallo")
+
+
+async def test_transcript_stores_the_masked_message_never_the_raw_one() -> None:
+    store = InMemorySessionStore()
+
+    turn = await service(store).chat(
+        None, "C-1001", "Wo ist meine Bestellung? Rückruf unter 0171 2345678"
+    )
+
+    saved = store.sessions[turn.session_id].messages[0].content
+    assert saved == "Wo ist meine Bestellung? Rückruf unter [Telefonnummer entfernt]"

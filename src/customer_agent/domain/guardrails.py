@@ -25,3 +25,22 @@ class GuardrailDecision(BaseModel):
     @property
     def blocked(self) -> bool:
         return self.action is GuardrailAction.BLOCK
+
+
+# Reason codes of guardrail interventions, shared with the evaluation: a benign case whose
+# reply was blocked with one of these is a guardrail false positive (NFR-08).
+BLOCK_REASONS = frozenset(
+    {
+        "prompt_injection",
+        "prompt_injection_llm",
+        "input_too_long",
+        "missing_citation",
+        "answer_too_long",
+        "secret_in_output",
+        "prompt_leak",
+        "not_german",
+        "unverified_content",
+    }
+)
+# The reply was delivered, but changed (sentences removed, values masked).
+REDACTION_REASONS = frozenset({"unverified_content", "pii_in_output"})

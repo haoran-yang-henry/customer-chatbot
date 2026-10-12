@@ -6,7 +6,7 @@
 | **Owner** | Project author |
 | **Started** | 2026-10-05 |
 | **Planned duration** | 8 working days |
-| **Last updated** | 2026-10-07 |
+| **Last updated** | 2026-10-12 |
 
 ## 1. Purpose
 
@@ -282,3 +282,4 @@ the D8 CI gate.
 | 2026-10-07 | D4 done. T-011 → `HUMAN_AGENT` (ADR-0009); server-side sessions (client sends `session_id` + message); AI disclosure in greeting (FR-05); `CA_LLM_REASONING_EFFORT=none` after empty-output findings |
 | 2026-10-07 | Engineering review: fixed cache key, embedding timeout, turn loss on disconnect, lost updates (optimistic locking, 409), unclosed HTTP clients, unvalidated request ids, missing stream usage logging. P1 items scheduled: RFC 9457 errors, pure ASGI middleware, nested settings and per-role model settings (D5); pip-audit, gitleaks, Trivy (D6); structured logging, Langfuse, Dockerfile, liveness/readiness probes (D7); Renovate, coverage gate, arc42 docs (D8). P2: LangGraph spike (backlog) |
 | 2026-10-07 | D5 done. Keycloak/OIDC (ADR-0010); read-only orders with ownership in SQL; deterministic order guidance; tickets and audit log; router v3 (`third_party`); answer prompt v3; per-role LLM settings; RFC 9457 errors; pure ASGI middleware; weighted RRF (full-text weight 0.25, confirmed on the new `retrieval_holdout.jsonl`). Nested settings skipped (would rename every existing `CA_*` variable) |
+| 2026-10-12 | D6 done. Layered guardrails (ADR-0011): input heuristics, LLM classifier concurrent with the router, PII masking before LLM and transcript, untrusted documents quoted, output checks (prompt leak, German, unverifiable links and codes), ticket limit; router v4 (`money_demand`, S-007); red-team set (37 attacks, 12 benign controls) with attack success 2.7 % and a classifier ablation. Fixed a Day 5 regression (embedding outage escaped as `ExceptionGroup` → 500). D5 committed in four commits; first GitHub push and CI run |
