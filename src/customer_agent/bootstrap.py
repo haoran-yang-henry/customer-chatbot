@@ -63,7 +63,8 @@ def create_embedding_provider(settings: Settings) -> EmbeddingProvider:
     return provider
 
 
-def create_llm_provider(settings: Settings) -> LLMProvider:
+def create_llm_providers(settings: Settings) -> dict[str, LLMProvider]:
+    """One provider per role (``router``, ``answer``), sharing one HTTP client."""
     if settings.llm_api_key is None:
         raise ConfigurationError("CA_LLM_API_KEY is not set (see .env.example)")
     client = AsyncOpenAI(
@@ -73,22 +74,27 @@ def create_llm_provider(settings: Settings) -> LLMProvider:
         max_retries=1,
         default_headers={"User-Agent": settings.llm_user_agent},
     )
-    llm: LLMProvider = OpenAICompatibleLLM(
-        client,
-        settings.llm_model,
-        session_header=settings.llm_session_header,
-        reasoning_effort=settings.llm_reasoning_effort,
-    )
-    if settings.llm_cache_dir is not None:
-        namespace = "|".join(
-            [
-                settings.llm_base_url or "openai-default",
-                settings.llm_model,
-                f"reasoning={settings.llm_reasoning_effort}",
-            ]
+    roles = {
+        "router": (settings.router_llm_model, settings.router_reasoning_effort),
+        "answer": (settings.answer_llm_model, settings.answer_reasoning_effort),
+    }
+    providers: dict[str, LLMProvider] = {}
+    for role, (model_override, effort_override) in roles.items():
+        model = model_override or settings.llm_model
+        effort = effort_override or settings.llm_reasoning_effort
+        llm: LLMProvider = OpenAICompatibleLLM(
+            client, model, session_header=settings.llm_session_header, reasoning_effort=effort
         )
-        llm = CachingLLM(llm, settings.llm_cache_dir, namespace=namespace)
-    return llm
+        if settings.llm_cache_dir is not None:
+            namespace = f"{settings.llm_base_url or 'openai-default'}|{model}|reasoning={effort}"
+            llm = CachingLLM(llm, settings.llm_cache_dir, namespace=namespace)
+        providers[role] = llm
+    return providers
+
+
+def create_llm_provider(settings: Settings) -> LLMProvider:
+    """The answer-role provider (also used by the evaluation judge)."""
+    return create_llm_providers(settings)["answer"]
 
 
 @dataclass
@@ -98,43 +104,46 @@ class Container:
     engine: AsyncEngine
     agent: ConversationOrchestrator
     chat: ChatService
-    llm: LLMProvider
+    llms: dict[str, LLMProvider]
     embeddings: EmbeddingProvider
     prompts: dict[str, str]
 
     @property
-    def llm_model(self) -> str:
-        return self.llm.model_name
+    def models(self) -> dict[str, str]:
+        return {role: llm.model_name for role, llm in self.llms.items()}
 
     async def aclose(self) -> None:
         """Graceful shutdown: let in-flight turns finish, then release connections."""
         await self.chat.drain()
-        await aclose_all(self.llm, self.embeddings)
+        # Both roles share one HTTP client; closing it once is enough, twice is harmless.
+        await aclose_all(*self.llms.values(), self.embeddings)
         await self.engine.dispose()
 
 
 def build_container(settings: Settings, clock: Clock | None = None) -> Container:
     engine = create_engine(settings)
     embeddings = create_embedding_provider(settings)
-    llm = create_llm_provider(settings)
+    llms = create_llm_providers(settings)
     answer_prompt = load_prompt("answer", settings.answer_prompt_version)
     router_prompt = load_prompt("router", settings.router_prompt_version)
     retrieval = RetrievalService(create_knowledge_repository(engine), embeddings)
     answers = AnswerService(
         retrieval,
-        llm,
+        llms["answer"],
         answer_prompt,
         clock or SystemClock(),
         tenant_id=settings.tenant_id,
         min_similarity=settings.min_answer_similarity,
+        top_k=settings.answer_top_k,
+        max_tokens=settings.answer_max_tokens,
     )
-    agent = ConversationOrchestrator(IntentRouter(llm, router_prompt), answers)
+    agent = ConversationOrchestrator(IntentRouter(llms["router"], router_prompt), answers)
     sessions = PostgresSessionStore(async_sessionmaker(engine, expire_on_commit=False))
     return Container(
         engine=engine,
         agent=agent,
         chat=ChatService(agent, sessions, tenant_id=settings.tenant_id),
-        llm=llm,
+        llms=llms,
         embeddings=embeddings,
         prompts={"answer": answer_prompt.ref, "router": router_prompt.ref},
     )

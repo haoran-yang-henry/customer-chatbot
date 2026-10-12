@@ -103,3 +103,28 @@ def test_concurrent_turn_is_409() -> None:
         response = c.post("/v1/chat", json={"session_id": "busy", "message": "Hallo"})
 
     assert response.status_code == 409
+
+
+def test_errors_are_rfc9457_problem_details() -> None:
+    with client(FakeChat()) as c:
+        response = c.post(
+            "/v1/chat",
+            json={"session_id": "missing", "message": "Hallo"},
+            headers={"x-request-id": "req-9"},
+        )
+
+    assert response.headers["content-type"] == "application/problem+json"
+    assert response.json() == {
+        "type": "about:blank",
+        "title": "Not Found",
+        "status": 404,
+        "detail": "session not found",
+        "request_id": "req-9",
+    }
+
+
+def test_validation_errors_list_the_offending_fields() -> None:
+    with client(FakeChat()) as c:
+        body = c.post("/v1/chat", json={"message": ""}).json()
+
+    assert body["status"] == 422 and body["errors"][0]["loc"] == ["body", "message"]

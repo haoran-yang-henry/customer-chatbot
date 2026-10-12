@@ -76,22 +76,17 @@ async def chat_stream(body: ChatRequest, service: Chat) -> StreamingResponse:
         raise _NOT_FOUND from None
 
     async def body_events() -> AsyncIterator[str]:
-        # The body is produced after the middleware returned; restore the request id for logs.
-        token = request_id_var.set(request_id)
-        try:
-            event: TextDelta | ChatTurn | None = first
-            while event is not None:
-                if isinstance(event, TextDelta):
-                    yield _sse("delta", {"text": event.text})
-                else:
-                    yield _sse("final", _response(event, request_id).model_dump(mode="json"))
-                try:
-                    event = await anext(events, None)
-                except ConcurrentTurnError:
-                    # The 200 status is already sent; report the conflict as a stream event.
-                    yield _sse("error", {"status": 409, "detail": _CONFLICT_DETAIL})
-                    return
-        finally:
-            request_id_var.reset(token)
+        event: TextDelta | ChatTurn | None = first
+        while event is not None:
+            if isinstance(event, TextDelta):
+                yield _sse("delta", {"text": event.text})
+            else:
+                yield _sse("final", _response(event, request_id).model_dump(mode="json"))
+            try:
+                event = await anext(events, None)
+            except ConcurrentTurnError:
+                # The 200 status is already sent; report the conflict as a stream event.
+                yield _sse("error", {"status": 409, "detail": _CONFLICT_DETAIL})
+                return
 
     return StreamingResponse(body_events(), media_type="text/event-stream")

@@ -12,6 +12,7 @@
 - Every response carries an `x-request-id` header. Clients may send their own `x-request-id`
   (1–64 characters `A-Z a-z 0-9 . _ -`; anything else is replaced by a generated id); it is used
   in all log lines of that request.
+- Errors are RFC 9457 Problem Details (`application/problem+json`) with an added `request_id`.
 - Authentication arrives on Day 5 (JWT bearer). Until then all requests are anonymous;
   `customer_id` is never accepted from the request body.
 

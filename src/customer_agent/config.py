@@ -36,6 +36,12 @@ class Settings(BaseSettings):
     llm_user_agent: str = "nordelektro-customer-agent/0.1.0"
     llm_session_header: str | None = None  # e.g. "x-opencode-session"
     llm_reasoning_effort: str | None = None  # e.g. "none" for OpenAI GPT-5 models
+    # Per-role overrides (None = use llm_model / llm_reasoning_effort). Routing must be fast and
+    # stable; answers may afford more reasoning.
+    router_llm_model: str | None = None
+    router_reasoning_effort: str | None = None
+    answer_llm_model: str | None = None
+    answer_reasoning_effort: str | None = None
     llm_cache_dir: Path | None = None  # evaluation only, see infrastructure/llm_cache.py
 
     # Answering (Day 3)
@@ -45,6 +51,8 @@ class Settings(BaseSettings):
     # "no answer" without an LLM call. Between this floor and clearly relevant scores the LLM
     # decides (it may reply KEINE_ANTWORT). Measured on Day 2/3, see architecture §6.4.
     min_answer_similarity: float = 0.35
+    answer_top_k: int = 4  # documents given to the answer prompt
+    answer_max_tokens: int = 800
 
     @field_validator(
         "openai_api_key",
@@ -52,6 +60,11 @@ class Settings(BaseSettings):
         "llm_api_key",
         "llm_base_url",
         "llm_cache_dir",
+        "llm_reasoning_effort",
+        "router_llm_model",
+        "router_reasoning_effort",
+        "answer_llm_model",
+        "answer_reasoning_effort",
         mode="before",
     )
     @classmethod

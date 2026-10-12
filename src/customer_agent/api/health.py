@@ -14,6 +14,6 @@ class HealthResponse(BaseModel):
 
 
 @router.get("/health")
-def health() -> HealthResponse:
+async def health() -> HealthResponse:
     """Liveness probe. Readiness (database, providers) is added on Day 2."""
     return HealthResponse(status="ok", version=__version__)

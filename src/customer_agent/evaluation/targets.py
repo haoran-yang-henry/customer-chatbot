@@ -36,7 +36,7 @@ async def _agent() -> AsyncIterator[Target]:
     container = build_container(settings, clock=FixedClock(DATASET_REFERENCE_DATE))
     try:
         config = {
-            "llm_model": container.llm_model,
+            **{f"{role}_model": model for role, model in container.models.items()},
             **{f"{name}_prompt": ref for name, ref in container.prompts.items()},
             "embedding_model": settings.embedding_model,
             "min_answer_similarity": str(settings.min_answer_similarity),

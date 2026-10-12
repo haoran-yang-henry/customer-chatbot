@@ -28,7 +28,6 @@ from customer_agent.observability import elapsed_ms, get_logger
 log = get_logger("answer")
 
 MAX_HISTORY_TURNS = 6
-MAX_ANSWER_TOKENS = 800
 TEMPERATURE = 0.1
 
 
@@ -97,6 +96,7 @@ class AnswerService:
         tenant_id: str,
         min_similarity: float,
         top_k: int = 4,
+        max_tokens: int = 800,
     ) -> None:
         self._retriever = retriever
         self._llm = llm
@@ -105,6 +105,7 @@ class AnswerService:
         self._tenant_id = tenant_id
         self._min_similarity = min_similarity
         self._top_k = top_k
+        self._max_tokens = max_tokens
 
     async def _prepare(
         self, conversation: Conversation, query: str | None, session: str | None
@@ -167,7 +168,7 @@ class AnswerService:
             return prepared
         result = await self._llm.complete(
             prepared.messages,
-            max_tokens=MAX_ANSWER_TOKENS,
+            max_tokens=self._max_tokens,
             temperature=TEMPERATURE,
             session_id=prepared.session_id,
         )
@@ -187,7 +188,7 @@ class AnswerService:
         stream_filter = StreamingCitationFilter()
         async for delta in self._llm.stream(
             prepared.messages,
-            max_tokens=MAX_ANSWER_TOKENS,
+            max_tokens=self._max_tokens,
             temperature=TEMPERATURE,
             session_id=prepared.session_id,
         ):

@@ -60,6 +60,6 @@ def test_embedding_client_has_a_short_timeout(monkeypatch: pytest.MonkeyPatch) -
     ],
 )
 def test_request_id_header_is_validated(header: str, kept: bool) -> None:
-    from customer_agent.main import request_id_from
+    from customer_agent.api.middleware import request_id_from
 
     assert (request_id_from(header) == header) is kept

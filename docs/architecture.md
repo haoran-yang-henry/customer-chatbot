@@ -440,7 +440,7 @@ statuses: `pending_payment → paid → processing → shipped → delivered`, p
 |---|---|---|
 | Configuration | `pydantic-settings`, env prefix `CA_`, `.env` for local only | D1 |
 | Language | German FTS config, multilingual embeddings, German prompts; see [ADR-0003](adr/0003-german-language-strategy.md) | D1–D3 |
-| Errors | Invalid requests → `422`; provider failures (`ProviderUnavailableError`) degrade to a German fallback answer, never `5xx` | D3 |
+| Errors | RFC 9457 Problem Details; provider failures (`ProviderUnavailableError`) degrade to a German fallback answer, never `5xx` | D3/D5 |
 | Logging | `customer_agent.observability`: one format, request id via `ContextVar` (also while streaming), `key=value` messages with per-step timings; `CA_LOG_LEVEL` | D3 |
 | Authentication | JWT bearer token with `customer_id`, `tenant_id` | D5 |
 | Observability | OpenTelemetry traces, JSON logs with correlation ids, Prometheus metrics | D7 |

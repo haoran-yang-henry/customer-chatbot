@@ -4,6 +4,7 @@ Only for development and evaluation (``CA_LLM_CACHE_DIR``); never enable it in p
 answers would not reflect knowledge or prompt changes outside the request itself.
 """
 
+import asyncio
 import hashlib
 import json
 from collections.abc import AsyncIterator, Sequence
@@ -44,13 +45,15 @@ class CachingLLM:
         session_id: str | None = None,
     ) -> LLMResult:
         path = self._path(messages, max_tokens, temperature)
-        if path.exists():
-            return LLMResult.model_validate_json(path.read_text(encoding="utf-8"))
+        # File I/O blocks; run it in the default thread pool so concurrent turns keep running.
+        if await asyncio.to_thread(path.exists):
+            cached = await asyncio.to_thread(path.read_text, encoding="utf-8")
+            return LLMResult.model_validate_json(cached)
         result = await self._inner.complete(
             messages, max_tokens=max_tokens, temperature=temperature, session_id=session_id
         )
         if result.text.strip():  # never cache an empty (failed) generation
-            path.write_text(result.model_dump_json(), encoding="utf-8")
+            await asyncio.to_thread(path.write_text, result.model_dump_json(), encoding="utf-8")
         return result
 
     async def stream(
