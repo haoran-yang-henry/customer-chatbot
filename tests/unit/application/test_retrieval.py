@@ -3,6 +3,7 @@ from datetime import date
 
 import pytest
 
+from customer_agent.application.ports import ProviderUnavailableError
 from customer_agent.application.retrieval import (
     MAX_QUERY_CHARS,
     RRF_K,
@@ -155,3 +156,17 @@ async def test_long_query_is_truncated() -> None:
     await service.retrieve("Versand " * 1000, SCOPE, mode=SearchMode.FULLTEXT)
 
     assert len(search.fulltext_queries[0]) <= MAX_QUERY_CHARS
+
+
+class DownEmbeddings(HashingEmbeddingProvider):
+    async def embed_query(self, text: str) -> list[float]:
+        raise ProviderUnavailableError("embedding outage")
+
+
+async def test_provider_failure_surfaces_as_itself_not_as_an_exception_group() -> None:
+    """The orchestrator turns ProviderUnavailableError into a fallback answer; an exception
+    group from the concurrent searches would bypass that handler and end as a 500."""
+    service = RetrievalService(RecordingSearch(), DownEmbeddings(dimensions=8))
+
+    with pytest.raises(ProviderUnavailableError):
+        await service.retrieve("Versand", SCOPE)
