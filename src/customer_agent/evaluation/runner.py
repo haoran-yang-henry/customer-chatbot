@@ -85,6 +85,8 @@ class EvalReport(BaseModel):
     by_check: dict[str, RateSummary]
     by_tag: dict[str, RateSummary] = {}
     safety: SafetySummary | None = None
+    # LLM tokens of the agent per turn (judge excluded): basis for the cost check (NFR-14)
+    usage: dict[str, float] = {}
     groundedness: RateSummary | None = None
     # expected intent → predicted intent → count, over cases that expect an intent
     intent_confusion: dict[str, dict[str, int]] = {}

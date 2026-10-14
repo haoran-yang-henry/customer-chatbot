@@ -1,13 +1,14 @@
 import json
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import httpx2
 import pytest
 from openai import AsyncOpenAI
 from prometheus_client import REGISTRY
 
-from customer_agent.application.ports import ChatMessage
+from customer_agent.application.ports import ChatMessage, LLMResult
 from customer_agent.infrastructure.embeddings import OpenAIEmbeddingProvider
 from customer_agent.infrastructure.lifecycle import aclose_all
 from customer_agent.infrastructure.llm import OpenAICompatibleLLM
@@ -207,3 +208,24 @@ async def test_stream_records_time_to_first_token_and_tokens() -> None:
     assert text == "Hallo"
     assert sample("ca_llm_time_to_first_token_seconds_count", model="model-y") == ttft + 1
     assert sample("ca_llm_tokens_total", model="model-y", kind="completion") == tokens + 2
+
+
+async def test_cache_hits_count_the_recorded_usage(tmp_path: Path) -> None:
+    """Evaluation runs mostly hit the cache; their token totals still estimate the cost."""
+
+    class CountedLLM(FakeLLM):
+        @property
+        def model_name(self) -> str:
+            return "counted-model"
+
+        async def complete(self, *args: Any, **kwargs: Any) -> LLMResult:
+            result = await super().complete(*args, **kwargs)
+            return result.model_copy(update={"prompt_tokens": 100, "completion_tokens": 10})
+
+    cache = CachingLLM(CountedLLM("Antwort"), tmp_path, namespace="n")
+    await cache.complete(MESSAGES, max_tokens=10, temperature=0.0)  # miss: the adapter counts
+    before = sample("ca_llm_tokens_total", model="counted-model", kind="prompt")
+
+    await cache.complete(MESSAGES, max_tokens=10, temperature=0.0)  # hit
+
+    assert sample("ca_llm_tokens_total", model="counted-model", kind="prompt") == before + 100

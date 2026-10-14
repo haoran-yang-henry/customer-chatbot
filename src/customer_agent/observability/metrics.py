@@ -51,6 +51,16 @@ def record_tokens(model: str, prompt: int | None, completion: int | None) -> Non
         LLM_TOKENS.labels(model=model, kind="completion").inc(completion)
 
 
+def token_totals() -> dict[str, float]:
+    """Tokens counted so far in this process, by kind (all models)."""
+    totals = {"prompt": 0.0, "completion": 0.0}
+    for metric in LLM_TOKENS.collect():
+        for sample in metric.samples:
+            if sample.name.endswith("_total"):
+                totals[sample.labels["kind"]] += sample.value
+    return totals
+
+
 def record_guardrail(decision: GuardrailDecision) -> None:
     """One sample per reason; a decision without reasons counts as reason ``none``."""
     for reason in decision.reasons or ["none"]:
