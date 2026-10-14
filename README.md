@@ -1,107 +1,219 @@
 # NordElektro Customer Service Agent
 
-A German-language customer service agent for a fictional online electronics retailer. It answers
-policy and product questions from a governed knowledge base, and performs order workflows (status,
-cancellation, returns) behind explicit authorization, policy checks and confirmation.
+[![CI](https://github.com/haoran-yang-henry/customer-chatbot/actions/workflows/ci.yml/badge.svg)](https://github.com/haoran-yang-henry/customer-chatbot/actions/workflows/ci.yml)
+![Python 3.12](https://img.shields.io/badge/python-3.12-blue)
+![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-261230)
+![Types: mypy strict](https://img.shields.io/badge/types-mypy%20strict-2a6db2)
 
-Customers write German; the agent answers in German. Code and documentation are in English
-(ADR-0003).
+A German-language AI customer service agent for an online electronics retailer. Customers ask
+in German — about returns, shipping, payment, warranty, products or their own orders — and get
+precise German answers that are grounded in a governed knowledge base, cite their sources, and
+never promise what the shop has not written down.
 
-> **Status: Day 7 of 8** — observable and resilient (ADR-0012): structured JSON logs with request,
-> session and trace ids and masked personal data, one OpenTelemetry trace per request with a span
-> per agent step, Prometheus metrics, circuit breakers and timeouts that turn a model outage into
-> a handoff within 10 s, a per-customer rate limit, health probes and a scanned container image.
-> Layered guardrails (ADR-0011) measured on a red-team set; authenticated customers (Keycloak,
-> OIDC) get order-specific guidance and can be handed over to a human with a ticket. The CI
-> evaluation gate and the final report follow on Day 8.
+The agent **informs and guides; it never changes data on its own**. Order questions are answered
+from read-only order data with deterministic policy checks, and anything a human must decide
+goes to the service team as a ticket.
 
-## Documentation
+## Highlights
 
-The project documentation lives in a local `docs/` folder that is not under version control
-(`.gitignore`); code comments and this README refer to it by name. The API contract is also
-available as OpenAPI at `/docs` of the running service.
-
-| Document | Content |
+| | |
 |---|---|
-| `docs/development-plan.md` | Eight-day plan, definition of done, cut list, roadmap |
-| `docs/requirements.md` | Use cases, functional, language and non-functional requirements |
-| `docs/intent-taxonomy.md` | Intents, examples, disambiguation rules |
-| `docs/architecture.md` | Context, containers, layers, flows, data model |
-| `docs/threat-model.md` | STRIDE + OWASP LLM Top 10, mitigations, tests, residual risks |
-| `docs/evaluation-plan.md` | Test levels, dataset schema, metrics, CI gating, findings |
-| `docs/api.md` | API summary |
-| `docs/adr/` | Architecture decision records (ADR-0001 – ADR-0011) |
+| **Grounded answers** | Hybrid search (German full-text + vector) over approved, currently valid documents; every answer cites them, or says honestly that it cannot answer |
+| **Order help without risk** | Status, cancellation and return eligibility from read-only order data; ownership is enforced in SQL; no tool can modify an order |
+| **Explicit conversation state** | An LLM classifies the intent; a deterministic state machine decides the next step — the model proposes, code decides |
+| **Defence in depth** | Prompt-injection heuristics, an LLM attack classifier, personal-data masking, untrusted content quoted as data, output checks for leaks and unverifiable links or codes |
+| **Production-shaped operations** | Structured logs, one trace per request, Prometheus metrics, circuit breakers, rate limiting, health probes, a scanned container image |
+| **Measured, not assumed** | Versioned evaluation datasets, a red-team set and load tests; every change is judged by them |
 
-## Quick start
+## Architecture
 
-Requirements: Python 3.12, [uv](https://docs.astral.sh/uv/), Docker, an OpenAI API key
-(embeddings, ADR-0007) and a key for an OpenAI-compatible chat endpoint (ADR-0008).
+A modular monolith with ports and adapters: one deployable service with strict internal
+boundaries, backed by PostgreSQL, an OpenID Connect identity provider and an OpenAI-compatible
+model provider.
+
+```mermaid
+flowchart LR
+    client([Chat client]) -- "HTTPS · optional Bearer JWT" --> api
+    idp[Keycloak<br/>OpenID Connect] -. signing keys .-> api
+
+    subgraph agent [Customer service agent · FastAPI]
+        api[HTTP API] --> orch[Conversation orchestrator]
+        orch --> guard[Guardrails]
+        orch --> router[Intent router<br/>+ state machine]
+        orch --> rag[Grounded answering]
+        orch --> tools[Order tools<br/>read-only · tickets]
+    end
+
+    rag --> db[(PostgreSQL<br/>pgvector · German FTS)]
+    tools --> db
+    orch -- sessions · audit log --> db
+    guard & router & rag --> llm[[LLM provider<br/>OpenAI-compatible]]
+    rag --> emb[[Embedding model]]
+    agent -. logs · traces · metrics .-> obs[(Jaeger · Prometheus)]
+```
+
+### How one message is handled
+
+```mermaid
+flowchart TD
+    msg[Customer message] --> input{Input guardrail<br/>normalise · size · injection · mask PII}
+    input -- attack --> refuse[Polite refusal]
+    input --> classify[Intent router ‖ attack classifier<br/>run concurrently]
+    classify -- attack --> refuse
+    classify --> decide{State machine}
+    decide -- knowledge question --> retrieve[Hybrid retrieval<br/>approved · valid · public]
+    retrieve --> answer[LLM answer<br/>evidence only · citations]
+    answer --> output{Output guardrail<br/>citation · leak · German · links/codes}
+    output --> reply([German reply])
+    decide -- own order --> lookup[Order lookup<br/>ownership in SQL]
+    lookup --> guidance[Deterministic guidance<br/>eligibility · steps · link]
+    guidance --> reply
+    decide -- needs a human --> ticket[Ticket + audit entry]
+    ticket --> reply
+    decide -- unclear · out of scope --> clarify[Clarifying question or refusal]
+    clarify --> reply
+    refuse --> reply
+```
+
+Answers stream token by token over Server-Sent Events; the final event is authoritative, because
+the output guardrail may still replace a draft. If the model provider fails, timeouts and a
+circuit breaker turn the turn into a handoff to the service team within seconds.
+
+### Code organisation
+
+```mermaid
+flowchart TB
+    api["api · HTTP adapters, auth, rate limit"] --> application
+    application["application · use cases: orchestrator, router,<br/>answering, guardrails, order guidance"] --> domain
+    infrastructure["infrastructure · Postgres, LLM, embeddings,<br/>circuit breakers, cache"] -. implements ports .-> application
+    infrastructure --> domain
+    domain["domain · pure rules: intents, state machine,<br/>order eligibility, knowledge, personal data"]
+```
+
+Inner layers never import outer ones (enforced by a test). Adapters are wired in a single
+composition root (`bootstrap.py`), which keeps the domain free of I/O and easy to test.
+
+## Quality
+
+| Area | Method | Current result |
+|---|---|---|
+| Answer quality | 71 German conversations: behaviour, intent, sources, tools, required and forbidden phrases | **69 / 71** passed |
+| Retrieval | Recall@5 / MRR on 36 questions; confirmed on 28 held-out questions | **1.00 / 0.95** (held-out 1.00 / 0.87) |
+| Safety | 37 attacks: direct and indirect injection, obfuscation, data exfiltration, social engineering | **2.7 %** attack success, no harmful output |
+| Over-blocking | Benign conversations stopped by a guardrail | **0 / 75** |
+| Latency | k6, 20 concurrent customers, model mocked out | **p95 54 ms** system overhead |
+| Resilience | Fault injection: model provider unreachable | Handoff in every turn, **< 10 s** |
+
+Groundedness is additionally scored by an LLM judge; its verdicts are not yet calibrated
+against human labels and are therefore not listed as a result.
+
+## Getting started
+
+**Prerequisites:** Python 3.12, [uv](https://docs.astral.sh/uv/), Docker, an OpenAI API key for
+embeddings, and an API key for an OpenAI-compatible chat model.
 
 ```bash
-cp .env.example .env   # then set CA_OPENAI_API_KEY and CA_LLM_API_KEY
-make install           # dependencies + pre-commit hooks
-make check             # lint, type check, unit tests (no Docker, no API key)
-make test-integration  # repository tests against a throwaway Postgres (Testcontainers)
-make test-llm          # same + production scenarios with the real embedding model
-make up migrate        # start Postgres + pgvector and Keycloak, apply migrations
-make seed              # load the mock order system (customers, orders)
-make token USER=anna.schneider  # access token for a test customer (see infra/keycloak/README.md)
-make ingest            # index data/knowledge (idempotent)
-make eval-retrieval    # Recall@5 / MRR for fulltext, vector and hybrid search
-make eval              # end-to-end evaluation of the real agent + groundedness judge
-make eval-redteam      # red-team set: attack success and guardrail false-positive rates
-make audit             # gitleaks, Trivy and pip-audit, as in the CI security job
-make load-test         # k6, 20 customers with think time, mocked model (NFR-09)
-make load-test-capacity  # k6 without think time: turns per second of one worker
-make up-app            # the API as a container (after make up migrate seed ingest)
-make run               # API on http://localhost:8000 (docs at /docs), live logs in the terminal
+cp .env.example .env          # set CA_OPENAI_API_KEY and CA_LLM_API_KEY
+make install                  # dependencies and git hooks
+make up migrate seed ingest   # Postgres + Keycloak, schema, demo orders, knowledge index
+make run                      # API on http://localhost:8000, OpenAPI UI at /docs
 ```
 
-Operations: `GET /metrics` serves Prometheus metrics (HTTP, per-step latency, LLM tokens and
-time to first token, guardrail decisions). For traces, `make up-observability` starts Jaeger
-(http://localhost:16686) and `CA_OTEL_ENDPOINT=http://localhost:4318` sends one trace per request
-with a span per agent step. `CA_LOG_FORMAT=json` writes one JSON object per log line, with
-request, session and trace ids and personal data masked. Probes: `/health/live` (process)
-and `/health/ready` (database; open circuit breakers are reported but keep the instance ready,
-because the agent then answers with a handoff). When the model provider fails, timeouts, one
-retry and a circuit breaker bring every turn to a handoff within 10 s; chat messages are
-limited per customer or client address (`CA_RATE_LIMIT_PER_MINUTE`, HTTP 429).
+Try it:
 
-## Repository layout
+```bash
+curl -s localhost:8000/v1/chat -H 'content-type: application/json' \
+  -d '{"message": "Wie lange habe ich Zeit, um einen Artikel zurückzuschicken?"}'
+```
+
+The response (shortened):
+
+```json
+{
+  "session_id": "8f3c…",
+  "answer": "Sie können Artikel innerhalb von 30 Tagen zurücksenden …",
+  "behavior": "answer",
+  "intent": "RETURN_POLICY",
+  "sources": ["policy-returns-v5"],
+  "request_id": "a1b2c3d4e5f6"
+}
+```
+
+Order questions need a logged-in customer: `make token USER=anna.schneider` prints a token for a
+demo customer; send it as `Authorization: Bearer <token>`. To run the API as a container instead,
+use `make up-app`.
+
+## API
+
+| Endpoint | Description |
+|---|---|
+| `POST /v1/chat` | Send a message; omit `session_id` to start a conversation, then send the returned one |
+| `POST /v1/chat/stream` | Same, as Server-Sent Events: `delta` events, then one authoritative `final` event |
+| `GET /health/live` · `GET /health/ready` | Liveness (process) and readiness (database) probes |
+| `GET /metrics` | Prometheus metrics — expose to the scraper only |
+
+`behavior` tells the client what happened: `answer`, `action` (based on the customer's order),
+`clarify`, `refuse`, `escalate` (handed over, with a ticket number) or `no_answer`. Errors follow
+RFC 9457 (`application/problem+json`); every response carries an `x-request-id`.
+
+## Configuration
+
+All settings are environment variables with the prefix `CA_` (see `.env.example`).
+
+| Variable | Purpose |
+|---|---|
+| `CA_DATABASE_URL` | PostgreSQL with pgvector |
+| `CA_OPENAI_API_KEY`, `CA_EMBEDDING_MODEL` | Embedding model |
+| `CA_LLM_API_KEY`, `CA_LLM_BASE_URL`, `CA_LLM_MODEL` | Chat model (any OpenAI-compatible endpoint); `CA_ROUTER_*` / `CA_ANSWER_*` override per role |
+| `CA_AUTH_ISSUER`, `CA_AUTH_AUDIENCE` | OpenID Connect issuer and audience; unset = anonymous only |
+| `CA_LOG_FORMAT`, `CA_OTEL_ENDPOINT` | `json` logs for collectors; OTLP/HTTP endpoint for traces |
+| `CA_RATE_LIMIT_PER_MINUTE`, `CA_ROUTER_TIMEOUT_SECONDS`, `CA_BREAKER_*` | Rate limit, timeouts, circuit breaker |
+
+## Operations
+
+- **Logs** — one JSON object per line with `request_id`, `session_id` and `trace_id`; personal data
+  (e-mail, phone, IBAN, card numbers, secrets) is masked before anything is written.
+- **Traces** — one OpenTelemetry trace per request with a span per step (guardrails, routing,
+  retrieval, model calls, tools). `make up-observability` starts Jaeger at http://localhost:16686.
+- **Metrics** — request and step latencies, LLM tokens and time to first token, guardrail
+  decisions, circuit breaker states, rate-limit rejections.
+- **Resilience** — per-role timeouts with one retry, a circuit breaker per provider, handoff with a
+  ticket when the model is down, rate limit per customer or client address.
+- **Security** — identity only from verified tokens, tenant- and customer-scoped data access,
+  append-only audit log of every order lookup and ticket, non-root container, dependencies and
+  images scanned in CI.
+
+## Development
+
+| Command | What it does |
+|---|---|
+| `make check` | Lint, format check, strict type check, unit and data tests — no Docker or keys needed |
+| `make test-integration` | Repository tests against a throwaway PostgreSQL (Testcontainers) |
+| `make eval` · `make eval-redteam` | End-to-end evaluation and red team against the real model (cached) |
+| `make load-test` | k6 load test with the model mocked out |
+| `make audit` | Secret, vulnerability and misconfiguration scans (gitleaks, Trivy, pip-audit) |
+
+Every pull request runs three CI jobs: **check** (lint, types, unit and integration tests,
+evaluation harness), **security** (gitleaks over the full history, Trivy, pip-audit) and
+**image** (build, vulnerability scan, smoke start). Actions are pinned to commit SHAs and images
+to digests.
+
+## Project structure
 
 ```text
-src/customer_agent/   domain · application · infrastructure · api · evaluation
-data/knowledge/       German knowledge base (Markdown + YAML front matter)
-data/seed/            mock customers and orders
-eval/datasets/        versioned evaluation datasets (JSONL)
-docs/                 requirements, architecture, threat model, ADRs (local, not versioned)
-tests/                unit and data validation tests
+src/customer_agent/
+  api/              HTTP endpoints, authentication, rate limit, error format
+  application/      orchestrator, intent router, answering, guardrails, order guidance
+  domain/           intents, state machine, order rules, knowledge metadata, personal data
+  infrastructure/   PostgreSQL, LLM and embedding clients, circuit breakers
+  observability/    logs, traces, metrics
+  evaluation/       datasets, scoring, judge, CLI
+data/               knowledge base (Markdown) and demo customers and orders
+eval/               evaluation datasets and results
+prompts/            versioned prompt templates
+migrations/         database schema (Alembic)
+tests/              unit, data, integration and load tests
 ```
 
-## Results
-
-| Day | Gated pass rate | Notes |
-|---|---|---|
-| D1 | n/a (0 cases due) | Placeholder agent: 3/71 overall; harness and dataset validated |
-| D2 | n/a (0 cases due) | Retrieval only, see below |
-| D7 | **69/71 (97 %)** | Unchanged behaviour (red team 1/37, false positives 0). Mocked model: 20 customers p95 54 ms, p99 87 ms (NFR-09 ≤ 300 ms), one worker 52 turns/s; model outage → handoff < 10 s (fault-injection test); ~2,350 input and 120 output tokens per turn |
-| D6 | **69/71 (97 %)** | Adversarial 8/8 (S-007 fixed). Red team: attack success 1/37 (2.7 %; 3/37 without the LLM classifier), guardrail false positives 0/12 (core: 0/63), no harmful output. Open: A-004, G-004 (router intents, nothing disclosed) |
-| D5 | **65/66 (98 %)** | Intent 65/65, tools 14/14, sources 36/36; groundedness 29/29 on knowledge answers (uncalibrated). Open: S-007 (Day 6) |
-| D4 | **45/47 (96 %)** | After review fixes (clean cache): intent accuracy 62/65 (95 %); groundedness 31/31 on Day-4 answers (uncalibrated). An earlier 47/47 was measured on a partly stale cache |
-| D3 | **32/32 (100 %)** | Real agent (`deepseek-v4-flash`, prompt `answer/v2`); groundedness 23/24 on Day-3 answers (judge, uncalibrated) |
-
-**Retrieval (Day 2, 37 cases, `text-embedding-3-small`)**
-
-| Mode | Recall@5 | MRR |
-|---|---|---|
-| Full-text (German FTS) | 0.865 | 0.743 |
-| Vector | 0.973 | 0.944 |
-| Hybrid (RRF) | **0.973** | 0.876 |
-
-Day 5: weighted RRF (full-text weight 0.25) reaches 1.000 / 0.954 on 36 cases and 1.000 / 0.872
-on the held-out set (architecture §6.4).
-
-## Roadmap
-
-Day 7 (observability, resilience) and Day 8 (CI evaluation gate, final report) follow; the
-roadmap beyond is in `docs/development-plan.md` §6.
+Design records, requirements, the threat model and the evaluation plan are maintained in a local
+`docs/` folder that is not part of this repository.
