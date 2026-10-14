@@ -118,7 +118,7 @@ async def _judge(report: EvalReport, cases: list[EvalCase]) -> EvalReport:
             result = result.model_copy(update={"grounded": verdict.grounded})
         results.append(result)
     config = {**report.config, "judge_prompt": "judge/v1"}
-    return build_report(
+    judged = build_report(
         results,
         target=report.target,
         dataset=report.dataset,
@@ -126,6 +126,7 @@ async def _judge(report: EvalReport, cases: list[EvalCase]) -> EvalReport:
         started_at=report.started_at,
         config=config,
     )
+    return judged.model_copy(update={"usage": report.usage})  # measured before judging
 
 
 async def _run(args: argparse.Namespace, cases: list[EvalCase]) -> EvalReport:
