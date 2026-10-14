@@ -27,6 +27,7 @@ from customer_agent.application.retrieval import RetrievalService
 from customer_agent.application.routing import IntentRouter
 from customer_agent.config import Settings
 from customer_agent.infrastructure.auth import JwtVerifier, jwks_resolver
+from customer_agent.infrastructure.cassette import CassetteEmbeddings, CassetteLLM, open_cassette
 from customer_agent.infrastructure.clock import SystemClock
 from customer_agent.infrastructure.db.knowledge_repository import PostgresKnowledgeRepository
 from customer_agent.infrastructure.db.models import EMBEDDING_DIMENSIONS
@@ -89,6 +90,16 @@ def create_breaker(settings: Settings, dependency: str) -> CircuitBreaker:
 def create_embedding_provider(
     settings: Settings, breaker: CircuitBreaker | None = None
 ) -> EmbeddingProvider:
+    if settings.eval_cassette is not None:
+        cassette = open_cassette(settings.eval_cassette, settings.eval_cassette_record)
+        inner = _embedding_provider(settings, breaker) if cassette.record else None
+        return CassetteEmbeddings(
+            cassette, inner, settings.embedding_model, settings.embedding_dimensions
+        )
+    return _embedding_provider(settings, breaker)
+
+
+def _embedding_provider(settings: Settings, breaker: CircuitBreaker | None) -> EmbeddingProvider:
     if settings.openai_api_key is None:
         raise ConfigurationError("CA_OPENAI_API_KEY is not set (see .env.example)")
     client = AsyncOpenAI(
@@ -112,6 +123,21 @@ def create_llm_providers(
 ) -> dict[str, LLMProvider]:
     """One provider per role (``router``, ``answer``) with its own timeout, sharing one HTTP
     connection pool and one circuit breaker (same endpoint)."""
+    if settings.eval_cassette is not None:
+        cassette = open_cassette(settings.eval_cassette, settings.eval_cassette_record)
+        inner = _llm_providers(settings, breaker) if cassette.record else None
+        models = {
+            "router": settings.router_llm_model or settings.llm_model,
+            "answer": settings.answer_llm_model or settings.llm_model,
+        }
+        return {
+            role: CassetteLLM(cassette, inner[role] if inner else None, model)
+            for role, model in models.items()
+        }
+    return _llm_providers(settings, breaker)
+
+
+def _llm_providers(settings: Settings, breaker: CircuitBreaker | None) -> dict[str, LLMProvider]:
     if settings.llm_api_key is None:
         raise ConfigurationError("CA_LLM_API_KEY is not set (see .env.example)")
     client = AsyncOpenAI(
