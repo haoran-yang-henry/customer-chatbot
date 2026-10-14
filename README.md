@@ -190,13 +190,19 @@ All settings are environment variables with the prefix `CA_` (see `.env.example`
 | `make check` | Lint, format check, strict type check, unit and data tests — no Docker or keys needed |
 | `make test-integration` | Repository tests against a throwaway PostgreSQL (Testcontainers) |
 | `make eval` · `make eval-redteam` | End-to-end evaluation and red team against the real model (cached) |
+| `make eval-smoke` | The CI quality gate locally: smoke conversations with recorded model answers, no keys |
 | `make load-test` | k6 load test with the model mocked out |
 | `make audit` | Secret, vulnerability and misconfiguration scans (gitleaks, Trivy, pip-audit) |
 
-Every pull request runs three CI jobs: **check** (lint, types, unit and integration tests,
-evaluation harness), **security** (gitleaks over the full history, Trivy, pip-audit) and
-**image** (build, vulnerability scan, smoke start). Actions are pinned to commit SHAs and images
-to digests.
+Every pull request runs four CI jobs: **check** (lint, types, unit and integration tests),
+**eval-gate** (the real agent, database and retrieval on 22 smoke conversations; every one must
+pass), **security** (gitleaks over the full history, Trivy, pip-audit) and **image** (build,
+vulnerability scan, smoke start). Actions are pinned to commit SHAs and images to digests.
+
+The evaluation gate needs no API key and makes no model call: `make eval-smoke-record` stores the
+model's answers for the smoke conversations in `eval/cassettes/smoke.json.gz`, and CI replays them.
+Any change to a prompt, the evidence or the chunking alters a request, misses the recording and
+fails the gate until the cassette is re-recorded and committed with the change.
 
 ## Project structure
 

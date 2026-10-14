@@ -38,7 +38,7 @@ jobs:
         run: uv run pytest --cov -m "not integration and not llm"
       - name: Integration tests (Testcontainers, Docker is preinstalled on the runner)
         run: uv run pytest -m integration
-      - name: Evaluation harness smoke test (placeholder agent; real-agent gate on Day 8)
+      - name: Evaluation harness on the full datasets (placeholder agent, no model)
         run: |
           uv run customer-agent-eval --dataset eval/datasets/core.jsonl --day 1 --out eval-result.json
           uv run customer-agent-eval --dataset eval/datasets/redteam.jsonl --day 1 --out redteam-result.json
@@ -48,6 +48,45 @@ jobs:
           path: |
             eval-result.json
             redteam-result.json
+
+  # Quality gate: the real agent, database and retrieval on the smoke cases, with the model
+  # answers replayed from eval/cassettes/smoke.json.gz. No API key, no model call: a changed
+  # prompt or retrieval fails here until `make eval-smoke-record` is run and committed.
+  eval-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b
+        env:
+          POSTGRES_USER: agent
+          POSTGRES_PASSWORD: agent # throwaway CI database
+          POSTGRES_DB: customer_agent_smoke
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U agent -d customer_agent_smoke"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      SMOKE_DATABASE_URL: postgresql+psycopg://agent:agent@localhost:5432/customer_agent_smoke
+      SMOKE_OUT: smoke-result.json
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+        with:
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync --locked
+      - name: Smoke evaluation, every case must pass (migrate, seed, ingest, evaluate)
+        run: eval/smoke.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: smoke-result
+          path: smoke-result.json
+          if-no-files-found: ignore
 
   security:
     runs-on: ubuntu-latest
