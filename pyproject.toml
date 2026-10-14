@@ -16,6 +16,11 @@ dependencies = [
     "pgvector>=0.3.6",
     "openai>=1.60",
     "pyjwt[crypto]>=2.10",
+    "structlog>=26.1.0",
+    "opentelemetry-api>=1.45.0",
+    "opentelemetry-sdk>=1.45.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.45.0",
+    "prometheus-client>=0.26.0",
 ]
 
 [project.scripts]

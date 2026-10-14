@@ -17,7 +17,7 @@ from customer_agent.application.answering import TextDelta
 from customer_agent.application.orchestrator import ConversationOrchestrator, TurnResult
 from customer_agent.application.ports import SessionStore, StoredSession
 from customer_agent.domain.conversation import AgentResponse, Conversation, Message, Role
-from customer_agent.observability import get_logger
+from customer_agent.observability import get_logger, session_id_var
 
 log = get_logger("session")
 
@@ -73,6 +73,8 @@ class ChatService:
         out: "asyncio.Queue[_Item]",
     ) -> None:
         """Producer: runs to completion even when nobody reads ``out`` any more."""
+        # The task has its own copy of the context: every log line of the turn gets the session.
+        session_id_var.set(session.session_id)
         try:
             history = session.messages[-(MAX_CONTEXT_MESSAGES - 1) :]
             conversation = Conversation(

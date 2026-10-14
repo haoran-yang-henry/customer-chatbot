@@ -25,7 +25,7 @@ def create_app(
 ) -> FastAPI:
     """``chat``/``verifier`` let tests inject fakes; otherwise the lifespan builds real ones."""
     settings = settings or get_settings()
-    configure_logging(settings.log_level)
+    configure_logging(settings.log_level, settings.log_format)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:

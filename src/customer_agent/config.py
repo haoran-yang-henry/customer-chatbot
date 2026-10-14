@@ -13,6 +13,7 @@ class Settings(BaseSettings):
 
     app_env: Literal["local", "test", "ci", "prod"] = "local"
     log_level: str = "INFO"
+    log_format: Literal["console", "json"] = "console"  # json in containers (Day 7)
     database_url: str = "postgresql+psycopg://agent:agent@localhost:5432/customer_agent"
     sql_echo: bool = False  # log every SQL statement (debugging only)
     knowledge_dir: Path = Path("data/knowledge")

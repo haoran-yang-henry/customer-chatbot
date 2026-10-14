@@ -4,13 +4,9 @@ is masked before any model, log or transcript sees it."""
 import pytest
 
 from customer_agent.application.guardrails import MAX_INPUT_CHARS, check_input
-from customer_agent.application.guardrails.patterns import (
-    mask_personal_data,
-    normalize,
-    valid_card,
-    valid_iban,
-)
+from customer_agent.application.guardrails.patterns import normalize
 from customer_agent.domain.guardrails import GuardrailAction
+from customer_agent.domain.pii import mask_personal_data, valid_card, valid_iban
 
 
 @pytest.mark.parametrize(
