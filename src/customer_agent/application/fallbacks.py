@@ -129,6 +129,39 @@ def handoff_pending_reply(ticket_id: str, *, intent: Intent | None) -> AgentResp
     )
 
 
+_OUTAGE = "Entschuldigung, ich kann Ihre Anfrage gerade nicht automatisch bearbeiten."
+
+
+def outage_reply(ticket_id: str, *, created: bool) -> AgentResponse:
+    """The model provider is down (NFR-11): a colleague takes over through a ticket."""
+    return AgentResponse(
+        answer=(
+            f"{_OUTAGE} Ich habe sie an unseren Kundenservice weitergegeben (Ticketnummer "
+            f"{ticket_id}). Sie erhalten eine Rückmeldung, sobald sich ein Kollege darum gekümmert "
+            "hat."
+            if created
+            else f"{_OUTAGE} Ihr Anliegen liegt unseren Mitarbeitern bereits vor (Ticketnummer "
+            f"{ticket_id})."
+        ),
+        behavior=Behavior.ESCALATE,
+        tool_calls=["create_ticket"] if created else [],
+        reasons=["provider_unavailable"],
+    )
+
+
+def outage_contact_reply() -> AgentResponse:
+    """Outage, anonymous customer: contact channels instead of an untraceable ticket."""
+    return AgentResponse(
+        answer=(
+            f"{_OUTAGE} Unsere Mitarbeiter erreichen Sie telefonisch unter {CONTACT_PHONE} "
+            f"({CONTACT_HOURS}) oder per E-Mail an {CONTACT_EMAIL}."
+        ),
+        behavior=Behavior.ESCALATE,
+        sources=[CONTACT_SOURCE],
+        reasons=["provider_unavailable"],
+    )
+
+
 PAYMENT_DATA_NOTICE = (
     "Hinweis: Bitte senden Sie keine Bank- oder Kartendaten und keine Zugangsdaten über den Chat. "
     "Ich habe sie aus Ihrer Nachricht entfernt; sie werden nicht gespeichert."

@@ -4,7 +4,7 @@ Names carry the ``ca_`` prefix; label values come from small, fixed sets (routes
 reason codes), never from user input, so the number of time series stays bounded.
 """
 
-from prometheus_client import Counter, Histogram
+from prometheus_client import Counter, Gauge, Histogram
 
 from customer_agent.domain.guardrails import GuardrailDecision
 
@@ -35,6 +35,13 @@ GUARDRAIL_DECISIONS = Counter(
     "ca_guardrail_decisions_total", "Guardrail decisions by reason", ["stage", "action", "reason"]
 )
 AGENT_REPLIES = Counter("ca_agent_replies_total", "Agent replies", ["behavior", "intent"])
+PROVIDER_FAILURES = Counter(
+    "ca_provider_failures_total", "Failed calls to an external model provider", ["dependency"]
+)
+CIRCUIT_OPEN = Gauge(
+    "ca_circuit_open", "1 while the circuit breaker of a dependency is open", ["dependency"]
+)
+RATE_LIMITED = Counter("ca_rate_limited_total", "Requests rejected with 429", ["scope"])
 
 
 def record_tokens(model: str, prompt: int | None, completion: int | None) -> None:

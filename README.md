@@ -58,7 +58,11 @@ Operations: `GET /metrics` serves Prometheus metrics (HTTP, per-step latency, LL
 time to first token, guardrail decisions). For traces, `make up-observability` starts Jaeger
 (http://localhost:16686) and `CA_OTEL_ENDPOINT=http://localhost:4318` sends one trace per request
 with a span per agent step. `CA_LOG_FORMAT=json` writes one JSON object per log line, with
-request, session and trace ids and personal data masked.
+request, session and trace ids and personal data masked. Probes: `/health/live` (process)
+and `/health/ready` (database; open circuit breakers are reported but keep the instance ready,
+because the agent then answers with a handoff). When the model provider fails, timeouts, one
+retry and a circuit breaker bring every turn to a handoff within 10 s; chat messages are
+limited per customer or client address (`CA_RATE_LIMIT_PER_MINUTE`, HTTP 429).
 
 ## Repository layout
 

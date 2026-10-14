@@ -15,9 +15,16 @@ class OpenAIEmbeddingProvider:
     """OpenAI embeddings API (ADR-0007). The SDK retries transient errors itself."""
 
     def __init__(
-        self, client: AsyncOpenAI, model: str, dimensions: int, batch_size: int = 256
+        self,
+        client: AsyncOpenAI,
+        model: str,
+        dimensions: int,
+        batch_size: int = 256,
+        query_timeout: float | None = None,
     ) -> None:
         self._client = client
+        # A query embedding sits on the request path; ingestion batches may take longer.
+        self._query_client = client.with_options(timeout=query_timeout) if query_timeout else client
         self._model = model
         self._dimensions = dimensions
         self._batch_size = batch_size
@@ -34,21 +41,24 @@ class OpenAIEmbeddingProvider:
         await self._client.close()
 
     async def embed_documents(self, texts: Sequence[str]) -> list[list[float]]:
+        return await self._embed(self._client, texts)
+
+    async def embed_query(self, text: str) -> list[float]:
+        return (await self._embed(self._query_client, [text]))[0]
+
+    async def _embed(self, client: AsyncOpenAI, texts: Sequence[str]) -> list[list[float]]:
         vectors: list[list[float]] = []
         for start in range(0, len(texts), self._batch_size):
             batch = list(texts[start : start + self._batch_size])
             try:
                 with step("embed", model=self._model, texts=len(batch)):
-                    response = await self._client.embeddings.create(
+                    response = await client.embeddings.create(
                         model=self._model, input=batch, dimensions=self._dimensions
                     )
             except openai.OpenAIError as exc:
                 raise ProviderUnavailableError(f"{self._model}: {exc}") from exc
             vectors.extend(item.embedding for item in sorted(response.data, key=lambda d: d.index))
         return vectors
-
-    async def embed_query(self, text: str) -> list[float]:
-        return (await self.embed_documents([text]))[0]
 
 
 class HashingEmbeddingProvider:

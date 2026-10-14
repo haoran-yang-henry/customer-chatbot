@@ -4,9 +4,11 @@ Nothing else in the codebase reads settings to construct infrastructure. The API
 the CLIs and the evaluation all obtain their objects from here.
 """
 
+import asyncio
 from dataclasses import dataclass
 
 from openai import AsyncOpenAI
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 
 from customer_agent.application.answering import AnswerService
@@ -40,6 +42,14 @@ from customer_agent.infrastructure.llm import OpenAICompatibleLLM
 from customer_agent.infrastructure.llm_cache import CachingLLM
 from customer_agent.infrastructure.memory import InMemoryAuditLog, InMemoryTicketService
 from customer_agent.infrastructure.prompts import load_prompt
+from customer_agent.infrastructure.resilience import (
+    BreakerEmbeddings,
+    BreakerLLM,
+    CircuitBreaker,
+)
+from customer_agent.observability import get_logger
+
+log = get_logger("bootstrap")
 
 
 class ConfigurationError(RuntimeError):
@@ -62,43 +72,74 @@ def check_embedding_dimensions(provider: EmbeddingProvider) -> None:
         )
 
 
-def create_embedding_provider(settings: Settings) -> EmbeddingProvider:
+def create_breaker(settings: Settings, dependency: str) -> CircuitBreaker:
+    return CircuitBreaker(
+        dependency,
+        failure_threshold=settings.breaker_failure_threshold,
+        reset_after=settings.breaker_reset_seconds,
+    )
+
+
+def create_embedding_provider(
+    settings: Settings, breaker: CircuitBreaker | None = None
+) -> EmbeddingProvider:
     if settings.openai_api_key is None:
         raise ConfigurationError("CA_OPENAI_API_KEY is not set (see .env.example)")
     client = AsyncOpenAI(
         api_key=settings.openai_api_key.get_secret_value(),
         base_url=settings.openai_base_url,
         timeout=settings.embedding_timeout_seconds,
-        max_retries=1,
+        max_retries=settings.llm_max_retries,
     )
     provider = OpenAIEmbeddingProvider(
-        client, model=settings.embedding_model, dimensions=settings.embedding_dimensions
+        client,
+        model=settings.embedding_model,
+        dimensions=settings.embedding_dimensions,
+        query_timeout=settings.embedding_query_timeout_seconds,
     )
     check_embedding_dimensions(provider)
-    return provider
+    return BreakerEmbeddings(provider, breaker or create_breaker(settings, "embeddings"))
 
 
-def create_llm_providers(settings: Settings) -> dict[str, LLMProvider]:
-    """One provider per role (``router``, ``answer``), sharing one HTTP client."""
+def create_llm_providers(
+    settings: Settings, breaker: CircuitBreaker | None = None
+) -> dict[str, LLMProvider]:
+    """One provider per role (``router``, ``answer``) with its own timeout, sharing one HTTP
+    connection pool and one circuit breaker (same endpoint)."""
     if settings.llm_api_key is None:
         raise ConfigurationError("CA_LLM_API_KEY is not set (see .env.example)")
     client = AsyncOpenAI(
         api_key=settings.llm_api_key.get_secret_value(),
         base_url=settings.llm_base_url,
         timeout=settings.llm_timeout_seconds,
-        max_retries=1,
+        max_retries=settings.llm_max_retries,
         default_headers={"User-Agent": settings.llm_user_agent},
     )
+    breaker = breaker or create_breaker(settings, "llm")
     roles = {
-        "router": (settings.router_llm_model, settings.router_reasoning_effort),
-        "answer": (settings.answer_llm_model, settings.answer_reasoning_effort),
+        "router": (
+            settings.router_llm_model,
+            settings.router_reasoning_effort,
+            settings.router_timeout_seconds,
+        ),
+        "answer": (
+            settings.answer_llm_model,
+            settings.answer_reasoning_effort,
+            settings.llm_timeout_seconds,
+        ),
     }
     providers: dict[str, LLMProvider] = {}
-    for role, (model_override, effort_override) in roles.items():
+    for role, (model_override, effort_override, timeout) in roles.items():
         model = model_override or settings.llm_model
         effort = effort_override or settings.llm_reasoning_effort
-        llm: LLMProvider = OpenAICompatibleLLM(
-            client, model, session_header=settings.llm_session_header, reasoning_effort=effort
+        llm: LLMProvider = BreakerLLM(
+            OpenAICompatibleLLM(
+                client.with_options(timeout=timeout),  # shares the connection pool
+                model,
+                session_header=settings.llm_session_header,
+                reasoning_effort=effort,
+            ),
+            breaker,
         )
         if settings.llm_cache_dir is not None:
             namespace = f"{settings.llm_base_url or 'openai-default'}|{model}|reasoning={effort}"
@@ -133,10 +174,25 @@ class Container:
     embeddings: EmbeddingProvider
     verifier: TokenVerifier | None
     prompts: dict[str, str]
+    breakers: dict[str, CircuitBreaker]
 
     @property
     def models(self) -> dict[str, str]:
         return {role: llm.model_name for role, llm in self.llms.items()}
+
+    async def readiness(self) -> dict[str, str]:
+        """The database decides readiness. Breaker states are reported, but an open breaker
+        keeps the instance ready: it still answers with the outage fallback (NFR-11), and
+        taking every instance out of the load balancer would turn an outage into downtime."""
+        checks: dict[str, str] = {name: breaker.state for name, breaker in self.breakers.items()}
+        try:
+            async with asyncio.timeout(2.0), self.engine.connect() as connection:
+                await connection.execute(text("SELECT 1"))
+            checks["database"] = "ok"
+        except Exception:  # any failure means "not ready", the reason goes to the log
+            log.warning("readiness: database unavailable", exc_info=True)
+            checks["database"] = "unavailable"
+        return checks
 
     async def aclose(self) -> None:
         """Graceful shutdown: let in-flight turns finish, then release connections."""
@@ -154,8 +210,9 @@ def build_container(
     customer's tickets across conversations (covered by unit tests instead)."""
     engine = create_engine(settings)
     clock = clock or SystemClock()
-    embeddings = create_embedding_provider(settings)
-    llms = create_llm_providers(settings)
+    breakers = {name: create_breaker(settings, name) for name in ("llm", "embeddings")}
+    embeddings = create_embedding_provider(settings, breakers["embeddings"])
+    llms = create_llm_providers(settings, breakers["llm"])
     answer_prompt = load_prompt("answer", settings.answer_prompt_version)
     router_prompt = load_prompt("router", settings.router_prompt_version)
     retrieval = RetrievalService(
@@ -208,4 +265,5 @@ def build_container(
         embeddings=embeddings,
         verifier=create_token_verifier(settings),
         prompts=prompts,
+        breakers=breakers,
     )

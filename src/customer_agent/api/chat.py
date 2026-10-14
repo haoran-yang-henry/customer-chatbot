@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from customer_agent.api.auth import CurrentPrincipal
+from customer_agent.api.rate_limit import RateLimited
 from customer_agent.api.schemas import ChatRequest, ChatResponse
 from customer_agent.application.answering import TextDelta
 from customer_agent.application.chat import ChatService, ChatTurn, SessionNotFoundError
@@ -40,7 +41,9 @@ def _response(turn: ChatTurn, request_id: str) -> ChatResponse:
 
 # The customer comes only from a verified token, never from the request body (T06, T13).
 @router.post("/chat")
-async def chat(body: ChatRequest, service: Chat, principal: CurrentPrincipal) -> ChatResponse:
+async def chat(
+    body: ChatRequest, service: Chat, principal: CurrentPrincipal, _: RateLimited
+) -> ChatResponse:
     customer_id = principal.customer_id if principal else None
     try:
         turn = await service.chat(body.session_id, customer_id, body.message)
@@ -61,12 +64,13 @@ def _sse(event: str, data: dict[str, object]) -> str:
     responses={
         200: {"content": {"text/event-stream": {}}},
         401: {"description": "Invalid token"},
+        429: {"description": "Too many messages; see Retry-After"},
         404: {"description": "Unknown session"},
         409: {"description": "Concurrent turn on the same session"},
     },
 )
 async def chat_stream(
-    body: ChatRequest, service: Chat, principal: CurrentPrincipal
+    body: ChatRequest, service: Chat, principal: CurrentPrincipal, _: RateLimited
 ) -> StreamingResponse:
     """Server-Sent Events: ``delta`` events with text, then one authoritative ``final`` event.
 

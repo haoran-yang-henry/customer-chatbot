@@ -22,6 +22,8 @@ from customer_agent.application.fallbacks import (
     fallback,
     handoff_pending_reply,
     handoff_reply,
+    outage_contact_reply,
+    outage_reply,
     step_reply,
     with_payment_data_notice,
 )
@@ -162,7 +164,9 @@ class ConversationOrchestrator:
         except ProviderUnavailableError as exc:
             log.error("provider unavailable: %s", exc)
             yield TurnResult(
-                response=fallback(["provider_unavailable"]), state=state, user_text=text
+                response=await self._outage_reply(conversation, session_id),
+                state=state,
+                user_text=text,
             )
 
     async def _route_and_screen(
@@ -253,47 +257,72 @@ class ConversationOrchestrator:
         session_id: str,
     ) -> AgentResponse:
         order_id = routing.order_id or step.state.slots.get("order_id")
-        message = conversation.messages[-1].content
+        ticket_id, created = await self._open_ticket(
+            conversation, session_id, intent=step.intent, order_id=order_id
+        )
+        if not created:
+            return handoff_pending_reply(ticket_id, intent=step.intent)
+        return handoff_reply(ticket_id, intent=step.intent)
+
+    async def _outage_reply(self, conversation: Conversation, session_id: str) -> AgentResponse:
+        """Nobody can answer automatically (NFR-11), so a colleague takes over."""
+        if conversation.customer_id is None:
+            return outage_contact_reply()
+        try:
+            ticket_id, created = await self._open_ticket(
+                conversation, session_id, intent=None, order_id=None
+            )
+        except Exception:  # the database may be down as well; still answer without a 5xx
+            log.exception("outage ticket could not be created")
+            return fallback(["provider_unavailable"])
+        return outage_reply(ticket_id, created=created)
+
+    async def _open_ticket(
+        self,
+        conversation: Conversation,
+        session_id: str,
+        *,
+        intent: Intent | None,
+        order_id: str | None,
+    ) -> tuple[str, bool]:
+        """``(ticket number, created)``; at the limit the newest open ticket, not a new one."""
         customer_id = conversation.customer_id
+        arguments = {"order_id": order_id or "-", "intent": str(intent)}
+
+        async def audit(outcome: str) -> None:
+            await self._audit.record(
+                AuditEntry(
+                    tool="create_ticket",
+                    customer_id=customer_id,
+                    session_id=session_id,
+                    request_id=request_id_var.get(),
+                    arguments=arguments,
+                    outcome=outcome,
+                )
+            )
+
         if customer_id is not None and self._max_tickets_per_day is not None:
             recent = await self._tickets.recent(customer_id=customer_id, tenant_id=self._tenant_id)
             if len(recent) >= self._max_tickets_per_day:
                 # Rate limit on the only state-changing tool (T12): point to the open ticket.
-                await self._audit.record(
-                    AuditEntry(
-                        tool="create_ticket",
-                        customer_id=customer_id,
-                        session_id=session_id,
-                        request_id=request_id_var.get(),
-                        arguments={"order_id": order_id or "-", "intent": str(step.intent)},
-                        outcome=f"rate_limited:{recent[0]}",
-                    )
-                )
+                await audit(f"rate_limited:{recent[0]}")
                 log.warning("ticket limit reached recent=%d", len(recent))
-                return handoff_pending_reply(recent[0], intent=step.intent)
+                return recent[0], False
+        message = conversation.messages[-1].content
         with agent_step("tool.create_ticket"):
             ticket_id = await self._tickets.create(
                 NewTicket(
                     tenant_id=self._tenant_id,
-                    customer_id=conversation.customer_id,
+                    customer_id=customer_id,
                     session_id=session_id,
-                    intent=step.intent.value if step.intent else None,
+                    intent=intent.value if intent else None,
                     order_id=order_id,
-                    summary=f"{step.intent or 'UNKNOWN'}: {message[:500]}",
+                    summary=f"{intent or 'UNKNOWN'}: {message[:500]}",
                 )
             )
-        await self._audit.record(
-            AuditEntry(
-                tool="create_ticket",
-                customer_id=conversation.customer_id,
-                session_id=session_id,
-                request_id=request_id_var.get(),
-                arguments={"order_id": order_id or "-", "intent": str(step.intent)},
-                outcome=ticket_id,
-            )
-        )
-        log.info("handoff ticket=%s intent=%s order_id=%s", ticket_id, step.intent, order_id)
-        return handoff_reply(ticket_id, intent=step.intent)
+        await audit(ticket_id)
+        log.info("ticket=%s intent=%s order_id=%s", ticket_id, intent, order_id)
+        return ticket_id, True
 
 
 def _blocked_input_reply(screen: GuardrailDecision) -> AgentResponse:
