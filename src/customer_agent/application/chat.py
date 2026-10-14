@@ -17,7 +17,7 @@ from customer_agent.application.answering import TextDelta
 from customer_agent.application.orchestrator import ConversationOrchestrator, TurnResult
 from customer_agent.application.ports import SessionStore, StoredSession
 from customer_agent.domain.conversation import AgentResponse, Conversation, Message, Role
-from customer_agent.observability import get_logger, session_id_var
+from customer_agent.observability import get_logger, session_id_var, step
 
 log = get_logger("session")
 
@@ -51,12 +51,14 @@ class ChatService:
 
     async def _open(self, session_id: str | None, customer_id: str | None) -> StoredSession:
         if session_id is None:
-            session = await self._sessions.create(
-                tenant_id=self._tenant_id, customer_id=customer_id
-            )
+            with step("session.create"):
+                session = await self._sessions.create(
+                    tenant_id=self._tenant_id, customer_id=customer_id
+                )
             log.info("created session=%s", session.session_id)
             return session
-        loaded = await self._sessions.load(session_id)
+        with step("session.load"):
+            loaded = await self._sessions.load(session_id)
         if (
             loaded is None
             or loaded.tenant_id != self._tenant_id
@@ -85,13 +87,14 @@ class ChatService:
                 conversation, session.state, session_id=session.session_id
             ):
                 if isinstance(event, TurnResult):
-                    await self._sessions.save_turn(
-                        session.session_id,
-                        expected_version=session.version,
-                        state=event.state,
-                        user=event.user_text,  # masked by the input guardrail, never raw
-                        reply=event.response,
-                    )
+                    with step("session.save"):
+                        await self._sessions.save_turn(
+                            session.session_id,
+                            expected_version=session.version,
+                            state=event.state,
+                            user=event.user_text,  # masked by the input guardrail, never raw
+                            reply=event.response,
+                        )
                     out.put_nowait(ChatTurn(session_id=session.session_id, response=event.response))
                 else:
                     out.put_nowait(event)

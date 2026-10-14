@@ -10,7 +10,7 @@ from opentelemetry import trace
 
 from customer_agent.application.ports import ChatMessage, LLMResult, ProviderUnavailableError
 from customer_agent.observability import elapsed_ms, get_logger, record_tokens, step, tracer
-from customer_agent.observability.metrics import LLM_FIRST_TOKEN
+from customer_agent.observability.metrics import LLM_FIRST_TOKEN, STEP_DURATION
 
 log = get_logger("llm")
 
@@ -127,7 +127,7 @@ class OpenAICompatibleLLM:
         session_id: str | None = None,
     ) -> AsyncIterator[str]:
         start = time.perf_counter()
-        chars, finish_reason, usage = 0, None, None
+        chars, finish_reason, usage, outcome = 0, None, None, "ok"
         # Not attached as the current span: this generator yields to its caller, and a context
         # attached here would be detached elsewhere (see observability.step).
         span = tracer.start_span("agent.llm.stream", attributes={"model": self._model})
@@ -153,9 +153,13 @@ class OpenAICompatibleLLM:
             log.warning("model=%s stream error=%s", self._model, type(exc).__name__)
             span.record_exception(exc)
             span.set_status(trace.StatusCode.ERROR)
+            outcome = "error"
             raise ProviderUnavailableError(f"{self._model}: {exc}") from exc
         finally:
             span.end()
+            STEP_DURATION.labels(step="llm_stream", outcome=outcome).observe(
+                time.perf_counter() - start
+            )
         if chars == 0:
             log.warning("model=%s empty stream finish_reason=%s", self._model, finish_reason)
         record_tokens(

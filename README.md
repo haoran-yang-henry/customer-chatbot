@@ -7,13 +7,13 @@ cancellation, returns) behind explicit authorization, policy checks and confirma
 Customers write German; the agent answers in German. Code and documentation are in English
 (ADR-0003).
 
-> **Status: Day 6 of 8** — layered guardrails (ADR-0011):
-> injection heuristics and an LLM classifier in front of the router, personal data masked
-> before any model or log sees it, untrusted documents quoted as data, answers checked for
-> leaks, language and unverifiable links or codes. Measured on a red-team set (attack success
-> 2.7 %, no false positives); CI scans for secrets and vulnerable dependencies. Authenticated
-> customers (Keycloak, OIDC) get order-specific guidance from read-only order data and can be
-> handed over to a human with a ticket. Observability and resilience follow on Day 7.
+> **Status: Day 7 of 8** — observable and resilient (ADR-0012): structured JSON logs with request,
+> session and trace ids and masked personal data, one OpenTelemetry trace per request with a span
+> per agent step, Prometheus metrics, circuit breakers and timeouts that turn a model outage into
+> a handoff within 10 s, a per-customer rate limit, health probes and a scanned container image.
+> Layered guardrails (ADR-0011) measured on a red-team set; authenticated customers (Keycloak,
+> OIDC) get order-specific guidance and can be handed over to a human with a ticket. The CI
+> evaluation gate and the final report follow on Day 8.
 
 ## Documentation
 
@@ -51,6 +51,9 @@ make eval-retrieval    # Recall@5 / MRR for fulltext, vector and hybrid search
 make eval              # end-to-end evaluation of the real agent + groundedness judge
 make eval-redteam      # red-team set: attack success and guardrail false-positive rates
 make audit             # gitleaks, Trivy and pip-audit, as in the CI security job
+make load-test         # k6, 20 customers with think time, mocked model (NFR-09)
+make load-test-capacity  # k6 without think time: turns per second of one worker
+make up-app            # the API as a container (after make up migrate seed ingest)
 make run               # API on http://localhost:8000 (docs at /docs), live logs in the terminal
 ```
 
@@ -81,6 +84,7 @@ tests/                unit and data validation tests
 |---|---|---|
 | D1 | n/a (0 cases due) | Placeholder agent: 3/71 overall; harness and dataset validated |
 | D2 | n/a (0 cases due) | Retrieval only, see below |
+| D7 | **69/71 (97 %)** | Unchanged behaviour (red team 1/37, false positives 0). Mocked model: 20 customers p95 54 ms, p99 87 ms (NFR-09 ≤ 300 ms), one worker 52 turns/s; model outage → handoff < 10 s (fault-injection test); ~2,350 input and 120 output tokens per turn |
 | D6 | **69/71 (97 %)** | Adversarial 8/8 (S-007 fixed). Red team: attack success 1/37 (2.7 %; 3/37 without the LLM classifier), guardrail false positives 0/12 (core: 0/63), no harmful output. Open: A-004, G-004 (router intents, nothing disclosed) |
 | D5 | **65/66 (98 %)** | Intent 65/65, tools 14/14, sources 36/36; groundedness 29/29 on knowledge answers (uncalibrated). Open: S-007 (Day 6) |
 | D4 | **45/47 (96 %)** | After review fixes (clean cache): intent accuracy 62/65 (95 %); groundedness 31/31 on Day-4 answers (uncalibrated). An earlier 47/47 was measured on a partly stale cache |

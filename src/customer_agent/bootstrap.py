@@ -57,7 +57,13 @@ class ConfigurationError(RuntimeError):
 
 
 def create_engine(settings: Settings) -> AsyncEngine:
-    return create_async_engine(settings.database_url, pool_pre_ping=True, echo=settings.sql_echo)
+    return create_async_engine(
+        settings.database_url,
+        pool_pre_ping=True,
+        pool_size=settings.db_pool_size,
+        max_overflow=settings.db_max_overflow,
+        echo=settings.sql_echo,
+    )
 
 
 def create_knowledge_repository(engine: AsyncEngine) -> PostgresKnowledgeRepository:
@@ -189,8 +195,9 @@ class Container:
             async with asyncio.timeout(2.0), self.engine.connect() as connection:
                 await connection.execute(text("SELECT 1"))
             checks["database"] = "ok"
-        except Exception:  # any failure means "not ready", the reason goes to the log
-            log.warning("readiness: database unavailable", exc_info=True)
+        except Exception as exc:  # any failure means "not ready"
+            # No traceback: probes run every few seconds, a database outage would flood the log.
+            log.warning("readiness database=unavailable error=%s", type(exc).__name__)
             checks["database"] = "unavailable"
         return checks
 

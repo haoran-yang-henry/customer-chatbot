@@ -18,6 +18,12 @@ class Settings(BaseSettings):
     otel_endpoint: str | None = None
     database_url: str = "postgresql+psycopg://agent:agent@localhost:5432/customer_agent"
     sql_echo: bool = False  # log every SQL statement (debugging only)
+    # Connection pool per process. One turn can hold three connections at once (session, the two
+    # concurrent searches); with the SQLAlchemy defaults (5 + 10) turns queued for connections in
+    # the load test (p99 284 ms vs 76 ms with 20 + 10, Day 7). 30 per worker: several workers or
+    # instances need a pooler (PgBouncer) below Postgres' default limit of 100 connections.
+    db_pool_size: int = 20
+    db_max_overflow: int = 10
     knowledge_dir: Path = Path("data/knowledge")
     tenant_id: str = "nordelektro"
 
