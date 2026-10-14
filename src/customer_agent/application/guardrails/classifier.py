@@ -20,7 +20,7 @@ from customer_agent.application.ports import ChatMessage, LLMProvider, ProviderU
 from customer_agent.application.prompts import PromptTemplate
 from customer_agent.domain.conversation import Conversation
 from customer_agent.domain.guardrails import GuardrailAction, GuardrailDecision
-from customer_agent.observability import get_logger
+from customer_agent.observability import get_logger, step
 
 log = get_logger("guard")
 
@@ -67,6 +67,12 @@ class PromptAttackClassifier:
         return self._prompt.ref
 
     async def classify(self, conversation: Conversation, *, session_id: str) -> GuardrailDecision:
+        with step("classify") as span:
+            decision = await self._classify(conversation, session_id=session_id)
+            span.set_attributes({"action": decision.action, **decision.scores})
+            return decision
+
+    async def _classify(self, conversation: Conversation, *, session_id: str) -> GuardrailDecision:
         user = self._prompt.render_user(
             history=format_history(conversation),
             message=fence(conversation.messages[-1].content),

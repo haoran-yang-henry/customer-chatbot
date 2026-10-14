@@ -12,6 +12,7 @@ from customer_agent.evaluation.runner import EvalReport, build_report, run_cases
 from customer_agent.evaluation.schema import EvalCase, load_dataset
 from customer_agent.evaluation.targets import TARGETS
 from customer_agent.observability import configure_logging
+from customer_agent.observability.metrics import token_totals
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
@@ -69,6 +70,11 @@ def _print_summary(report: EvalReport) -> None:
     print("\nBy check:")
     for name, summary in report.by_check.items():
         print(f"  {name:<22} {summary.passed:>3}/{summary.total:<3} {summary.rate:>5.0%}")
+    if report.usage:
+        print(
+            f"LLM tokens per turn: {report.usage['prompt_tokens_per_turn']:.0f} in, "
+            f"{report.usage['completion_tokens_per_turn']:.0f} out"
+        )
     if report.by_tag:
         print("\nBy tag:")
         for name, summary in report.by_tag.items():
@@ -112,7 +118,7 @@ async def _judge(report: EvalReport, cases: list[EvalCase]) -> EvalReport:
             result = result.model_copy(update={"grounded": verdict.grounded})
         results.append(result)
     config = {**report.config, "judge_prompt": "judge/v1"}
-    return build_report(
+    judged = build_report(
         results,
         target=report.target,
         dataset=report.dataset,
@@ -120,12 +126,15 @@ async def _judge(report: EvalReport, cases: list[EvalCase]) -> EvalReport:
         started_at=report.started_at,
         config=config,
     )
+    return judged.model_copy(update={"usage": report.usage})  # measured before judging
 
 
 async def _run(args: argparse.Namespace, cases: list[EvalCase]) -> EvalReport:
     started_at = datetime.now(UTC)
+    before = token_totals()
     async with TARGETS[args.target]() as (agent, config):
         results = await run_cases(cases, agent, current_day=args.day, concurrency=args.concurrency)
+    after = token_totals()
     report = build_report(
         results,
         target=args.target,
@@ -134,6 +143,13 @@ async def _run(args: argparse.Namespace, cases: list[EvalCase]) -> EvalReport:
         started_at=started_at,
         config=config,
     )
+    turns = len(results)
+    if turns and after["prompt"] > before["prompt"]:
+        usage = {
+            f"{kind}_tokens_per_turn": round((after[kind] - before[kind]) / turns, 1)
+            for kind in ("prompt", "completion")
+        }
+        report = report.model_copy(update={"usage": usage})
     return await _judge(report, cases) if args.judge else report
 
 

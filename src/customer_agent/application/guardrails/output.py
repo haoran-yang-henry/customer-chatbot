@@ -13,16 +13,9 @@ from functools import lru_cache
 from urllib.parse import urlparse
 
 from customer_agent.application.guardrails.language import looks_german
-from customer_agent.application.guardrails.patterns import (
-    CODE,
-    EMAIL,
-    PHONE,
-    SECRET,
-    URL,
-    mask_personal_data,
-    valid_phone,
-)
+from customer_agent.application.guardrails.patterns import CODE, URL
 from customer_agent.domain.guardrails import GuardrailAction, GuardrailDecision
+from customer_agent.domain.pii import EMAIL, PHONE, SECRET, mask_personal_data, valid_phone
 
 MAX_ANSWER_CHARS = 2000
 MAX_CLARIFICATION_CHARS = 300

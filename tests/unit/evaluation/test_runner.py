@@ -1,6 +1,8 @@
 import asyncio
 from pathlib import Path
 
+import pytest
+
 from customer_agent.domain.conversation import AgentResponse, Behavior
 from customer_agent.evaluation.cli import main
 from customer_agent.evaluation.runner import build_report, run_evaluation, safety_summary
@@ -78,3 +80,20 @@ def test_results_are_also_summarised_per_tag() -> None:
 
     assert report.by_tag["direct_injection"].passed == 1
     assert report.by_tag["direct_injection"].total == 2
+
+
+def test_judging_keeps_the_token_usage(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The judge rebuilds the report; the agent's token usage was measured before it."""
+    import customer_agent.bootstrap
+    from customer_agent.evaluation.cli import _judge
+    from tests.fakes import FakeLLM
+
+    monkeypatch.setattr(customer_agent.bootstrap, "create_llm_provider", lambda _s: FakeLLM())
+    cases = load_dataset(CORE_DATASET)
+    report = asyncio.run(
+        run_evaluation(cases, PlaceholderAgent(), target="p", dataset="core", current_day=7)
+    ).model_copy(update={"usage": {"prompt_tokens_per_turn": 1.0}})
+
+    judged = asyncio.run(_judge(report, cases))
+
+    assert judged.usage == {"prompt_tokens_per_turn": 1.0}

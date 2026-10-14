@@ -9,10 +9,10 @@ from customer_agent.application.guardrails.patterns import (
     BLOCK_THRESHOLD,
     injection_score,
     injection_signals,
-    mask_personal_data,
     normalize,
 )
 from customer_agent.domain.guardrails import GuardrailAction, GuardrailDecision
+from customer_agent.domain.pii import mask_personal_data
 
 MAX_INPUT_CHARS = 2000
 

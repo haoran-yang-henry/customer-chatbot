@@ -1,0 +1,21 @@
+# Only what the image needs: pyproject.toml, uv.lock, README.md, alembic.ini, src, prompts,
+# migrations, data. Secrets, local state and development files stay out.
+.git
+.github
+.vscode
+.venv
+.cache
+.env
+.env.*
+docs
+eval
+tests
+infra
+**/__pycache__
+.mypy_cache
+.pytest_cache
+.ruff_cache
+.coverage
+htmlcov
+Dockerfile
+docker-compose.yml

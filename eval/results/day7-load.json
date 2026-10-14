@@ -1,0 +1,102 @@
+{
+  "nfr": "NFR-09: P95 <= 300 ms system overhead at 20 concurrent users (model latency 0)",
+  "mock_llm_latency_ms": 0.0,
+  "client": {
+    "requests": 335,
+    "throughput_rps": 4.3,
+    "failed_rate": 0,
+    "full_path_checks": 0.8218562874251497,
+    "latency_ms": {
+      "avg": 39.1,
+      "med": 37.2,
+      "p(90)": 49.0,
+      "p(95)": 53.5,
+      "p(99)": 87.3,
+      "max": 161.4
+    }
+  },
+  "server_steps": {
+    "session.create": {
+      "count": 334,
+      "mean_ms": 9.9,
+      "p95_ms_at_most": 25,
+      "over_250ms": 0
+    },
+    "input_guardrail": {
+      "count": 334,
+      "mean_ms": 0.2,
+      "p95_ms_at_most": 5,
+      "over_250ms": 0
+    },
+    "llm": {
+      "count": 668,
+      "mean_ms": 3.4,
+      "p95_ms_at_most": 10,
+      "over_250ms": 0
+    },
+    "route": {
+      "count": 334,
+      "mean_ms": 4.0,
+      "p95_ms_at_most": 10,
+      "over_250ms": 0
+    },
+    "classify": {
+      "count": 334,
+      "mean_ms": 3.0,
+      "p95_ms_at_most": 5,
+      "over_250ms": 0
+    },
+    "embed": {
+      "count": 334,
+      "mean_ms": 4.1,
+      "p95_ms_at_most": 10,
+      "over_250ms": 0
+    },
+    "retrieve": {
+      "count": 334,
+      "mean_ms": 8.7,
+      "p95_ms_at_most": 25,
+      "over_250ms": 0
+    },
+    "session.save": {
+      "count": 334,
+      "mean_ms": 8.4,
+      "p95_ms_at_most": 25,
+      "over_250ms": 0
+    },
+    "llm_stream": {
+      "count": 215,
+      "mean_ms": 3.3,
+      "p95_ms_at_most": 5,
+      "over_250ms": 0
+    },
+    "output_guardrail": {
+      "count": 215,
+      "mean_ms": 0.1,
+      "p95_ms_at_most": 5,
+      "over_250ms": 0
+    }
+  },
+  "server_http": {
+    "/health/ready": {
+      "count": 1,
+      "mean_ms": 15.0,
+      "p95_ms_at_most": 25,
+      "over_250ms": 0
+    },
+    "/health/live": {
+      "count": 1,
+      "mean_ms": 0.7,
+      "p95_ms_at_most": 5,
+      "over_250ms": 0
+    },
+    "/v1/chat": {
+      "count": 334,
+      "mean_ms": 36.1,
+      "p95_ms_at_most": 100,
+      "over_250ms": 0
+    }
+  },
+  "scenario": "vus=20 think=2-6s db_pool=20",
+  "overhead_mean_ms": 25.9
+}

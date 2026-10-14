@@ -4,6 +4,7 @@ from customer_agent.bootstrap import (
     ConfigurationError,
     check_embedding_dimensions,
     create_embedding_provider,
+    create_llm_providers,
 )
 from customer_agent.config import Settings
 from customer_agent.infrastructure.embeddings import HashingEmbeddingProvider
@@ -40,13 +41,26 @@ def test_dimension_mismatch_with_database_column_is_rejected() -> None:
         check_embedding_dimensions(HashingEmbeddingProvider(dimensions=3072))
 
 
-def test_embedding_client_has_a_short_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_embedding_clients_have_short_timeouts(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CA_OPENAI_API_KEY", "sk-test")
 
-    provider = create_embedding_provider(Settings(_env_file=None))
+    provider = create_embedding_provider(Settings(_env_file=None))._inner  # type: ignore[attr-defined]
 
-    assert provider._client.timeout == 15.0  # type: ignore[attr-defined]
-    assert provider._client.max_retries == 1  # type: ignore[attr-defined]
+    assert provider._client.timeout == 15.0 and provider._client.max_retries == 1
+    assert provider._query_client.timeout == 5.0  # the request path waits less
+
+
+def test_router_timeout_and_retries_stay_below_the_fallback_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """NFR-11: an LLM outage reaches the fallback within 10 s (timeout × attempts + backoff)."""
+    monkeypatch.setenv("CA_LLM_API_KEY", "sk-test")
+    settings = Settings(_env_file=None)
+
+    router = create_llm_providers(settings)["router"]._inner  # type: ignore[attr-defined]
+
+    attempts = settings.llm_max_retries + 1
+    assert router._client.timeout * attempts + 1.0 < 10.0
 
 
 @pytest.mark.parametrize(

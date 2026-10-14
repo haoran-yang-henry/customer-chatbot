@@ -1,9 +1,14 @@
+import json
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
+import httpx2
 import pytest
 from openai import AsyncOpenAI
+from prometheus_client import REGISTRY
 
-from customer_agent.application.ports import ChatMessage
+from customer_agent.application.ports import ChatMessage, LLMResult
 from customer_agent.infrastructure.embeddings import OpenAIEmbeddingProvider
 from customer_agent.infrastructure.lifecycle import aclose_all
 from customer_agent.infrastructure.llm import OpenAICompatibleLLM
@@ -119,3 +124,108 @@ async def test_adapters_close_their_http_clients(tmp_path: Path) -> None:
     await aclose_all(llm, embeddings, None, "not closable")
 
     assert llm_client.is_closed() and embed_client.is_closed()
+
+
+# --- the real SDK against a mocked transport ------------------------------------------------
+
+Handler = Callable[[httpx2.Request], httpx2.Response]
+
+
+def mocked(handler: Handler, model: str = "model-x") -> OpenAICompatibleLLM:
+    client = AsyncOpenAI(
+        api_key="test",
+        base_url="https://llm.test/v1",
+        http_client=httpx2.AsyncClient(transport=httpx2.MockTransport(handler)),
+        max_retries=0,
+    )
+    return OpenAICompatibleLLM(client, model)
+
+
+def completion(request: httpx2.Request) -> httpx2.Response:
+    return httpx2.Response(
+        200,
+        json={
+            "id": "c1",
+            "object": "chat.completion",
+            "created": 0,
+            "model": "model-x",
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": "Hallo!"},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": 12, "completion_tokens": 3, "total_tokens": 15},
+        },
+    )
+
+
+def stream(request: httpx2.Request) -> httpx2.Response:
+    def chunk(delta: dict[str, str], usage: dict[str, int] | None = None) -> str:
+        body = {
+            "id": "c1",
+            "object": "chat.completion.chunk",
+            "created": 0,
+            "model": "model-y",
+            "choices": [{"index": 0, "delta": delta, "finish_reason": None}] if delta else [],
+            "usage": usage,
+        }
+        return f"data: {json.dumps(body)}\n\n"
+
+    events = [
+        chunk({"role": "assistant", "content": "Hal"}),
+        chunk({"content": "lo"}),
+        chunk({}, {"prompt_tokens": 20, "completion_tokens": 2, "total_tokens": 22}),
+        "data: [DONE]\n\n",
+    ]
+    return httpx2.Response(
+        200, headers={"content-type": "text/event-stream"}, content="".join(events).encode()
+    )
+
+
+def sample(name: str, **labels: str) -> float:
+    return REGISTRY.get_sample_value(name, labels) or 0.0
+
+
+async def test_completion_records_tokens() -> None:
+    before = sample("ca_llm_tokens_total", model="model-x", kind="prompt")
+
+    result = await mocked(completion).complete(MESSAGES, max_tokens=10, temperature=0.0)
+
+    assert (result.text, result.prompt_tokens, result.completion_tokens) == ("Hallo!", 12, 3)
+    assert sample("ca_llm_tokens_total", model="model-x", kind="prompt") == before + 12
+
+
+async def test_stream_records_time_to_first_token_and_tokens() -> None:
+    ttft = sample("ca_llm_time_to_first_token_seconds_count", model="model-y")
+    tokens = sample("ca_llm_tokens_total", model="model-y", kind="completion")
+
+    text = "".join(
+        [d async for d in mocked(stream, "model-y").stream(MESSAGES, max_tokens=10, temperature=0)]
+    )
+
+    assert text == "Hallo"
+    assert sample("ca_llm_time_to_first_token_seconds_count", model="model-y") == ttft + 1
+    assert sample("ca_llm_tokens_total", model="model-y", kind="completion") == tokens + 2
+
+
+async def test_cache_hits_count_the_recorded_usage(tmp_path: Path) -> None:
+    """Evaluation runs mostly hit the cache; their token totals still estimate the cost."""
+
+    class CountedLLM(FakeLLM):
+        @property
+        def model_name(self) -> str:
+            return "counted-model"
+
+        async def complete(self, *args: Any, **kwargs: Any) -> LLMResult:
+            result = await super().complete(*args, **kwargs)
+            return result.model_copy(update={"prompt_tokens": 100, "completion_tokens": 10})
+
+    cache = CachingLLM(CountedLLM("Antwort"), tmp_path, namespace="n")
+    await cache.complete(MESSAGES, max_tokens=10, temperature=0.0)  # miss: the adapter counts
+    before = sample("ca_llm_tokens_total", model="counted-model", kind="prompt")
+
+    await cache.complete(MESSAGES, max_tokens=10, temperature=0.0)  # hit
+
+    assert sample("ca_llm_tokens_total", model="counted-model", kind="prompt") == before + 100

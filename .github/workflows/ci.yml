@@ -73,3 +73,29 @@ jobs:
         run: |
           uv export --locked --format requirements-txt --no-emit-project --all-groups -o requirements-audit.txt
           uvx --from pip-audit==2.10.1 pip-audit -r requirements-audit.txt --require-hashes --disable-pip
+
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Build the API image
+        run: docker build -t customer-agent:ci .
+      - name: Vulnerabilities in the image (Trivy; unfixed base-image issues do not fail)
+        run: >-
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock
+          aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969
+          image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --skip-version-check
+          customer-agent:ci
+      - name: The image starts and answers its liveness probe
+        run: |
+          docker run -d --name api -p 8000:8000 \
+            -e CA_OPENAI_API_KEY=dummy -e CA_LLM_API_KEY=dummy customer-agent:ci
+          for _ in $(seq 1 30); do
+            curl -fsS http://localhost:8000/health/live && exit 0
+            sleep 1
+          done
+          docker logs api
+          exit 1

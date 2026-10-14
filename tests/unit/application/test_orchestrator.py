@@ -349,3 +349,45 @@ async def test_ticket_limit_points_to_the_open_ticket() -> None:
     assert audit.entries[-1].outcome == "rate_limited:T-000003"
     other = await agent.respond(ask("Mensch bitte", "C-1002"))  # the limit is per customer
     assert other.tool_calls == ["create_ticket"]
+
+
+# --- Day 7: provider outage ------------------------------------------------------------------
+
+
+async def test_outage_hands_a_logged_in_customer_over_with_a_ticket() -> None:
+    tickets, audit = InMemoryTicketService(), InMemoryAuditLog()
+    llm = ScriptedRouterLLM(routing("RETURN_POLICY"))
+    llm.fail = True
+
+    response = await orchestrator(llm, tickets=tickets, audit=audit).respond(
+        ask("Wie lange habe ich Zeit für eine Rücksendung?", "C-1001")
+    )
+
+    assert response.behavior is Behavior.ESCALATE and response.tool_calls == ["create_ticket"]
+    assert response.reasons == ["provider_unavailable"] and "T-000001" in response.answer
+    [ticket] = tickets.tickets
+    assert ticket.intent is None and ticket.summary.startswith("UNKNOWN: Wie lange")
+    assert audit.entries[0].tool == "create_ticket"
+
+
+async def test_outage_gives_anonymous_customers_contact_channels() -> None:
+    llm = ScriptedRouterLLM(routing("RETURN_POLICY"))
+    llm.fail = True
+
+    response = await orchestrator(llm).respond(ask("Kosten?"))
+
+    assert response.behavior is Behavior.ESCALATE and "0800 123 4567" in response.answer
+    assert response.reasons == ["provider_unavailable"] and response.tool_calls == []
+
+
+async def test_outage_with_a_broken_ticket_store_still_answers() -> None:
+    class BrokenTickets(InMemoryTicketService):
+        async def create(self, ticket: Any) -> str:
+            raise RuntimeError("database down")
+
+    llm = ScriptedRouterLLM(routing("RETURN_POLICY"))
+    llm.fail = True
+
+    response = await orchestrator(llm, tickets=BrokenTickets()).respond(ask("Kosten?", "C-1001"))
+
+    assert response.behavior is Behavior.NO_ANSWER and response.reasons == ["provider_unavailable"]

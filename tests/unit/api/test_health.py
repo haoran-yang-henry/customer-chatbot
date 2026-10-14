@@ -18,3 +18,31 @@ def test_docs_are_disabled_in_production() -> None:
     client = TestClient(create_app(Settings(app_env="prod")))
 
     assert client.get("/docs").status_code == 404
+
+
+def test_liveness_alias_and_readiness_without_dependencies() -> None:
+    app = create_app(Settings(app_env="test"), chat=object())  # type: ignore[arg-type]
+    with TestClient(app) as client:
+        assert client.get("/health/live").json()["status"] == "ok"
+        ready = client.get("/health/ready")
+
+    assert ready.status_code == 200 and ready.json()["status"] == "ready"
+
+
+def test_readiness_fails_on_the_database_but_not_on_an_open_breaker() -> None:
+    app = create_app(Settings(app_env="test"), chat=object())  # type: ignore[arg-type]
+    with TestClient(app) as client:
+
+        async def llm_down() -> dict[str, str]:
+            return {"database": "ok", "llm": "open"}
+
+        async def database_down() -> dict[str, str]:
+            return {"database": "unavailable", "llm": "closed"}
+
+        app.state.readiness = llm_down
+        degraded = client.get("/health/ready")
+        app.state.readiness = database_down
+        unavailable = client.get("/health/ready")
+
+    assert degraded.status_code == 200 and degraded.json()["checks"]["llm"] == "open"
+    assert unavailable.status_code == 503 and unavailable.json()["status"] == "unavailable"

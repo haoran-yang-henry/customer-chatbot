@@ -12,6 +12,7 @@ from pathlib import Path
 
 from customer_agent.application.ports import ChatMessage, LLMProvider, LLMResult
 from customer_agent.infrastructure.lifecycle import SupportsAclose
+from customer_agent.observability import record_tokens
 
 
 class CachingLLM:
@@ -47,8 +48,12 @@ class CachingLLM:
         path = self._path(messages, max_tokens, temperature)
         # File I/O blocks; run it in the default thread pool so concurrent turns keep running.
         if await asyncio.to_thread(path.exists):
-            cached = await asyncio.to_thread(path.read_text, encoding="utf-8")
-            return LLMResult.model_validate_json(cached)
+            cached = LLMResult.model_validate_json(
+                await asyncio.to_thread(path.read_text, encoding="utf-8")
+            )
+            # Count the recorded usage: an evaluation's token totals are what the run would cost.
+            record_tokens(self._inner.model_name, cached.prompt_tokens, cached.completion_tokens)
+            return cached
         result = await self._inner.complete(
             messages, max_tokens=max_tokens, temperature=temperature, session_id=session_id
         )

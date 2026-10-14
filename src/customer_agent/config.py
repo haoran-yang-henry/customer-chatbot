@@ -13,8 +13,17 @@ class Settings(BaseSettings):
 
     app_env: Literal["local", "test", "ci", "prod"] = "local"
     log_level: str = "INFO"
+    log_format: Literal["console", "json"] = "console"  # json in containers (Day 7)
+    # OTLP/HTTP receiver for traces, e.g. http://localhost:4318 (Jaeger); unset = not exported.
+    otel_endpoint: str | None = None
     database_url: str = "postgresql+psycopg://agent:agent@localhost:5432/customer_agent"
     sql_echo: bool = False  # log every SQL statement (debugging only)
+    # Connection pool per process. One turn can hold three connections at once (session, the two
+    # concurrent searches); with the SQLAlchemy defaults (5 + 10) turns queued for connections in
+    # the load test (p99 284 ms vs 76 ms with 20 + 10, Day 7). 30 per worker: several workers or
+    # instances need a pooler (PgBouncer) below Postgres' default limit of 100 connections.
+    db_pool_size: int = 20
+    db_max_overflow: int = 10
     knowledge_dir: Path = Path("data/knowledge")
     tenant_id: str = "nordelektro"
 
@@ -25,13 +34,20 @@ class Settings(BaseSettings):
     embedding_model: str = "text-embedding-3-small"
     embedding_dimensions: int = 1536
     # The SDK default is 600 s with 2 retries; a hung call would block a request for minutes.
-    embedding_timeout_seconds: float = 15.0
+    embedding_timeout_seconds: float = 15.0  # ingestion batches
+    embedding_query_timeout_seconds: float = 5.0  # one query embedding on the request path
 
     # Chat model (ADR-0008): any OpenAI-compatible endpoint
     llm_api_key: SecretStr | None = None
     llm_base_url: str | None = "https://opencode.ai/zen/go/v1"
     llm_model: str = "deepseek-v4-flash"
-    llm_timeout_seconds: float = 30.0
+    llm_timeout_seconds: float = 30.0  # answer generation (read timeout per streamed chunk)
+    # Router and classifier: 4 s and one retry stay below NFR-11's 10 s to the fallback (Day 7).
+    router_timeout_seconds: float = 4.0
+    llm_max_retries: int = 1  # SDK retries with exponential backoff (connection errors, 429, 5xx)
+    # Circuit breaker per endpoint: open after this many consecutive failures, for this long.
+    breaker_failure_threshold: int = 3
+    breaker_reset_seconds: float = 30.0
     # Honest client identification; OpenCode Go requires both (ADR-0008).
     llm_user_agent: str = "nordelektro-customer-agent/0.1.0"
     llm_session_header: str | None = None  # e.g. "x-opencode-session"
@@ -69,6 +85,8 @@ class Settings(BaseSettings):
     # Attack probability at which the classifier blocks (evaluation plan §5.5).
     guard_classifier_threshold: float = 0.7
     max_tickets_per_day: int = 3  # per customer, rolling 24 hours (T12)
+    # Chat messages per minute per customer (logged in) or client address (anonymous); 0 = off.
+    rate_limit_per_minute: int = 20
 
     @field_validator(
         "openai_api_key",
@@ -78,6 +96,7 @@ class Settings(BaseSettings):
         "llm_cache_dir",
         "auth_issuer",
         "auth_jwks_url",
+        "otel_endpoint",
         "llm_reasoning_effort",
         "router_llm_model",
         "router_reasoning_effort",
