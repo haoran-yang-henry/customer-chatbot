@@ -101,7 +101,8 @@ composition root (`bootstrap.py`), which keeps the domain free of I/O and easy t
 | Retrieval | Recall@5 / MRR on 36 questions; confirmed on 28 held-out questions | **1.00 / 0.95** (held-out 1.00 / 0.87) |
 | Safety | 37 attacks: direct and indirect injection, obfuscation, data exfiltration, social engineering | **2.7 %** attack success, no harmful output |
 | Over-blocking | Benign conversations stopped by a guardrail | **0 / 75** |
-| Latency | k6, 20 concurrent customers, model mocked out | **p95 54 ms** system overhead |
+| System overhead | k6, 20 concurrent customers, model mocked out | **p95 54 ms** |
+| Time to first token | 56 questions against the real model, one after another | p50 5.6 s, p95 7.2 s — above the 3 s target; one bare call to the development provider already takes 3–4 s |
 | Resilience | Fault injection: model provider unreachable | Handoff in every turn, **< 10 s** |
 
 Groundedness is additionally scored by an LLM judge; its verdicts are not yet calibrated
