@@ -1,4 +1,9 @@
+import gzip
+import json
+from pathlib import Path
+
 import pytest
+from pydantic import ValidationError
 
 from customer_agent.bootstrap import (
     ConfigurationError,
@@ -7,6 +12,7 @@ from customer_agent.bootstrap import (
     create_llm_providers,
 )
 from customer_agent.config import Settings
+from customer_agent.infrastructure.cassette import CassetteEmbeddings, CassetteLLM
 from customer_agent.infrastructure.embeddings import HashingEmbeddingProvider
 
 
@@ -34,6 +40,25 @@ def test_missing_api_key_fails_with_actionable_message(monkeypatch: pytest.Monke
 
     with pytest.raises(ConfigurationError, match="CA_OPENAI_API_KEY"):
         create_embedding_provider(Settings(_env_file=None))
+
+
+def test_replaying_a_cassette_needs_no_api_key(tmp_path: Path) -> None:
+    cassette = tmp_path / "smoke.json.gz"
+    with gzip.open(cassette, "wt", encoding="utf-8") as file:
+        json.dump({"chat": {}, "embeddings": {}}, file)
+    settings = Settings(_env_file=None, eval_cassette=cassette)
+
+    providers = create_llm_providers(settings)
+
+    assert all(isinstance(llm, CassetteLLM) for llm in providers.values())
+    assert isinstance(create_embedding_provider(settings), CassetteEmbeddings)
+
+
+def test_evaluation_shortcuts_are_refused_in_prod(tmp_path: Path) -> None:
+    with pytest.raises(ValidationError, match="evaluation runs only"):
+        Settings(_env_file=None, app_env="prod", eval_cassette=tmp_path / "smoke.json.gz")
+    with pytest.raises(ValidationError, match="evaluation runs only"):
+        Settings(_env_file=None, app_env="prod", llm_cache_dir=tmp_path)
 
 
 def test_dimension_mismatch_with_database_column_is_rejected() -> None:

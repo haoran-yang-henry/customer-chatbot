@@ -2,7 +2,7 @@
 # Pinned by digest, like in .github/workflows/ci.yml (keep both in sync).
 GITLEAKS_IMAGE := zricethezav/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
 TRIVY_IMAGE := aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969
-.PHONY: seed token help install lint format typecheck test test-integration test-llm check audit eval eval-redteam eval-retrieval load-test load-test-capacity migrate ingest run up up-app up-observability down
+.PHONY: seed token help install lint format typecheck test test-integration test-llm check audit eval eval-smoke eval-smoke-record eval-redteam eval-retrieval ttft load-test load-test-capacity migrate ingest run up up-app up-observability down
 
 help:  ## Show available targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-18s %s\n", $$1, $$2}'
@@ -45,15 +45,24 @@ audit:  ## Security scans: secrets in git history, Trivy on the tree, pip-audit 
 		--disable-pip
 
 eval:  ## End-to-end evaluation of the real agent + judge (needs make up migrate seed ingest)
-	CA_LLM_CACHE_DIR=.cache/llm uv run customer-agent-eval --dataset eval/datasets/core.jsonl --day 6 \
+	CA_LLM_CACHE_DIR=.cache/llm uv run customer-agent-eval --dataset eval/datasets/core.jsonl --day 8 \
 		--target agent --judge --calibration-out eval/calibration/groundedness-latest.jsonl
+
+eval-smoke:  ## CI gate locally: smoke cases against recorded model responses (needs make up)
+	eval/smoke.sh
+
+eval-smoke-record:  ## Re-record the smoke cassette with the real providers (after prompt changes)
+	eval/smoke.sh record
 
 eval-redteam:  ## Red-team set: attack success and false-positive rates (same setup as eval)
 	CA_LLM_CACHE_DIR=.cache/llm uv run customer-agent-eval --dataset eval/datasets/redteam.jsonl \
-		--day 6 --target agent
+		--day 8 --target agent
 
 eval-retrieval:  ## Recall@5 / MRR for fulltext, vector and hybrid search (needs DB + API key)
 	uv run customer-agent-eval-retrieval --dataset eval/datasets/core.jsonl --out eval/results/day2-retrieval.json
+
+ttft:  ## Time to first token with the real model, NFR-10 (needs: CA_RATE_LIMIT_PER_MINUTE=0 make run)
+	uv run python -m tests.load.ttft --out eval/results/day8-ttft.json
 
 load-test:  ## NFR-09: 20 customers with think time, mocked model (needs make up and Docker)
 	tests/load/run.sh

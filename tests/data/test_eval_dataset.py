@@ -6,6 +6,7 @@ from collections import Counter
 import pytest
 
 from customer_agent.domain.knowledge import KnowledgeDocument, TrustLevel
+from customer_agent.evaluation.cli import select_cases
 from customer_agent.evaluation.schema import Category, EvalCase, load_dataset
 from customer_agent.infrastructure.knowledge_files import load_knowledge_directory
 from tests.conftest import CORE_DATASET, KNOWLEDGE_DIR, REFERENCE_DATE, SEED_DIR, TENANT_ID
@@ -62,3 +63,11 @@ def test_transactional_actions_have_a_customer(cases: list[EvalCase]) -> None:
     for case in cases:
         if case.expected_tool in order_tools:
             assert case.customer_id is not None, case.id
+
+
+def test_the_smoke_gate_covers_every_category() -> None:
+    """CI replays only the smoke cases; each behaviour family must still be represented."""
+    smoke = select_cases([CORE_DATASET, CORE_DATASET.parent / "redteam.jsonl"], "smoke")
+
+    assert set(Category) <= {case.category for case in smoke}
+    assert all(case.target_day <= 8 for case in smoke)

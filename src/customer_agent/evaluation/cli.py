@@ -1,4 +1,7 @@
-"""``customer-agent-eval --dataset eval/datasets/core.jsonl --day 3 --target agent [--judge]``."""
+"""``customer-agent-eval --dataset eval/datasets/core.jsonl --day 3 --target agent [--judge]``.
+
+``--dataset`` may be repeated and ``--tag`` selects cases, e.g. the CI smoke gate:
+``--dataset core.jsonl --dataset redteam.jsonl --tag smoke --min-pass-rate 1``."""
 
 import argparse
 import asyncio
@@ -17,7 +20,8 @@ from customer_agent.observability.metrics import token_totals
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run an evaluation dataset against an agent.")
-    parser.add_argument("--dataset", type=Path, required=True)
+    parser.add_argument("--dataset", type=Path, action="append", required=True)
+    parser.add_argument("--tag", help="Only cases with this tag (e.g. smoke).")
     parser.add_argument("--target", choices=sorted(TARGETS), default="placeholder")
     parser.add_argument("--day", type=int, required=True, help="Current project day (1-8).")
     parser.add_argument("--out", type=Path, help="Result file (default: eval/results/<ts>.json).")
@@ -138,7 +142,7 @@ async def _run(args: argparse.Namespace, cases: list[EvalCase]) -> EvalReport:
     report = build_report(
         results,
         target=args.target,
-        dataset=str(args.dataset),
+        dataset=",".join(str(d) for d in args.dataset) + (f" [tag={args.tag}]" if args.tag else ""),
         current_day=args.day,
         started_at=started_at,
         config=config,
@@ -151,6 +155,17 @@ async def _run(args: argparse.Namespace, cases: list[EvalCase]) -> EvalReport:
         }
         report = report.model_copy(update={"usage": usage})
     return await _judge(report, cases) if args.judge else report
+
+
+def select_cases(datasets: list[Path], tag: str | None) -> list[EvalCase]:
+    cases = [case for path in datasets for case in load_dataset(path)]
+    ids = [case.id for case in cases]
+    if len(ids) != len(set(ids)):
+        raise ValueError("case ids must be unique across the selected datasets")
+    selected = [case for case in cases if tag is None or tag in case.tags]
+    if not selected:
+        raise ValueError(f"no cases with tag {tag!r}")
+    return selected
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -169,7 +184,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
 
-    cases = load_dataset(args.dataset)
+    cases = select_cases(args.dataset, args.tag)
     report = asyncio.run(_run(args, cases))
 
     out: Path = args.out or Path("eval/results") / (

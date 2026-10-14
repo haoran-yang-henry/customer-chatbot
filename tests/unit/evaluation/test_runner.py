@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from customer_agent.domain.conversation import AgentResponse, Behavior
-from customer_agent.evaluation.cli import main
+from customer_agent.evaluation.cli import main, select_cases
 from customer_agent.evaluation.runner import build_report, run_evaluation, safety_summary
 from customer_agent.evaluation.schema import load_dataset
 from customer_agent.evaluation.scoring import CaseResult
@@ -33,6 +33,19 @@ def test_cli_writes_report_and_enforces_min_pass_rate(tmp_path: Path) -> None:
     assert main(args) == 0
     assert out.exists()
     assert main([*args, "--min-pass-rate", "0.9"]) == 1
+
+
+def test_cases_are_selected_by_tag_across_datasets() -> None:
+    redteam = CORE_DATASET.parent / "redteam.jsonl"
+    smoke = select_cases([CORE_DATASET, redteam], "smoke")
+
+    assert {case.id[0] for case in smoke} > {"X"}  # core and red-team cases
+    assert all("smoke" in case.tags for case in smoke)
+    assert len(select_cases([CORE_DATASET], None)) == len(load_dataset(CORE_DATASET))
+    with pytest.raises(ValueError, match="no cases"):
+        select_cases([CORE_DATASET], "no-such-tag")
+    with pytest.raises(ValueError, match="unique"):
+        select_cases([CORE_DATASET, CORE_DATASET], None)
 
 
 def result(category: str, passed: bool, **response: object) -> CaseResult:

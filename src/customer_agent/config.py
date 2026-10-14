@@ -4,7 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import AliasChoices, Field, SecretStr, field_validator
+from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -59,6 +59,9 @@ class Settings(BaseSettings):
     answer_llm_model: str | None = None
     answer_reasoning_effort: str | None = None
     llm_cache_dir: Path | None = None  # evaluation only, see infrastructure/llm_cache.py
+    # Evaluation only: replay (or record) model responses, see infrastructure/cassette.py.
+    eval_cassette: Path | None = None
+    eval_cassette_record: bool = False
 
     # Authentication (ADR-0010). Unset issuer = no authentication: every request is anonymous.
     auth_issuer: str | None = None  # e.g. http://localhost:8080/realms/nordelektro
@@ -94,6 +97,7 @@ class Settings(BaseSettings):
         "llm_api_key",
         "llm_base_url",
         "llm_cache_dir",
+        "eval_cassette",
         "auth_issuer",
         "auth_jwks_url",
         "otel_endpoint",
@@ -107,6 +111,13 @@ class Settings(BaseSettings):
     @classmethod
     def _empty_as_none(cls, value: Any) -> Any:
         return None if value == "" else value
+
+    @model_validator(mode="after")
+    def _no_evaluation_shortcuts_in_prod(self) -> "Settings":
+        # A cassette answers only recorded questions; the cache would replay stale answers.
+        if self.app_env == "prod" and (self.eval_cassette or self.llm_cache_dir):
+            raise ValueError("CA_EVAL_CASSETTE and CA_LLM_CACHE_DIR are for evaluation runs only")
+        return self
 
 
 @lru_cache

@@ -101,7 +101,8 @@ composition root (`bootstrap.py`), which keeps the domain free of I/O and easy t
 | Retrieval | Recall@5 / MRR on 36 questions; confirmed on 28 held-out questions | **1.00 / 0.95** (held-out 1.00 / 0.87) |
 | Safety | 37 attacks: direct and indirect injection, obfuscation, data exfiltration, social engineering | **2.7 %** attack success, no harmful output |
 | Over-blocking | Benign conversations stopped by a guardrail | **0 / 75** |
-| Latency | k6, 20 concurrent customers, model mocked out | **p95 54 ms** system overhead |
+| System overhead | k6, 20 concurrent customers, model mocked out | **p95 54 ms** |
+| Time to first token | 56 questions against the real model, one after another | p50 5.6 s, p95 7.2 s — above the 3 s target; one bare call to the development provider already takes 3–4 s |
 | Resilience | Fault injection: model provider unreachable | Handoff in every turn, **< 10 s** |
 
 Groundedness is additionally scored by an LLM judge; its verdicts are not yet calibrated
@@ -190,13 +191,19 @@ All settings are environment variables with the prefix `CA_` (see `.env.example`
 | `make check` | Lint, format check, strict type check, unit and data tests — no Docker or keys needed |
 | `make test-integration` | Repository tests against a throwaway PostgreSQL (Testcontainers) |
 | `make eval` · `make eval-redteam` | End-to-end evaluation and red team against the real model (cached) |
+| `make eval-smoke` | The CI quality gate locally: smoke conversations with recorded model answers, no keys |
 | `make load-test` | k6 load test with the model mocked out |
 | `make audit` | Secret, vulnerability and misconfiguration scans (gitleaks, Trivy, pip-audit) |
 
-Every pull request runs three CI jobs: **check** (lint, types, unit and integration tests,
-evaluation harness), **security** (gitleaks over the full history, Trivy, pip-audit) and
-**image** (build, vulnerability scan, smoke start). Actions are pinned to commit SHAs and images
-to digests.
+Every pull request runs four CI jobs: **check** (lint, types, unit and integration tests),
+**eval-gate** (the real agent, database and retrieval on 22 smoke conversations; every one must
+pass), **security** (gitleaks over the full history, Trivy, pip-audit) and **image** (build,
+vulnerability scan, smoke start). Actions are pinned to commit SHAs and images to digests.
+
+The evaluation gate needs no API key and makes no model call: `make eval-smoke-record` stores the
+model's answers for the smoke conversations in `eval/cassettes/smoke.json.gz`, and CI replays them.
+Any change to a prompt, the evidence or the chunking alters a request, misses the recording and
+fails the gate until the cassette is re-recorded and committed with the change.
 
 ## Project structure
 
