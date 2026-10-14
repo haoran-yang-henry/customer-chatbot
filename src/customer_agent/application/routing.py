@@ -7,6 +7,7 @@ import time
 from pydantic import BaseModel, ValidationError, field_validator
 
 from customer_agent.application.answering import format_history, search_query
+from customer_agent.application.guardrails import check_generated_text
 from customer_agent.application.ports import ChatMessage, LLMProvider
 from customer_agent.application.prompts import PromptTemplate
 from customer_agent.domain.conversation import Conversation
@@ -35,6 +36,7 @@ class _LLMRouting(BaseModel):
     confidence: float = 0.0
     about_specific_order: bool = False
     third_party: bool = False
+    money_demand: bool = False
     standalone_query: str = ""
     clarification_question: str | None = None
 
@@ -102,6 +104,7 @@ def parse_llm_routing(text: str, conversation: Conversation) -> RoutingResult:
         order_id=order_id,
         about_specific_order=parsed.about_specific_order or order_id is not None,
         third_party=parsed.third_party,
+        money_demand=parsed.money_demand,
         standalone_query=parsed.standalone_query.strip() or search_query(conversation),
         clarification_question=(parsed.clarification_question or "").strip() or None,
         source=RoutingSource.LLM,
@@ -143,7 +146,9 @@ class IntentRouter:
                 temperature=0.0,
                 session_id=session_id,
             )
-            result = parse_llm_routing(reply.text, conversation)
+            result = self._vet_clarification(
+                parse_llm_routing(reply.text, conversation), conversation
+            )
         log.info(
             "source=%s intent=%s confidence=%.2f order_id=%s specific=%s took=%dms",
             result.source,
@@ -154,4 +159,20 @@ class IntentRouter:
             elapsed_ms(start),
         )
         log.debug("standalone_query=%r", result.standalone_query)
+        return result
+
+    def _vet_clarification(
+        self, result: RoutingResult, conversation: Conversation
+    ) -> RoutingResult:
+        """The clarification question is LLM output shown verbatim: an injected message could
+        turn it into a channel for the system prompt or a phishing link. Unsafe → default."""
+        question = result.clarification_question
+        if question is None:
+            return result
+        decision = check_generated_text(
+            question, prompt=self._prompt.system, customer=search_query(conversation)
+        )
+        if decision.blocked:
+            log.warning("clarification replaced reasons=%s", ",".join(decision.reasons))
+            return result.model_copy(update={"clarification_question": None})
         return result

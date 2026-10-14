@@ -55,13 +55,20 @@ class Settings(BaseSettings):
 
     # Answering (Day 3)
     answer_prompt_version: int = 3
-    router_prompt_version: int = 3
+    router_prompt_version: int = 4
     # Below this best cosine similarity the question is treated as unrelated and answered with
     # "no answer" without an LLM call. Between this floor and clearly relevant scores the LLM
     # decides (it may reply KEINE_ANTWORT). Measured on Day 2/3, see architecture §6.4.
     min_answer_similarity: float = 0.35
     answer_top_k: int = 4  # documents given to the answer prompt
     answer_max_tokens: int = 800
+
+    # Guardrails (Day 6, ADR-0011). The classifier uses the router's model and runs concurrently.
+    guard_classifier_enabled: bool = True
+    guard_prompt_version: int = 1
+    # Attack probability at which the classifier blocks (evaluation plan §5.5).
+    guard_classifier_threshold: float = 0.7
+    max_tickets_per_day: int = 3  # per customer, rolling 24 hours (T12)
 
     @field_validator(
         "openai_api_key",

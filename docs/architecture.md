@@ -182,14 +182,17 @@ designs exist — the OpenAI Agents SDK uses a boolean tripwire plus info, Llama
 PII handling (T10) requires. Unlike Bedrock, fallback wording stays in the orchestrator, not in
 the guardrail configuration.
 
-| Reason code (examples) | Stage | Typical action | Customer sees |
+| Reason code (as implemented, Day 6) | Stage | Action | Customer sees |
 |---|---|---|---|
-| `prompt_injection` | input | block | Polite refusal, offer of supported topics |
-| `input_too_long` | input | block | Request to shorten the message |
-| `pii_in_input` | input | redact | Normal answer; PII never reaches the LLM or logs |
-| `missing_citation` / `ungrounded` | output | block | "No answer" + handoff offer |
-| `pii_in_output` | output | redact | Answer with masked values |
-| `not_german` | output | block (retry once) | Regenerated German answer, else fallback |
+| `prompt_injection` (+ `signal:<id>`) | input (heuristics) | block, no model call | The ordinary out-of-scope refusal |
+| `prompt_injection_llm` (+ `category:<c>`) | input (classifier) | veto the step | Most specific refusal (third party, money, else out of scope) |
+| `input_too_long`, `empty_input` | input | block | Request to shorten / "Wie kann ich helfen?" |
+| `pii_iban`, `pii_payment_card`, `pii_email`, `pii_phone`, `secret` | input | redact | Normal answer; payment data → a notice first. Masked text is all the LLM, logs and transcript see |
+| `invisible_characters` | input | redact | Normal answer (hidden text was scored, then removed) |
+| `missing_citation`, `answer_too_long` | output | block | "No answer" + handoff offer |
+| `secret_in_output`, `prompt_leak`, `not_german` | output | block | "No answer" + handoff offer (no retry: no occurrence measured) |
+| `unverified_content` | output | redact (block if nothing is left) | Answer without the sentence carrying an unverifiable link, code or number |
+| `pii_in_output` | output | redact | Answer with masked IBAN / card numbers |
 
 Decisions are logged and exported as metrics (stage, action, reasons) — the basis for the
 false-positive and attack-success rates in the evaluation plan.
@@ -206,6 +209,32 @@ false-positive and attack-success rates in the evaluation plan.
   evaluation result records the prompt ref and model.
 - **Streaming** uses the same decision path: the final answer is computed from the full model
   output, and the `final` SSE event is authoritative.
+
+#### Day 6 implementation notes
+
+Layers and their order are decided in [ADR-0011](adr/0011-layered-guardrails.md):
+
+```mermaid
+flowchart LR
+    msg[Message] --> inp[Input guardrail<br/>normalise · size · injection signals · mask PII]
+    inp -- block --> ref1[Refusal]
+    inp --> par{{concurrently}}
+    par --> router[Router<br/>intent · scope · flags]
+    par --> cls[LLM classifier<br/>attack probability]
+    cls -- veto --> ref2[Most specific refusal]
+    router --> decide[decide&#40;&#41;<br/>third party · money demand · clarify]
+    decide --> tools[Order lookup · ticket<br/>ownership in SQL · ticket limit]
+    decide --> rag[Retrieval → untrusted docs quoted<br/>→ answer model]
+    rag --> out[Output guardrail<br/>citation · leak · German · verifiable tokens · PII]
+```
+
+- **Detectors are pure functions** (`application/guardrails/`); only the classifier calls a
+  model. Every hit carries an id (`signal:override`, `category:role_play`) for logs and reports.
+- **The router's clarification question is an output channel too** (LLM text shown verbatim):
+  it passes the output checks and falls back to the default wording.
+- **Verifiable tokens:** links, e-mail addresses, phone numbers and voucher-like codes in an
+  answer must occur in a trusted document (compared without spaces or dashes) or in the
+  customer's own words — unless the token appears in an untrusted document.
 
 ### 5.2 One turn with explicit state (D4)
 
@@ -467,6 +496,8 @@ statuses: `pending_payment → paid → processing → shipped → delivered`, p
 | Errors | RFC 9457 Problem Details; provider failures (`ProviderUnavailableError`) degrade to a German fallback answer, never `5xx` | D3/D5 |
 | Logging | `customer_agent.observability`: one format, request id via `ContextVar` (also while streaming), `key=value` messages with per-step timings; `CA_LOG_LEVEL` | D3 |
 | Authentication | Keycloak (OIDC), RS256 JWT verified via JWKS; claims `customer_id`, `tenant_id` ([ADR-0010](adr/0010-oidc-authentication-with-keycloak.md)) | D5 |
+| Guardrails | Input heuristics, LLM classifier, untrusted evidence quoted, output checks; personal data masked before models, transcript and logs ([ADR-0011](adr/0011-layered-guardrails.md)) | D6 |
+| Supply chain | `uv.lock` with hashes; CI security job: gitleaks (history), Trivy (tree), pip-audit (lock); GitHub Actions pinned by commit SHA, container images by digest; least-privilege `GITHUB_TOKEN` | D6 |
 | Observability | OpenTelemetry traces, JSON logs with correlation ids, Prometheus metrics | D7 |
 | Resilience | Timeouts, retries with backoff, fallbacks to handoff | D7 |
 | Testing | Unit (domain, policies) → integration (Postgres) → eval (LLM) → e2e; see [ADR-0004](adr/0004-evaluation-first-with-versioned-datasets.md) | D1+ |

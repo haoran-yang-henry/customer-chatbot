@@ -23,3 +23,4 @@ its consequences. Format: a lightweight variant of [MADR](https://adr.github.io/
 | [0008](0008-llm-provider-opencode-go.md) | Chat model via an OpenAI-compatible endpoint, OpenCode Go for development | Accepted | 2026-10-06 |
 | [0009](0009-order-changes-route-to-human-agent.md) | Order change requests are routed to `HUMAN_AGENT` | Accepted | 2026-10-07 |
 | [0010](0010-oidc-authentication-with-keycloak.md) | OIDC authentication with Keycloak, JWT verification via JWKS | Accepted | 2026-10-07 |
+| [0011](0011-layered-guardrails.md) | Layered guardrails: deterministic checks first, an LLM classifier as second opinion | Accepted | 2026-10-12 |

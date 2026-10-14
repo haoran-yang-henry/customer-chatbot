@@ -87,7 +87,7 @@ class ChatService:
                         session.session_id,
                         expected_version=session.version,
                         state=event.state,
-                        user=text,
+                        user=event.user_text,  # masked by the input guardrail, never raw
                         reply=event.response,
                     )
                     out.put_nowait(ChatTurn(session_id=session.session_id, response=event.response))

@@ -127,6 +127,32 @@ def test_third_party_request_is_refused_regardless_of_intent_or_login() -> None:
     assert decision.state == IDLE
 
 
+@pytest.mark.parametrize("intent", [Intent.REFUND_STATUS, Intent.PRODUCT_INFO, Intent.ORDER_CANCEL])
+def test_money_demand_is_refused_before_any_lookup(intent: Intent) -> None:
+    routing = routed(intent, order_id="NE-100231").model_copy(update={"money_demand": True})
+
+    decision = decide(IDLE, routing, authenticated=True)
+
+    assert decision.step is NextStep.REFUSE_MONEY_DEMAND
+    assert decision.state == IDLE
+
+
+@pytest.mark.parametrize(("intent", "confidence"), [(None, 0.9), (Intent.REFUND_STATUS, 0.3)])
+def test_unclear_money_message_is_clarified_not_refused(
+    intent: Intent | None, confidence: float
+) -> None:
+    routing = routed(intent, confidence=confidence).model_copy(update={"money_demand": True})
+
+    assert decide(IDLE, routing, authenticated=True).step is NextStep.CLARIFY
+
+
+@pytest.mark.parametrize("intent", [Intent.COMPLAINT, Intent.HUMAN_AGENT])
+def test_money_demand_in_a_complaint_still_reaches_a_human(intent: Intent) -> None:
+    routing = routed(intent).model_copy(update={"money_demand": True})
+
+    assert decide(IDLE, routing, authenticated=True).step is NextStep.HANDOFF
+
+
 def test_topic_switch_while_waiting_abandons_the_workflow_explicitly() -> None:
     decision = decide(WAITING, routed(Intent.SHIPPING_INFO), authenticated=True)
 

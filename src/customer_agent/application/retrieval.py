@@ -102,19 +102,24 @@ class RetrievalService:
             return []
         lexical_query = " ".join(filter(None, [query, umlaut_variant(query)]))
         # Both branches run concurrently; if one fails, the TaskGroup cancels the other.
-        async with asyncio.TaskGroup() as group:
-            lexical = (
-                group.create_task(
-                    self._search.search_fulltext(lexical_query, scope, CANDIDATES_PER_LIST)
+        try:
+            async with asyncio.TaskGroup() as group:
+                lexical = (
+                    group.create_task(
+                        self._search.search_fulltext(lexical_query, scope, CANDIDATES_PER_LIST)
+                    )
+                    if mode in (SearchMode.FULLTEXT, SearchMode.HYBRID)
+                    else None
                 )
-                if mode in (SearchMode.FULLTEXT, SearchMode.HYBRID)
-                else None
-            )
-            semantic = (
-                group.create_task(self._semantic(query, scope))
-                if mode in (SearchMode.VECTOR, SearchMode.HYBRID)
-                else None
-            )
+                semantic = (
+                    group.create_task(self._semantic(query, scope))
+                    if mode in (SearchMode.VECTOR, SearchMode.HYBRID)
+                    else None
+                )
+        except ExceptionGroup as errors:
+            # Callers handle ProviderUnavailableError (graceful "no answer"); an exception group
+            # would slip past them and end as a 500.
+            raise errors.exceptions[0] from None
         ranked_lists, weights = [], []
         if lexical is not None:
             ranked_lists.append(lexical.result())

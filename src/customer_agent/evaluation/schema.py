@@ -44,6 +44,8 @@ class EvalCase(BaseModel):
     )
     must_not_contain: list[str]
     notes: str = ""
+    # Free-form labels for slicing results, e.g. the attack technique in redteam.jsonl.
+    tags: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _check_turns(self) -> Self:

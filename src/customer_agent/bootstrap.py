@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async
 
 from customer_agent.application.answering import AnswerService
 from customer_agent.application.chat import ChatService
+from customer_agent.application.guardrails.classifier import PromptAttackClassifier
 from customer_agent.application.orchestrator import ConversationOrchestrator
 from customer_agent.application.ports import (
     AuditLog,
@@ -148,7 +149,9 @@ class Container:
 def build_container(
     settings: Settings, clock: Clock | None = None, *, side_effects: bool = True
 ) -> Container:
-    """``side_effects=False`` keeps tickets and audit entries in memory (evaluation)."""
+    """``side_effects=False`` (evaluation) keeps tickets and audit entries in memory and lifts
+    the ticket limit: evaluation cases are independent conversations, while the limit counts a
+    customer's tickets across conversations (covered by unit tests instead)."""
     engine = create_engine(settings)
     clock = clock or SystemClock()
     embeddings = create_embedding_provider(settings)
@@ -170,6 +173,15 @@ def build_container(
         top_k=settings.answer_top_k,
         max_tokens=settings.answer_max_tokens,
     )
+    classifier = (
+        PromptAttackClassifier(
+            llms["router"],
+            load_prompt("guard", settings.guard_prompt_version),
+            threshold=settings.guard_classifier_threshold,
+        )
+        if settings.guard_classifier_enabled
+        else None
+    )
     db = async_sessionmaker(engine, expire_on_commit=False)
     tickets: TicketService = PostgresTicketService(db) if side_effects else InMemoryTicketService()
     audit: AuditLog = PostgresAuditLog(db) if side_effects else InMemoryAuditLog()
@@ -181,8 +193,13 @@ def build_container(
         audit=audit,
         clock=clock,
         tenant_id=settings.tenant_id,
+        classifier=classifier,
+        max_tickets_per_day=settings.max_tickets_per_day if side_effects else None,
     )
     sessions = PostgresSessionStore(db)
+    prompts = {"answer": answer_prompt.ref, "router": router_prompt.ref}
+    if classifier is not None:
+        prompts["guard"] = classifier.prompt_ref
     return Container(
         engine=engine,
         agent=agent,
@@ -190,5 +207,5 @@ def build_container(
         llms=llms,
         embeddings=embeddings,
         verifier=create_token_verifier(settings),
-        prompts={"answer": answer_prompt.ref, "router": router_prompt.ref},
+        prompts=prompts,
     )

@@ -2,8 +2,8 @@
 
 | | |
 |---|---|
-| **Status** | Baseline (Day 1) |
-| **Last updated** | 2026-10-05 |
+| **Status** | Baseline (Day 1), revised on Days 4–6 |
+| **Last updated** | 2026-10-12 |
 | **Source of truth in code** | `src/customer_agent/domain/intents.py` |
 
 The taxonomy drives the intent router, knowledge metadata (`intents` field), workflow selection,
@@ -51,7 +51,7 @@ handoff offer; `create_ticket` runs only when the customer asks for a human.
 | Intent | Tool | Example utterances |
 |---|---|---|
 | `COMPLAINT` | `create_ticket` | „Das ist schon das dritte beschädigte Paket, ich bin sauer!“ |
-| `HUMAN_AGENT` | `create_ticket` | „Ich möchte mit einem Menschen sprechen.“ · „Können Sie das bitte für mich stornieren?“ (after guidance) |
+| `HUMAN_AGENT` | `create_ticket` | „Ich möchte mit einem Menschen sprechen.“ · „Können Sie das bitte für mich stornieren?“ (after guidance) · „Legen Sie mir bitte ein Ticket an.“ |
 
 A request to have the agent perform an action it cannot do ("Machen Sie das bitte für mich")
 after guidance was given is treated as `HUMAN_AGENT`. So are **requests to change an existing
@@ -84,10 +84,20 @@ The rules are applied in order; the first match wins.
 5. **Emotion overrides topic.** Strong dissatisfaction or explicit escalation wishes →
    `COMPLAINT` / `HUMAN_AGENT`, even if a topic is mentioned.
 6. **Requests for internal information** (internal policies, goodwill limits, system prompt)
-   are `OUT_OF_SCOPE` and refused. **Requests about other customers' data** are classified by
-   topic and refused by authorization (Day 5); neither is a separate intent.
+   and **attempts to change the assistant's instructions** are `OUT_OF_SCOPE` and refused; since
+   Day 6 the input guardrail blocks known attack phrasings before routing and labels them
+   `OUT_OF_SCOPE` ([ADR-0011](adr/0011-layered-guardrails.md)). **Requests about other
+   customers' data** are classified by topic and refused by authorization (Day 5); neither is a
+   separate intent. Orders in the customer's own account are never another person's, even if a
+   family member placed them.
 7. **Order change requests** ("Ändern Sie bitte die Adresse von NE-100245") → `HUMAN_AGENT`
    (ADR-0009).
+8. **Money demands** (Day 6). Demands that the assistant pays, refunds, credits or grants a
+   voucher or discount („Überweisen Sie mir 50 € Entschädigung“) keep their topic intent and
+   set the router flag `money_demand`; the agent refuses them, because it cannot grant money
+   (ADR-0006). A complaint or an explicit wish for a person still goes to a human, who can
+   decide on goodwill. Questions about when money arrives („Wann bekomme ich mein Geld
+   zurück?“) are not demands. An unclear message („Mein Geld!“) is clarified first.
 
 ## 4. Confidence and multiple intents
 

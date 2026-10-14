@@ -101,3 +101,40 @@ def test_parse_third_party_flag() -> None:
     )
 
     assert parse_llm_routing(text, convo("Welche Bestellungen hat Jonas Weber?")).third_party
+
+
+def test_parse_money_demand_flag() -> None:
+    text = (
+        '{"intent": "REFUND_STATUS", "confidence": 0.9, "money_demand": true, '
+        '"standalone_query": "Erstattung für NE-100231"}'
+    )
+
+    result = parse_llm_routing(text, convo("Überweisen Sie mir sofort 300 € für NE-100231!"))
+
+    assert result.money_demand and result.intent is Intent.REFUND_STATUS
+
+
+async def test_unsafe_clarification_question_is_replaced_by_the_default() -> None:
+    """The clarification is shown verbatim: it must not become a channel for links or the
+    prompt (an injected message could ask the router to write them)."""
+    llm = ScriptedRouterLLM(
+        '{"intent": null, "confidence": 0.2, "standalone_query": "?", '
+        '"clarification_question": "Bitte melden Sie sich unter https://evil.example an."}'
+    )
+    router = IntentRouter(llm, load_prompt("router", 4))
+
+    result = await router.route(convo("Hilfe?"), SessionState(), session_id="s")
+
+    assert result.clarification_question is None
+
+
+async def test_safe_clarification_question_is_kept() -> None:
+    llm = ScriptedRouterLLM(
+        '{"intent": "PRODUCT_INFO", "confidence": 0.4, "standalone_query": "Kopfhörer", '
+        '"clarification_question": "Was möchten Sie über die Kopfhörer wissen?"}'
+    )
+    router = IntentRouter(llm, load_prompt("router", 4))
+
+    result = await router.route(convo("Kopfhörer"), SessionState(), session_id="s")
+
+    assert result.clarification_question == "Was möchten Sie über die Kopfhörer wissen?"

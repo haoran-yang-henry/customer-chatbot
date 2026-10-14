@@ -64,6 +64,11 @@ async def _agent() -> AsyncIterator[Target]:
             **{f"{name}_prompt": ref for name, ref in container.prompts.items()},
             "embedding_model": settings.embedding_model,
             "min_answer_similarity": str(settings.min_answer_similarity),
+            "guard_classifier": (
+                f"on (threshold {settings.guard_classifier_threshold})"
+                if settings.guard_classifier_enabled
+                else "off"
+            ),
         }
         yield container.agent, config
     finally:

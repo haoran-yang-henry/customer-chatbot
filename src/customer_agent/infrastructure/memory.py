@@ -15,6 +15,15 @@ class InMemoryTicketService:
         self.tickets.append(ticket)
         return f"T-{len(self.tickets):06d}"
 
+    async def recent(self, *, customer_id: str, tenant_id: str) -> list[str]:
+        """Every ticket counts as recent: an evaluation run or a test is shorter than a day."""
+        numbers = [
+            f"T-{index:06d}"
+            for index, ticket in enumerate(self.tickets, start=1)
+            if ticket.customer_id == customer_id and ticket.tenant_id == tenant_id
+        ]
+        return numbers[::-1]
+
 
 class InMemoryAuditLog:
     def __init__(self) -> None:

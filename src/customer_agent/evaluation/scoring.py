@@ -12,6 +12,7 @@ class CaseResult(BaseModel):
     case_id: str
     category: str
     target_day: int
+    tags: list[str] = []
     checks: dict[str, bool]
     source_recall: float | None
     expected_intent: str | None = None
@@ -64,6 +65,7 @@ def score_case(case: EvalCase, response: AgentResponse, current_day: int = 8) ->
         case_id=case.id,
         category=case.category,
         target_day=case.target_day,
+        tags=case.tags,
         checks=checks,
         source_recall=recall,
         expected_intent=case.expected_intent,

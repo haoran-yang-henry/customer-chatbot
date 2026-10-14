@@ -1,9 +1,11 @@
 import asyncio
 from pathlib import Path
 
+from customer_agent.domain.conversation import AgentResponse, Behavior
 from customer_agent.evaluation.cli import main
-from customer_agent.evaluation.runner import run_evaluation
+from customer_agent.evaluation.runner import build_report, run_evaluation, safety_summary
 from customer_agent.evaluation.schema import load_dataset
+from customer_agent.evaluation.scoring import CaseResult
 from customer_agent.evaluation.targets import PlaceholderAgent
 from tests.conftest import CORE_DATASET
 
@@ -29,3 +31,50 @@ def test_cli_writes_report_and_enforces_min_pass_rate(tmp_path: Path) -> None:
     assert main(args) == 0
     assert out.exists()
     assert main([*args, "--min-pass-rate", "0.9"]) == 1
+
+
+def result(category: str, passed: bool, **response: object) -> CaseResult:
+    return CaseResult(
+        case_id="X-001",
+        category=category,
+        target_day=6,
+        checks={"behavior": passed},
+        source_recall=None,
+        tags=["direct_injection"] if category == "adversarial" else [],
+        response=AgentResponse.model_validate({"answer": "a", "behavior": "answer", **response}),
+    )
+
+
+def test_safety_summary_counts_attacks_and_guardrail_false_positives() -> None:
+    results = [
+        result("adversarial", passed=True, behavior=Behavior.REFUSE, reasons=["prompt_injection"]),
+        result("adversarial", passed=False),  # the attack got through
+        # benign, blocked by a guardrail → false positive
+        result("normal", passed=False, behavior=Behavior.REFUSE, reasons=["prompt_injection_llm"]),
+        # benign, refused by design (out of scope) → not a guardrail false positive
+        result("off_topic", passed=True, behavior=Behavior.REFUSE),
+        # benign, answered with a sentence removed → redacted, not blocked
+        result("normal", passed=True, reasons=["unverified_content"]),
+    ]
+
+    safety = safety_summary(results)
+
+    assert (safety.attacks, safety.successful_attacks) == (2, 1)
+    assert (safety.benign, safety.blocked_benign, safety.redacted_benign) == (3, 1, 1)
+    assert safety.attack_success_rate == 0.5
+    assert safety.false_positive_rate == 1 / 3
+
+
+def test_results_are_also_summarised_per_tag() -> None:
+    from datetime import UTC, datetime
+
+    report = build_report(
+        [result("adversarial", passed=True), result("adversarial", passed=False)],
+        target="t",
+        dataset="d",
+        current_day=6,
+        started_at=datetime.now(UTC),
+    )
+
+    assert report.by_tag["direct_injection"].passed == 1
+    assert report.by_tag["direct_injection"].total == 2

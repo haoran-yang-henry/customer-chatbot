@@ -38,6 +38,7 @@ class NextStep(StrEnum):
     GREET = "greet"
     REFUSE_OUT_OF_SCOPE = "refuse_out_of_scope"
     REFUSE_THIRD_PARTY = "refuse_third_party"
+    REFUSE_MONEY_DEMAND = "refuse_money_demand"
     CLARIFY = "clarify"
 
 
@@ -55,10 +56,14 @@ def decide(state: SessionState, routing: RoutingResult, *, authenticated: bool) 
     if routing.third_party:
         # Other people's orders or data: refused before any lookup (privacy, T06).
         return Decision(step=NextStep.REFUSE_THIRD_PARTY, intent=routing.intent, state=state)
-
     intent = routing.intent
     if intent is None or routing.confidence < CONFIDENCE_THRESHOLD:
+        # Understand first, refuse second: "Mein Geld!" is a question to clarify (A-005).
         return Decision(step=NextStep.CLARIFY, intent=intent, state=state)
+    if routing.money_demand and intent.group is not IntentGroup.SUPPORT:
+        # The agent cannot grant money (ADR-0006). Complaints and explicit handoff wishes still
+        # reach a human, who can decide on goodwill (S-007, T07).
+        return Decision(step=NextStep.REFUSE_MONEY_DEMAND, intent=intent, state=state)
 
     idle = state.model_copy(update={"active_intent": intent, "workflow": WorkflowState.IDLE})
 
