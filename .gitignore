@@ -17,3 +17,5 @@ eval/results/*.json
 eval/calibration/*-latest.jsonl
 # LLM response cache for evaluation runs
 .cache/
+# Project documentation is kept locally, not under version control
+docs/

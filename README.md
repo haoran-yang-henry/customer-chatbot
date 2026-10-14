@@ -5,34 +5,37 @@ policy and product questions from a governed knowledge base, and performs order 
 cancellation, returns) behind explicit authorization, policy checks and confirmation.
 
 Customers write German; the agent answers in German. Code and documentation are in English
-([ADR-0003](docs/adr/0003-german-language-strategy.md)).
+(ADR-0003).
 
-> **Status: Day 6 of 8** — layered guardrails ([ADR-0011](docs/adr/0011-layered-guardrails.md)):
+> **Status: Day 6 of 8** — layered guardrails (ADR-0011):
 > injection heuristics and an LLM classifier in front of the router, personal data masked
 > before any model or log sees it, untrusted documents quoted as data, answers checked for
 > leaks, language and unverifiable links or codes. Measured on a red-team set (attack success
 > 2.7 %, no false positives); CI scans for secrets and vulnerable dependencies. Authenticated
 > customers (Keycloak, OIDC) get order-specific guidance from read-only order data and can be
-> handed over to a human with a ticket ([API](docs/api.md)). Observability and resilience
-> follow on Day 7. See the [development plan](docs/development-plan.md).
+> handed over to a human with a ticket. Observability and resilience follow on Day 7.
 
 ## Documentation
 
+The project documentation lives in a local `docs/` folder that is not under version control
+(`.gitignore`); code comments and this README refer to it by name. The API contract is also
+available as OpenAPI at `/docs` of the running service.
+
 | Document | Content |
 |---|---|
-| [Development plan](docs/development-plan.md) | Eight-day plan, definition of done, cut list |
-| [Requirements](docs/requirements.md) | Use cases, functional, language and non-functional requirements |
-| [Intent taxonomy](docs/intent-taxonomy.md) | Intents, examples, disambiguation rules |
-| [Architecture](docs/architecture.md) | Context, containers, layers, flows, data model |
-| [Threat model](docs/threat-model.md) | STRIDE + OWASP LLM Top 10, mitigations, tests |
-| [Evaluation plan](docs/evaluation-plan.md) | Test levels, dataset schema, metrics, CI gating |
-| [ADRs](docs/adr/README.md) | Architecture decision records |
+| `docs/development-plan.md` | Eight-day plan, definition of done, cut list, roadmap |
+| `docs/requirements.md` | Use cases, functional, language and non-functional requirements |
+| `docs/intent-taxonomy.md` | Intents, examples, disambiguation rules |
+| `docs/architecture.md` | Context, containers, layers, flows, data model |
+| `docs/threat-model.md` | STRIDE + OWASP LLM Top 10, mitigations, tests, residual risks |
+| `docs/evaluation-plan.md` | Test levels, dataset schema, metrics, CI gating, findings |
+| `docs/api.md` | API summary |
+| `docs/adr/` | Architecture decision records (ADR-0001 – ADR-0011) |
 
 ## Quick start
 
 Requirements: Python 3.12, [uv](https://docs.astral.sh/uv/), Docker, an OpenAI API key
-(embeddings, [ADR-0007](docs/adr/0007-openai-embeddings.md)) and a key for an OpenAI-compatible
-chat endpoint ([ADR-0008](docs/adr/0008-llm-provider-opencode-go.md)).
+(embeddings, ADR-0007) and a key for an OpenAI-compatible chat endpoint (ADR-0008).
 
 ```bash
 cp .env.example .env   # then set CA_OPENAI_API_KEY and CA_LLM_API_KEY
@@ -58,7 +61,7 @@ src/customer_agent/   domain · application · infrastructure · api · evaluati
 data/knowledge/       German knowledge base (Markdown + YAML front matter)
 data/seed/            mock customers and orders
 eval/datasets/        versioned evaluation datasets (JSONL)
-docs/                 requirements, architecture, threat model, ADRs
+docs/                 requirements, architecture, threat model, ADRs (local, not versioned)
 tests/                unit and data validation tests
 ```
 
@@ -82,8 +85,9 @@ tests/                unit and data validation tests
 | Hybrid (RRF) | **0.973** | 0.876 |
 
 Day 5: weighted RRF (full-text weight 0.25) reaches 1.000 / 0.954 on 36 cases and 1.000 / 0.872
-on the held-out set ([architecture §6.4](docs/architecture.md#64-retrieval)).
+on the held-out set (architecture §6.4).
 
 ## Roadmap
 
-See [development plan §6](docs/development-plan.md#6-explicitly-out-of-scope-roadmap).
+Day 7 (observability, resilience) and Day 8 (CI evaluation gate, final report) follow; the
+roadmap beyond is in `docs/development-plan.md` §6.
