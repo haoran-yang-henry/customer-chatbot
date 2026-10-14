@@ -26,7 +26,7 @@ from customer_agent.domain.conversation import AgentResponse, Behavior, Conversa
 from customer_agent.domain.guardrails import GuardrailAction
 from customer_agent.domain.knowledge import TrustLevel
 from customer_agent.domain.retrieval import RetrievedDocument, SearchScope
-from customer_agent.observability import elapsed_ms, get_logger
+from customer_agent.observability import elapsed_ms, get_logger, record_guardrail, step
 
 log = get_logger("answer")
 
@@ -172,9 +172,11 @@ class AnswerService:
             return fallback(["model_declined"])
         offered = {d.document_id for d in prepared.documents}
         answer, cited = extract_citations(raw)
-        decision = check_output(
-            answer, cited, offered, prompt=self._prompt.system, evidence=prepared.evidence
-        )
+        with step("output_guardrail"):
+            decision = check_output(
+                answer, cited, offered, prompt=self._prompt.system, evidence=prepared.evidence
+            )
+        record_guardrail(decision)
         if decision.blocked:
             log.warning("output blocked reasons=%s", ",".join(decision.reasons))
             return fallback(decision.reasons)

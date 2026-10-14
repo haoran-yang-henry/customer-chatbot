@@ -14,7 +14,7 @@ from customer_agent.domain.conversation import Conversation
 from customer_agent.domain.intents import Intent
 from customer_agent.domain.routing import RoutingResult, RoutingSource, extract_order_id
 from customer_agent.domain.session import SessionState, WorkflowState
-from customer_agent.observability import elapsed_ms, get_logger
+from customer_agent.observability import elapsed_ms, get_logger, step
 
 log = get_logger("router")
 
@@ -125,6 +125,14 @@ class IntentRouter:
         self._prompt = prompt
 
     async def route(
+        self, conversation: Conversation, state: SessionState, *, session_id: str
+    ) -> RoutingResult:
+        with step("route") as span:
+            result = await self._route(conversation, state, session_id=session_id)
+            span.set_attributes({"intent": str(result.intent), "source": result.source})
+            return result
+
+    async def _route(
         self, conversation: Conversation, state: SessionState, *, session_id: str
     ) -> RoutingResult:
         start = time.perf_counter()

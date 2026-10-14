@@ -6,6 +6,7 @@ from collections.abc import Sequence
 
 from customer_agent.application.ports import EmbeddingProvider, KnowledgeSearch
 from customer_agent.domain.retrieval import ChunkHit, RetrievedDocument, SearchMode, SearchScope
+from customer_agent.observability import step
 
 RRF_K = 60
 CANDIDATES_PER_LIST = 20
@@ -100,6 +101,14 @@ class RetrievalService:
         query = query.strip()[:MAX_QUERY_CHARS]
         if not query:
             return []
+        with step("retrieve", mode=mode) as span:
+            documents = await self._retrieve(query, scope, top_k=top_k, mode=mode)
+            span.set_attribute("documents", [d.document_id for d in documents])
+            return documents
+
+    async def _retrieve(
+        self, query: str, scope: SearchScope, *, top_k: int, mode: SearchMode
+    ) -> list[RetrievedDocument]:
         lexical_query = " ".join(filter(None, [query, umlaut_variant(query)]))
         # Both branches run concurrently; if one fails, the TaskGroup cancels the other.
         try:

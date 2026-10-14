@@ -6,9 +6,11 @@ from typing import Any
 
 import openai
 from openai import AsyncOpenAI
+from opentelemetry import trace
 
 from customer_agent.application.ports import ChatMessage, LLMResult, ProviderUnavailableError
-from customer_agent.observability import elapsed_ms, get_logger
+from customer_agent.observability import elapsed_ms, get_logger, record_tokens, step, tracer
+from customer_agent.observability.metrics import LLM_FIRST_TOKEN
 
 log = get_logger("llm")
 
@@ -64,6 +66,23 @@ class OpenAICompatibleLLM:
         temperature: float,
         session_id: str | None = None,
     ) -> LLMResult:
+        with step("llm", model=self._model) as span:
+            result = await self._complete(messages, max_tokens, temperature, session_id)
+            span.set_attributes(
+                {
+                    "tokens_in": result.prompt_tokens or 0,
+                    "tokens_out": result.completion_tokens or 0,
+                }
+            )
+            return result
+
+    async def _complete(
+        self,
+        messages: Sequence[ChatMessage],
+        max_tokens: int,
+        temperature: float,
+        session_id: str | None,
+    ) -> LLMResult:
         start = time.perf_counter()
         try:
             response = await self._client.chat.completions.create(
@@ -89,6 +108,7 @@ class OpenAICompatibleLLM:
             prompt_tokens=usage.prompt_tokens if usage else None,
             completion_tokens=usage.completion_tokens if usage else None,
         )
+        record_tokens(self._model, result.prompt_tokens, result.completion_tokens)
         log.info(
             "model=%s tokens_in=%s tokens_out=%s took=%dms",
             result.model,
@@ -108,6 +128,9 @@ class OpenAICompatibleLLM:
     ) -> AsyncIterator[str]:
         start = time.perf_counter()
         chars, finish_reason, usage = 0, None, None
+        # Not attached as the current span: this generator yields to its caller, and a context
+        # attached here would be detached elsewhere (see observability.step).
+        span = tracer.start_span("agent.llm.stream", attributes={"model": self._model})
         try:
             chunks = await self._client.chat.completions.create(
                 **self._request(messages, max_tokens, temperature, session_id),
@@ -120,13 +143,26 @@ class OpenAICompatibleLLM:
                     continue
                 finish_reason = chunk.choices[0].finish_reason or finish_reason
                 if content := chunk.choices[0].delta.content:
+                    if chars == 0:
+                        first = time.perf_counter() - start
+                        LLM_FIRST_TOKEN.labels(model=self._model).observe(first)
+                        span.set_attribute("time_to_first_token_ms", round(first * 1000))
                     chars += len(content)
                     yield content
         except openai.OpenAIError as exc:
             log.warning("model=%s stream error=%s", self._model, type(exc).__name__)
+            span.record_exception(exc)
+            span.set_status(trace.StatusCode.ERROR)
             raise ProviderUnavailableError(f"{self._model}: {exc}") from exc
+        finally:
+            span.end()
         if chars == 0:
             log.warning("model=%s empty stream finish_reason=%s", self._model, finish_reason)
+        record_tokens(
+            self._model,
+            usage.prompt_tokens if usage else None,
+            usage.completion_tokens if usage else None,
+        )
         log.info(
             "model=%s stream tokens_in=%s tokens_out=%s took=%dms",
             self._model,

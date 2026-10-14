@@ -43,7 +43,9 @@ from customer_agent.domain.guardrails import GuardrailDecision
 from customer_agent.domain.intents import Intent
 from customer_agent.domain.routing import RoutingResult
 from customer_agent.domain.session import Decision, NextStep, SessionState, decide
-from customer_agent.observability import get_logger, request_id_var
+from customer_agent.observability import get_logger, record_guardrail, request_id_var
+from customer_agent.observability import step as agent_step  # `step` is a Decision here
+from customer_agent.observability.metrics import AGENT_REPLIES
 
 log = get_logger("chat")
 
@@ -108,14 +110,18 @@ class ConversationOrchestrator:
         self, conversation: Conversation, state: SessionState, *, session_id: str
     ) -> AsyncIterator[TurnEvent]:
         raw = conversation.messages[-1].content
-        screen = check_input(raw)
+        with agent_step("input_guardrail"):
+            screen = check_input(raw)
+        record_guardrail(screen)
         text = screen.content if screen.content is not None else raw
         if screen.blocked:
             log.info("input blocked reasons=%s", ",".join(screen.reasons))
-            yield TurnResult(
-                response=_blocked_input_reply(screen),
-                state=state,
-                user_text=text or "[leere Nachricht]",
+            yield _counted(
+                TurnResult(
+                    response=_blocked_input_reply(screen),
+                    state=state,
+                    user_text=text or "[leere Nachricht]",
+                )
             )
             return
         if screen.reasons:
@@ -129,10 +135,12 @@ class ConversationOrchestrator:
         if notice:
             yield TextDelta(text=f"{PAYMENT_DATA_NOTICE}\n\n")
         async for event in self._turn(conversation, state, session_id):
-            if notice and isinstance(event, TurnResult):
-                event = event.model_copy(
-                    update={"response": with_payment_data_notice(event.response)}
-                )
+            if isinstance(event, TurnResult):
+                if notice:
+                    event = event.model_copy(
+                        update={"response": with_payment_data_notice(event.response)}
+                    )
+                event = _counted(event)
             yield event
 
     async def _turn(
@@ -141,6 +149,8 @@ class ConversationOrchestrator:
         text = conversation.messages[-1].content
         try:
             routing, verdict = await self._route_and_screen(conversation, state, session_id)
+            if verdict is not None:
+                record_guardrail(verdict)
             if verdict is not None and verdict.blocked:
                 log.warning("input blocked by classifier reasons=%s", ",".join(verdict.reasons))
                 yield TurnResult(response=_vetoed(verdict, routing), state=state, user_text=text)
@@ -217,9 +227,10 @@ class ConversationOrchestrator:
         intent = step.intent or Intent.ORDER_STATUS
         if customer_id is None:  # decide() never routes anonymous users here
             raise RuntimeError("order guidance requires an authenticated customer")
-        order = await self._orders.get_for_customer(
-            order_id, customer_id=customer_id, tenant_id=self._tenant_id
-        )
+        with agent_step("tool.get_order_status"):
+            order = await self._orders.get_for_customer(
+                order_id, customer_id=customer_id, tenant_id=self._tenant_id
+            )
         await self._audit.record(
             AuditEntry(
                 tool="get_order_status",
@@ -260,16 +271,17 @@ class ConversationOrchestrator:
                 )
                 log.warning("ticket limit reached recent=%d", len(recent))
                 return handoff_pending_reply(recent[0], intent=step.intent)
-        ticket_id = await self._tickets.create(
-            NewTicket(
-                tenant_id=self._tenant_id,
-                customer_id=conversation.customer_id,
-                session_id=session_id,
-                intent=step.intent.value if step.intent else None,
-                order_id=order_id,
-                summary=f"{step.intent or 'UNKNOWN'}: {message[:500]}",
+        with agent_step("tool.create_ticket"):
+            ticket_id = await self._tickets.create(
+                NewTicket(
+                    tenant_id=self._tenant_id,
+                    customer_id=conversation.customer_id,
+                    session_id=session_id,
+                    intent=step.intent.value if step.intent else None,
+                    order_id=order_id,
+                    summary=f"{step.intent or 'UNKNOWN'}: {message[:500]}",
+                )
             )
-        )
         await self._audit.record(
             AuditEntry(
                 tool="create_ticket",
@@ -302,3 +314,9 @@ def _vetoed(verdict: GuardrailDecision, routing: RoutingResult) -> AgentResponse
     else:
         response = fallback(verdict.reasons)
     return response.model_copy(update={"intent": routing.intent, "reasons": verdict.reasons})
+
+
+def _counted(turn: TurnResult) -> TurnResult:
+    response = turn.response
+    AGENT_REPLIES.labels(behavior=response.behavior, intent=str(response.intent)).inc()
+    return turn

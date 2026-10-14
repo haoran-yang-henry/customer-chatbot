@@ -34,5 +34,14 @@ services:
       timeout: 5s
       retries: 40
 
+  # Traces UI (Day 7): `make up-observability`, then CA_OTEL_ENDPOINT=http://localhost:4318.
+  # Not started by `make up`; in-memory storage, local development only.
+  jaeger:
+    image: jaegertracing/jaeger:2.21.0@sha256:3d0ac795ff98aa04d1be04311d2dac6c25b4bfc8322dc02e53bc5b170c5018c3
+    profiles: [observability]
+    ports:
+      - "16686:16686"  # UI
+      - "4318:4318"    # OTLP/HTTP receiver
+
 volumes:
   pgdata:

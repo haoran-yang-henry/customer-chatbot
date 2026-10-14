@@ -8,6 +8,7 @@ import openai
 from openai import AsyncOpenAI
 
 from customer_agent.application.ports import ProviderUnavailableError
+from customer_agent.observability import step
 
 
 class OpenAIEmbeddingProvider:
@@ -37,9 +38,10 @@ class OpenAIEmbeddingProvider:
         for start in range(0, len(texts), self._batch_size):
             batch = list(texts[start : start + self._batch_size])
             try:
-                response = await self._client.embeddings.create(
-                    model=self._model, input=batch, dimensions=self._dimensions
-                )
+                with step("embed", model=self._model, texts=len(batch)):
+                    response = await self._client.embeddings.create(
+                        model=self._model, input=batch, dimensions=self._dimensions
+                    )
             except openai.OpenAIError as exc:
                 raise ProviderUnavailableError(f"{self._model}: {exc}") from exc
             vectors.extend(item.embedding for item in sorted(response.data, key=lambda d: d.index))

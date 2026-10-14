@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     app_env: Literal["local", "test", "ci", "prod"] = "local"
     log_level: str = "INFO"
     log_format: Literal["console", "json"] = "console"  # json in containers (Day 7)
+    # OTLP/HTTP receiver for traces, e.g. http://localhost:4318 (Jaeger); unset = not exported.
+    otel_endpoint: str | None = None
     database_url: str = "postgresql+psycopg://agent:agent@localhost:5432/customer_agent"
     sql_echo: bool = False  # log every SQL statement (debugging only)
     knowledge_dir: Path = Path("data/knowledge")
@@ -79,6 +81,7 @@ class Settings(BaseSettings):
         "llm_cache_dir",
         "auth_issuer",
         "auth_jwks_url",
+        "otel_endpoint",
         "llm_reasoning_effort",
         "router_llm_model",
         "router_reasoning_effort",

@@ -54,6 +54,12 @@ make audit             # gitleaks, Trivy and pip-audit, as in the CI security jo
 make run               # API on http://localhost:8000 (docs at /docs), live logs in the terminal
 ```
 
+Operations: `GET /metrics` serves Prometheus metrics (HTTP, per-step latency, LLM tokens and
+time to first token, guardrail decisions). For traces, `make up-observability` starts Jaeger
+(http://localhost:16686) and `CA_OTEL_ENDPOINT=http://localhost:4318` sends one trace per request
+with a span per agent step. `CA_LOG_FORMAT=json` writes one JSON object per log line, with
+request, session and trace ids and personal data masked.
+
 ## Repository layout
 
 ```text

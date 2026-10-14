@@ -2,10 +2,10 @@
 # Pinned by digest, like in .github/workflows/ci.yml (keep both in sync).
 GITLEAKS_IMAGE := zricethezav/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
 TRIVY_IMAGE := aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969
-.PHONY: seed token help install lint format typecheck test test-integration test-llm check audit eval eval-redteam eval-retrieval migrate ingest run up down
+.PHONY: seed token help install lint format typecheck test test-integration test-llm check audit eval eval-redteam eval-retrieval migrate ingest run up up-observability down
 
 help:  ## Show available targets
-	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-10s %s\n", $$1, $$2}'
+	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-18s %s\n", $$1, $$2}'
 
 install:  ## Install dependencies and git hooks
 	uv sync
@@ -73,5 +73,8 @@ token:  ## Print an access token from the local Keycloak, e.g. make token USER=a
 up:  ## Start local infrastructure (Postgres + pgvector, Keycloak)
 	docker compose up -d --wait
 
+up-observability:  ## Jaeger for traces (UI http://localhost:16686); set CA_OTEL_ENDPOINT
+	docker compose --profile observability up -d jaeger
+
 down:  ## Stop local infrastructure
-	docker compose down
+	docker compose --profile observability down
