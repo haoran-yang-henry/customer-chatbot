@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src https://*.trycloudflare.com http://localhost:* http://127.0.0.1:*; base-uri 'none'; form-action 'self'">
+  <meta name="referrer" content="no-referrer">
+  <title>NordElektro Kundenservice</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <img src="favicon.svg" alt="" width="28" height="28">
+      <div>
+        <strong>NordElektro</strong>
+        <span>Kundenservice-Assistent · Demo</span>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <span id="status" class="status" hidden></span>
+      <span id="user" class="user" hidden></span>
+      <button id="logout" class="link-button" type="button" hidden>Abmelden</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="setup" class="card" hidden>
+      <h1>Mit dem Demo-Server verbinden</h1>
+      <p>Die Demo läuft auf dem Rechner des Entwicklers und ist über einen Link mit
+        <code>?backend=…</code> erreichbar. Sie haben nur die Adresse? Dann fügen Sie sie hier ein.</p>
+      <form id="setup-form" class="inline-form">
+        <label class="visually-hidden" for="backend-input">Backend-Adresse</label>
+        <input id="backend-input" type="url" placeholder="https://….trycloudflare.com" required>
+        <button type="submit">Verbinden</button>
+      </form>
+      <p id="setup-error" class="error" role="alert"></p>
+    </section>
+
+    <section id="login" class="card" hidden>
+      <h1>Willkommen beim NordElektro-Kundenservice</h1>
+      <p>Der Assistent beantwortet Fragen zu Rücksendung, Versand, Zahlung, Garantie und Produkten
+        – und hilft angemeldeten Kunden bei ihren eigenen Bestellungen.</p>
+      <button id="login-button" class="primary" type="button">Anmelden</button>
+      <p id="login-error" class="error" role="alert"></p>
+      <details class="hint">
+        <summary>Demo-Konten</summary>
+        <p>Drei erfundene Kunden mit Beispielbestellungen: <code>anna.schneider</code>,
+          <code>jonas.weber</code>, <code>mehmet.yilmaz</code>. Das Passwort erhalten Sie zusammen
+          mit dem Link.</p>
+      </details>
+      <button id="change-backend" class="link-button small" type="button">Andere Server-Adresse</button>
+    </section>
+
+    <section id="chat" class="chat" hidden>
+      <ol id="messages" class="messages" aria-live="polite"></ol>
+      <div id="suggestions" class="suggestions" aria-label="Beispielfragen"></div>
+      <form id="composer" class="composer">
+        <label class="visually-hidden" for="input">Ihre Nachricht</label>
+        <textarea id="input" rows="1" maxlength="2000" placeholder="Ihre Frage an den Kundenservice …" required></textarea>
+        <button id="send" class="primary" type="submit" aria-label="Senden">Senden</button>
+      </form>
+      <div class="chat-footer">
+        <span>Erfundener Shop, erfundene Bestellungen. Antworten erzeugt ein KI-Modell.</span>
+        <button id="new-chat" class="link-button small" type="button">Neue Unterhaltung</button>
+      </div>
+    </section>
+  </main>
+
+  <template id="message-template">
+    <li class="message">
+      <div class="bubble"><div class="text"></div></div>
+      <div class="meta"></div>
+    </li>
+  </template>
+</body>
+</html>

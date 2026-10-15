@@ -11,6 +11,7 @@ docs
 eval
 tests
 infra
+frontend
 **/__pycache__
 .mypy_cache
 .pytest_cache

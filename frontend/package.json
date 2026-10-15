@@ -1,0 +1,9 @@
+{
+  "name": "nordelektro-chat-demo",
+  "private": true,
+  "type": "module",
+  "description": "Browser demo of the customer service agent: static files, no build step, no dependencies.",
+  "scripts": {
+    "test": "node --test \"tests/*.test.js\""
+  }
+}

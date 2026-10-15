@@ -36,6 +36,9 @@ jobs:
         run: uv run mypy
       - name: Unit and data tests
         run: uv run pytest --cov -m "not integration and not llm"
+      - name: Frontend unit tests (Node is preinstalled on the runner)
+        working-directory: frontend
+        run: npm test
       - name: Integration tests (Testcontainers, Docker is preinstalled on the runner)
         run: uv run pytest -m integration
       - name: Evaluation harness on the full datasets (placeholder agent, no model)
