@@ -43,7 +43,7 @@ async def test_llm_outage_reaches_the_fallback_in_time_and_the_breaker_takes_ove
         AnswerService(
             FakeRetriever([document("policy-returns-v5", 0.7)]),
             llm,
-            load_prompt("answer", 3),
+            load_prompt("answer", 4),
             FixedClock(TODAY),
             tenant_id="nordelektro",
             min_similarity=0.35,

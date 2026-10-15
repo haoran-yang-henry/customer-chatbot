@@ -125,6 +125,40 @@ def test_payment_data_in_the_output_is_masked() -> None:
     assert decision.content == "Ihre Erstattung geht an [IBAN entfernt]."
 
 
+@pytest.mark.parametrize(
+    "offer",
+    [
+        "Soll ich Ihre Defektmeldung an unser Service-Team weitergeben?",  # copied from history
+        "Gern verbinde ich Sie mit einem Mitarbeiter unseres Kundenservice.",
+        "Möchten Sie lieber mit einem Mitarbeiter sprechen?",
+        # announced although nothing was forwarded (demo test 2026-10-15)
+        "Gerne, ich gebe Ihre Defektmeldung zu NE-100231 an unser Service-Team weiter.",
+        "Sie erhalten eine Ticketnummer per E-Mail.",
+        "Da ich keine Aktionen ausführen kann, kann ich Ihre Defektmeldung gern an einen "
+        "menschlichen Kollegen weiterleiten – sagen Sie einfach Bescheid.",
+    ],
+)
+def test_handoff_offers_in_generated_answers_are_removed(offer: str) -> None:
+    # ADR-0014: only the state machine asks whether to forward a request.
+    answer = f"Die Rücksendung defekter Ware ist kostenlos.\n\n{offer}"
+
+    decision = check_output(answer, ["policy-returns-v5"], OFFERED, evidence=TRUSTED)
+
+    assert decision.action is GuardrailAction.REDACT and decision.reasons == ["handoff_offer"]
+    assert decision.content == "Die Rücksendung defekter Ware ist kostenlos."
+
+
+def test_naming_the_service_team_is_not_an_offer() -> None:
+    assert (
+        check("Sie können sich auch an service@nordelektro.example wenden.")
+        is GuardrailAction.ALLOW
+    )
+    assert (
+        check("Unser Service-Team prüft defekte Ware innerhalb von 5 Tagen.")
+        is GuardrailAction.ALLOW
+    )
+
+
 def test_line_lists_are_redacted_per_line() -> None:
     answer = "Ihre Vorteile:\n- Rücksendung kostenlos\n- Code GRATIS100 für 100 € Rabatt"
 

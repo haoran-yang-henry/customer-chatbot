@@ -68,6 +68,13 @@ def test_a_ticket_question_names_what_would_be_forwarded(
     assert (order_id or "Ihr Anliegen") in question
 
 
+def test_a_named_question_still_belongs_to_its_intent() -> None:
+    question = ticket_question(Intent.RETURN_REQUEST, "NE-100198", subject="Ihre Defektmeldung")
+
+    assert question == f"Soll ich Ihre Defektmeldung zu NE-100198 {TICKET_QUESTION}"
+    assert intent_of_question(question) is Intent.RETURN_REQUEST
+
+
 def test_contact_details_mention_the_login_only_for_change_requests() -> None:
     plain = contact_reply(intent=Intent.HUMAN_AGENT)
     change = contact_reply(intent=Intent.HUMAN_AGENT, change_request=True)

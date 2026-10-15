@@ -30,8 +30,8 @@ class SessionState(BaseModel):
 
     active_intent: Intent | None = None
     workflow: WorkflowState = WorkflowState.IDLE
-    # order_id: the order being discussed; request: the change awaiting confirmation;
-    # ticket_id: the ticket this conversation already opened.
+    # order_id: the order being discussed; request / question: the change awaiting
+    # confirmation and the question asked about it; ticket_id: the ticket already opened.
     slots: dict[str, str] = Field(default_factory=dict)
 
 
@@ -65,6 +65,12 @@ def decide(state: SessionState, routing: RoutingResult, *, authenticated: bool) 
         reply = _confirmation(state, routing)
         if reply is not None:
             return reply
+        if _follow_up(state, routing):
+            # A question about the same matter ("Wie sende ich das zurück?"): answer it from the
+            # documents; the question stays open, so a later "Ja" still forwards the request.
+            return Decision(
+                step=NextStep.ANSWER_FROM_KNOWLEDGE, intent=state.active_intent, state=state
+            )
         # Anything else is a new topic: the question lapses, nothing is forwarded.
         state = _without_request(state)
     if routing.source is RoutingSource.FALLBACK:
@@ -130,19 +136,32 @@ def _offer_ticket(state: SessionState, routing: RoutingResult, intent: Intent) -
 def _confirmation(state: SessionState, routing: RoutingResult) -> Decision | None:
     """The customer's answer to "Soll ich … an unser Service-Team weitergeben?"."""
     intent = state.active_intent or routing.intent
+    same_matter = routing.intent is not None and routing.intent is state.active_intent
     agrees = routing.confirmation is True or (
-        routing.confirmation is None and routing.intent is Intent.HUMAN_AGENT
+        routing.confirmation is None
+        and (routing.intent is Intent.HUMAN_AGENT or (routing.change_request and same_matter))
     )
     if agrees:
         if "ticket_id" in state.slots:
             return Decision(step=NextStep.TICKET_EXISTS, intent=intent, state=state)
-        confirmed = state.model_copy(update={"workflow": WorkflowState.IDLE})
+        slots = {k: v for k, v in state.slots.items() if k != "question"}
+        confirmed = state.model_copy(update={"workflow": WorkflowState.IDLE, "slots": slots})
         return Decision(step=NextStep.CREATE_TICKET, intent=intent, state=confirmed)
     if routing.confirmation is False:
         return Decision(step=NextStep.TICKET_DECLINED, intent=intent, state=_without_request(state))
     return None
 
 
+def _follow_up(state: SessionState, routing: RoutingResult) -> bool:
+    other_order = routing.order_id is not None and routing.order_id != state.slots.get("order_id")
+    return (
+        routing.source is RoutingSource.LLM
+        and routing.intent is not None
+        and routing.intent is state.active_intent
+        and not other_order
+    )
+
+
 def _without_request(state: SessionState) -> SessionState:
-    slots = {key: value for key, value in state.slots.items() if key != "request"}
+    slots = {k: v for k, v in state.slots.items() if k not in ("request", "question")}
     return state.model_copy(update={"workflow": WorkflowState.IDLE, "slots": slots})

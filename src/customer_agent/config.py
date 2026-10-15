@@ -77,7 +77,7 @@ class Settings(BaseSettings):
     retrieval_fulltext_weight: float = 0.25
 
     # Answering (Day 3)
-    answer_prompt_version: int = 3
+    answer_prompt_version: int = 4
     router_prompt_version: int = 5
     # Below this best cosine similarity the question is treated as unrelated and answered with
     # "no answer" without an LLM call. Between this floor and clearly relevant scores the LLM

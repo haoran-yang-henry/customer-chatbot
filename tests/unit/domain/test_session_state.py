@@ -262,3 +262,25 @@ def test_one_conversation_opens_at_most_one_ticket() -> None:
 
     assert another.step is NextStep.TICKET_EXISTS
     assert agreed.step is NextStep.TICKET_EXISTS
+
+
+def test_a_follow_up_on_the_same_matter_keeps_the_question_open() -> None:
+    decision = decide(PENDING, routed(Intent.ORDER_CHANGE), authenticated=True)
+
+    assert decision.step is NextStep.ANSWER_FROM_KNOWLEDGE
+    assert decision.state == PENDING  # a later "Ja" still forwards the request
+
+
+def test_a_follow_up_about_another_order_lets_the_question_lapse() -> None:
+    decision = decide(
+        PENDING, routed(Intent.ORDER_CHANGE, order_id="NE-100252"), authenticated=True
+    )
+
+    assert decision.step is NextStep.ORDER_GUIDANCE
+    assert decision.state.workflow is WorkflowState.IDLE and "request" not in decision.state.slots
+
+
+def test_asking_for_the_change_itself_while_asked_is_agreement() -> None:
+    decision = decide(PENDING, routed(Intent.ORDER_CHANGE, change=True), authenticated=True)
+
+    assert decision.step is NextStep.CREATE_TICKET

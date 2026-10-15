@@ -16,7 +16,9 @@ from customer_agent.domain.orders import (
     OrderStatus,
     can_cancel,
     can_change_address,
+    can_claim_warranty,
     can_return,
+    defect_presumed,
 )
 
 ACCOUNT_URL = "https://www.nordelektro.example/konto/bestellungen"  # as in the knowledge base
@@ -27,6 +29,7 @@ TOOL = "get_order_status"
 class Guidance:
     response: AgentResponse
     change_possible: bool = False  # the customer's change can still be made: offer a ticket
+    question_subject: str | None = None  # what the ticket question names, if not the intent's
 
 
 def _reply(text: str, behavior: Behavior, intent: Intent, sources: list[str]) -> AgentResponse:
@@ -140,8 +143,10 @@ def _cancel(order: Order) -> Guidance:
     return Guidance(_reply(text, Behavior.ANSWER, Intent.ORDER_CANCEL, sources))
 
 
-def _return(order: Order, today: date) -> Guidance:
+def _return(order: Order, today: date, *, defect: bool) -> Guidance:
     oid, eligibility = order.order_id, can_return(order, today)
+    if defect and eligibility.reason == "window_expired":
+        return _warranty(order, today)  # the return window is over, the warranty is not
     shipping = order.shipping
     if eligibility.allowed and eligibility.deadline and shipping.delivered_at:
         seal = (
@@ -187,6 +192,34 @@ def _return(order: Order, today: date) -> Guidance:
     return Guidance(_reply(text, Behavior.ANSWER, Intent.RETURN_REQUEST, ["policy-returns-v5"]))
 
 
+def _warranty(order: Order, today: date) -> Guidance:
+    """policy-warranty: the customer reported a defect after the return window."""
+    oid, claim = order.order_id, can_claim_warranty(order, today)
+    sources = ["policy-warranty"]
+    if not claim.allowed or claim.deadline is None:
+        until = f" ist am {format_date_de(claim.deadline)} abgelaufen" if claim.deadline else ""
+        text = (
+            f"Die gesetzliche Gewährleistung für Ihre Bestellung {oid}{until}. Ob der Hersteller "
+            f"eine Garantie gewährt, klärt unser Service-Team per E-Mail an {CONTACT_EMAIL}."
+        )
+        return Guidance(_reply(text, Behavior.ANSWER, Intent.RETURN_REQUEST, sources))
+    presumption = (
+        " Da die Zustellung weniger als 12 Monate zurückliegt, wird vermutet, dass der Mangel "
+        "schon bei der Übergabe vorlag."
+        if defect_presumed(order, today)
+        else ""
+    )
+    text = (
+        f"Für Ihre Bestellung {oid} ({_items(order)}) gilt die gesetzliche Gewährleistung noch "
+        f"bis zum {format_date_de(claim.deadline)}.{presumption} Sie können zwischen Reparatur "
+        "und Ersatzlieferung wählen; die Rücksendung der defekten Ware ist für Sie kostenlos. So "
+        "melden Sie den Defekt: Kundenkonto → „Meine Bestellungen“ → „Problem melden“: "
+        f"{ACCOUNT_URL}."
+    )
+    reply = _reply(text, Behavior.ANSWER, Intent.RETURN_REQUEST, sources)
+    return Guidance(reply, change_possible=True, question_subject="Ihre Defektmeldung")
+
+
 def _change(order: Order) -> Guidance:
     """faq-order-change. Items cannot be changed at all; the address only before processing."""
     oid, eligibility = order.order_id, can_change_address(order)
@@ -224,12 +257,12 @@ def _change(order: Order) -> Guidance:
     )
 
 
-def order_guidance(intent: Intent, order: Order, today: date) -> Guidance:
+def order_guidance(intent: Intent, order: Order, today: date, *, defect: bool = False) -> Guidance:
     match intent:
         case Intent.ORDER_CANCEL:
             return _cancel(order)
         case Intent.RETURN_REQUEST:
-            return _return(order, today)
+            return _return(order, today, defect=defect)
         case Intent.ORDER_CHANGE:
             return _change(order)
         case Intent.REFUND_STATUS:

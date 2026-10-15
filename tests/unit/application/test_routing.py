@@ -185,4 +185,7 @@ def test_router_flags_for_change_requests_and_confirmations_are_parsed() -> None
     result = parse_llm_routing(text, convo("Ja, bitte machen Sie das für mich."))
 
     assert result.change_request is True and result.confirmation is True
+    assert parse_llm_routing(
+        '{"intent": "RETURN_REQUEST", "defect_reported": true}', convo("x")
+    ).defect_reported
     assert parse_llm_routing('{"intent": "SHIPPING_INFO"}', convo("x")).confirmation is None

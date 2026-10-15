@@ -41,6 +41,8 @@ class RoutingResult(BaseModel):
     # Reply to the assistant's question whether to forward a request to the service team:
     # True = agrees, False = declines, None = not a reply to such a question.
     confirmation: bool | None = None
+    # The customer says a product they bought is defective ("kaputt", "funktioniert nicht").
+    defect_reported: bool = False
     # Self-contained German question for retrieval ("Und in die Schweiz?" → full question).
     standalone_query: str
     clarification_question: str | None = None

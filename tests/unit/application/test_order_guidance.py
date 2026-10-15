@@ -146,6 +146,25 @@ def test_guidance_never_claims_to_have_acted_and_never_offers_a_handoff() -> Non
             assert "Mitarbeiter" not in answer  # ADR-0014: the orchestrator asks, if anything
 
 
+def test_a_defect_after_the_return_window_takes_the_warranty_route() -> None:
+    guidance = order_guidance(Intent.RETURN_REQUEST, ORDERS["NE-100198"], TODAY, defect=True)
+    answer = guidance.response.answer
+
+    assert "Gewährleistung noch bis zum 10. August 2028" in answer
+    assert "Reparatur und Ersatzlieferung" in answer and "kostenlos" in answer
+    assert "vermutet" in answer  # delivered less than 12 months ago
+    assert "Rückgabefrist" not in answer
+    assert guidance.response.sources == ["policy-warranty"]
+    assert guidance.change_possible and guidance.question_subject == "Ihre Defektmeldung"
+
+
+def test_a_defect_within_the_return_window_keeps_the_free_return() -> None:
+    guidance = order_guidance(Intent.RETURN_REQUEST, ORDERS["NE-100231"], TODAY, defect=True)
+
+    assert "Retourenlabel" in guidance.response.answer
+    assert guidance.response.sources == ["policy-returns-v5"]
+
+
 @pytest.mark.parametrize(
     ("order_id", "intent", "possible"),
     [

@@ -103,22 +103,26 @@ def fallback(reasons: list[str]) -> AgentResponse:
 
 # Every confirmation question ends like this; a stateless call recognises it in the transcript.
 TICKET_QUESTION = "an unser Service-Team weitergeben?"
-# Which request a question was about, so that its confirmation can be attributed to it.
-_QUESTION_SUBJECTS: dict[Intent, str] = {
-    Intent.ORDER_CHANGE: "Ihren Änderungswunsch",
-    Intent.ORDER_CANCEL: "die Stornierung",
-    Intent.RETURN_REQUEST: "die Rücksendung",
+# What a question offers to forward, and the intent its confirmation belongs to.
+_QUESTION_SUBJECTS: dict[str, Intent] = {
+    "Ihren Änderungswunsch": Intent.ORDER_CHANGE,
+    "die Stornierung": Intent.ORDER_CANCEL,
+    "die Rücksendung": Intent.RETURN_REQUEST,
+    "Ihre Defektmeldung": Intent.RETURN_REQUEST,
 }
 
 
-def ticket_question(intent: Intent | None, order_id: str | None) -> str:
-    subject = _QUESTION_SUBJECTS.get(intent, "Ihr Anliegen") if intent else "Ihr Anliegen"
+def ticket_question(
+    intent: Intent | None, order_id: str | None, *, subject: str | None = None
+) -> str:
+    if subject is None:
+        subject = next((s for s, i in _QUESTION_SUBJECTS.items() if i is intent), "Ihr Anliegen")
     about = f" zu {order_id}" if order_id else ""
     return f"Soll ich {subject}{about} {TICKET_QUESTION}"
 
 
 def intent_of_question(question: str) -> Intent | None:
-    return next((i for i, subject in _QUESTION_SUBJECTS.items() if subject in question), None)
+    return next((i for subject, i in _QUESTION_SUBJECTS.items() if subject in question), None)
 
 
 def confirm_ticket_reply(intent: Intent | None, order_id: str | None) -> AgentResponse:

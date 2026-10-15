@@ -49,6 +49,7 @@ class _LLMRouting(BaseModel):
     money_demand: bool = False
     change_request: bool = False
     confirmation: bool | None = None
+    defect_reported: bool = False
     standalone_query: str = ""
     clarification_question: str | None = None
 
@@ -140,6 +141,7 @@ def parse_llm_routing(text: str, conversation: Conversation) -> RoutingResult:
         money_demand=parsed.money_demand,
         change_request=parsed.change_request,
         confirmation=parsed.confirmation,
+        defect_reported=parsed.defect_reported,
         standalone_query=parsed.standalone_query.strip() or search_query(conversation),
         clarification_question=(parsed.clarification_question or "").strip() or None,
         source=RoutingSource.LLM,

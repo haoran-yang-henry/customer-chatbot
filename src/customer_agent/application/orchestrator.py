@@ -64,6 +64,9 @@ from customer_agent.observability.metrics import AGENT_REPLIES
 log = get_logger("chat")
 
 _TICKET_NUMBER = re.compile(r"Ticketnummer (?:lautet )?(T-\d{6})")
+# Facts the customer may simply ask for again ("Und wo ist sie jetzt?"); everything else is
+# guidance, which is not repeated word for word.
+_FACT_LOOKUPS = {Intent.ORDER_STATUS, Intent.REFUND_STATUS}
 
 
 class TurnResult(BaseModel):
@@ -163,7 +166,7 @@ class ConversationOrchestrator:
         self, conversation: Conversation, state: SessionState, session_id: str
     ) -> AsyncIterator[TurnEvent]:
         text = conversation.messages[-1].content
-        state = recover_ticket_state(conversation, state)
+        state = recover_state(conversation, state)
         try:
             routing, verdict = await self._route_and_screen(conversation, state, session_id)
             if verdict is not None:
@@ -220,17 +223,34 @@ class ConversationOrchestrator:
                 user_text=conversation.messages[-1].content,
             )
 
+        # A follow-up while a ticket question is open: answer it, then ask the question again.
+        pending = step.state.slots.get("question") if _awaiting(step.state) else None
+
+        async def knowledge() -> AsyncIterator[TurnEvent]:
+            async for event in self._answers.answer_stream(
+                conversation, query=routing.standalone_query, session_id=session_id
+            ):
+                if not isinstance(event, FinalAnswer):
+                    yield event
+                elif pending is None:
+                    yield result(event.response)
+                else:
+                    answer = f"{event.response.answer}\n\n{pending}"
+                    yield result(event.response.model_copy(update={"answer": answer}))
+
         match step.step:
             case NextStep.ORDER_GUIDANCE:
-                yield result(*await self._order_guidance(conversation, routing, step, session_id))
-            case NextStep.ANSWER_FROM_KNOWLEDGE:
-                async for event in self._answers.answer_stream(
-                    conversation, query=routing.standalone_query, session_id=session_id
-                ):
-                    if isinstance(event, FinalAnswer):
-                        yield result(event.response)
-                    else:
+                reply = await self._order_guidance(conversation, routing, step, session_id)
+                if reply is not None:
+                    yield result(*reply)
+                else:
+                    # The same guidance once more would not help: the customer asks something
+                    # the template does not cover, so answer the follow-up from the documents.
+                    async for event in knowledge():
                         yield event
+            case NextStep.ANSWER_FROM_KNOWLEDGE:
+                async for event in knowledge():
+                    yield event
             case NextStep.CONFIRM_TICKET:
                 yield result(*await self._confirm_ticket(conversation, step, session_id))
             case NextStep.CREATE_TICKET:
@@ -275,9 +295,10 @@ class ConversationOrchestrator:
         routing: RoutingResult,
         step: Decision,
         session_id: str,
-    ) -> tuple[AgentResponse, SessionState]:
+    ) -> tuple[AgentResponse, SessionState] | None:
         """Facts and eligibility for one own order; if the requested change is still possible,
-        one question whether to forward it (or a pointer to the ticket already open)."""
+        one question whether to forward it (or a pointer to the ticket already open). ``None``
+        if this guidance was already given in the conversation (see ``_execute``)."""
         state = step.state
         order_id = state.slots["order_id"]
         intent = step.intent or Intent.ORDER_STATUS
@@ -285,18 +306,22 @@ class ConversationOrchestrator:
         if order is None:
             # Never remember (or later attach to a ticket) an order that is not the customer's.
             return order_not_found(order_id, intent), _forget_order(state)
-        guidance = order_guidance(intent, order, self._clock.today())
+        guidance = order_guidance(
+            intent, order, self._clock.today(), defect=routing.defect_reported
+        )
         response = guidance.response
+        if intent not in _FACT_LOOKUPS and _already_said(conversation, response.answer):
+            return None
         if not guidance.change_possible:
             return response, state
         if "ticket_id" in state.slots:
             reminder = ticket_exists_reply(state.slots["ticket_id"], intent=intent).answer
             return response.model_copy(update={"answer": f"{response.answer}\n\n{reminder}"}), state
-        question = ticket_question(intent, order_id)
+        question = ticket_question(intent, order_id, subject=guidance.question_subject)
         pending = state.model_copy(
             update={
                 "workflow": WorkflowState.AWAITING_TICKET_CONFIRMATION,
-                "slots": {**state.slots, "request": routing.standalone_query},
+                "slots": {**state.slots, "request": routing.standalone_query, "question": question},
             }
         )
         return response.model_copy(update={"answer": f"{response.answer}\n\n{question}"}), pending
@@ -311,7 +336,9 @@ class ConversationOrchestrator:
             slots = {k: v for k, v in state.slots.items() if k not in ("order_id", "request")}
             idle = state.model_copy(update={"workflow": WorkflowState.IDLE, "slots": slots})
             return order_not_found(order_id, step.intent or Intent.HUMAN_AGENT), idle
-        return confirm_ticket_reply(step.intent, order_id), state
+        question = ticket_question(step.intent, order_id)
+        asked = state.model_copy(update={"slots": {**state.slots, "question": question}})
+        return confirm_ticket_reply(step.intent, order_id), asked
 
     async def _create_ticket(
         self, conversation: Conversation, step: Decision, session_id: str
@@ -380,30 +407,46 @@ class ConversationOrchestrator:
         return ticket_id, True
 
 
-def recover_ticket_state(conversation: Conversation, state: SessionState) -> SessionState:
+def recover_state(conversation: Conversation, state: SessionState) -> SessionState:
     """A stateless call (the evaluation) has the transcript but no session state. Rebuild what
-    the ticket flow needs from the assistant's own earlier messages: an open confirmation
-    question and a ticket already opened. Sessions with state keep theirs."""
-    if state != SessionState():
+    a session would hold from the earlier messages: the order last talked about (looked up again,
+    scoped to the customer, before any use), an open ticket question of the assistant, and a
+    ticket already opened. Sessions with state keep theirs."""
+    if state != SessionState() or len(conversation.messages) < 2:
         return state
-    messages = conversation.messages
+    earlier = conversation.messages[:-1]
     slots: dict[str, str] = {}
-    for message in messages[:-1]:
+    for message in earlier:
+        if order_id := extract_order_id(message.content):
+            slots["order_id"] = order_id
         if message.role is Role.ASSISTANT and (match := _TICKET_NUMBER.search(message.content)):
             slots["ticket_id"] = match.group(1)
-    last = messages[-2] if len(messages) >= 2 else None
-    if last is None or last.role is not Role.ASSISTANT or TICKET_QUESTION not in last.content:
+    last = earlier[-1]
+    if last.role is not Role.ASSISTANT or TICKET_QUESTION not in last.content:
         return SessionState(slots=slots) if slots else state
     question = last.content[last.content.rfind("Soll ich") :]
+    slots["question"] = question
     if order_id := extract_order_id(question):
         slots["order_id"] = order_id
-    earlier = [m.content for m in messages[:-2] if m.role is Role.USER][-3:]
-    if earlier:
-        slots["request"] = " / ".join(earlier)
+    requests = [m.content for m in earlier[:-1] if m.role is Role.USER][-3:]
+    if requests:
+        slots["request"] = " / ".join(requests)
     return SessionState(
         active_intent=intent_of_question(question),
         workflow=WorkflowState.AWAITING_TICKET_CONFIRMATION,
         slots=slots,
+    )
+
+
+def _awaiting(state: SessionState) -> bool:
+    return state.workflow is WorkflowState.AWAITING_TICKET_CONFIRMATION
+
+
+def _already_said(conversation: Conversation, text: str) -> bool:
+    return any(
+        text in message.content
+        for message in conversation.messages[:-1]
+        if message.role is Role.ASSISTANT
     )
 
 

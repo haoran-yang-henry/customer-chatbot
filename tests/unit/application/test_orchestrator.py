@@ -476,3 +476,99 @@ async def test_the_daily_ticket_limit_still_applies_across_conversations() -> No
     assert audit.entries[-1].outcome == "rate_limited:T-000003"
     other = await agent.respond(confirmed(0, "C-1002"))  # the limit is per customer
     assert other.tool_calls == ["create_ticket"]
+
+
+# --- follow-ups the order template does not cover --------------------------------------------
+
+
+def returning(defect: bool) -> str:
+    return (
+        '{"intent": "RETURN_REQUEST", "confidence": 0.9, "about_specific_order": true, '
+        f'"defect_reported": {"true" if defect else "false"}, '
+        '"standalone_query": "Wie sende ich den defekten Laptop aus NE-100198 zurück?"}'
+    )
+
+
+async def test_a_reported_defect_after_the_return_window_gets_the_warranty_route() -> None:
+    llm = ScriptedRouterLLM(returning(defect=False))
+    chat = Chat(orchestrator(llm), "C-1001")
+
+    first = await chat.send("Kann ich den Laptop aus NE-100198 noch zurückgeben?")
+    llm.routing = returning(defect=True)
+    second = await chat.send("Ja, der Laptop war defekt und ich möchte ihn zurücksenden.")
+
+    assert "Rückgabefrist" in first.response.answer and TICKET_QUESTION not in first.response.answer
+    assert "Gewährleistung noch bis zum" in second.response.answer
+    assert second.response.answer.endswith(
+        f"Soll ich Ihre Defektmeldung zu NE-100198 {TICKET_QUESTION}"
+    )
+    assert second.state.workflow is WorkflowState.AWAITING_TICKET_CONFIRMATION
+
+
+async def test_guidance_already_given_is_not_repeated_word_for_word() -> None:
+    llm = ScriptedRouterLLM(
+        returning(defect=False), answer="Melden Sie den Defekt im Kundenkonto. [policy-returns-v5]"
+    )
+    chat = Chat(orchestrator(llm), "C-1001")
+
+    first = await chat.send("Kann ich den Laptop aus NE-100198 noch zurückgeben?")
+    again = await chat.send("Wie kann ich das zurücksenden?")
+
+    assert again.response.answer != first.response.answer
+    assert again.response.answer.startswith("Melden Sie den Defekt")  # from the documents
+    assert again.response.intent is Intent.RETURN_REQUEST
+
+
+async def test_order_facts_may_be_asked_for_again() -> None:
+    llm = ScriptedRouterLLM(
+        '{"intent": "ORDER_STATUS", "confidence": 0.9, "about_specific_order": true, '
+        '"standalone_query": "Wo ist NE-100250?"}'
+    )
+    chat = Chat(orchestrator(llm), "C-1002")
+
+    first = await chat.send("Wo ist NE-100250?")
+    again = await chat.send("Und wo ist NE-100250 jetzt?")
+
+    assert again.response.answer == first.response.answer
+    assert again.response.behavior is Behavior.ACTION
+
+
+async def test_a_stateless_follow_up_refers_to_the_order_talked_about() -> None:
+    orders = SeedOrderRepository()
+    convo = Conversation(
+        messages=[
+            Message(role=Role.USER, content="Kann ich den Laptop aus NE-100198 noch zurückgeben?"),
+            Message(role=Role.ASSISTANT, content="Die Rückgabefrist für NE-100198 ist abgelaufen."),
+            Message(role=Role.USER, content="Der Laptop war aber defekt."),
+        ],
+        customer_id="C-1001",
+    )
+
+    response = await orchestrator(ScriptedRouterLLM(returning(defect=True)), orders=orders).respond(
+        convo
+    )
+
+    assert "Gewährleistung noch bis zum" in response.answer
+    assert orders.lookups == [("NE-100198", "C-1001")]  # looked up again, scoped to the customer
+
+
+async def test_the_demo_conversation_ends_with_one_ticket_after_a_follow_up() -> None:
+    # Demo test 2026-10-15: return window over → defect → "Wie kann ich das zurücksenden?" → "Ja".
+    tickets = InMemoryTicketService()
+    llm = ScriptedRouterLLM(
+        returning(defect=False), answer="Melden Sie den Defekt. [policy-returns-v5]"
+    )
+    chat = Chat(orchestrator(llm, tickets=tickets), "C-1001")
+
+    await chat.send("Kann ich den Laptop aus NE-100198 noch zurückgeben?")
+    llm.routing = returning(defect=True)
+    await chat.send("Ja, der Laptop war defekt und ich möchte ihn zurücksenden.")
+    follow_up = await chat.send("Wie kann ich das zurücksenden?")
+    created = await chat.send("Ja")
+
+    question = f"Soll ich Ihre Defektmeldung zu NE-100198 {TICKET_QUESTION}"
+    assert follow_up.response.answer == f"Melden Sie den Defekt.\n\n{question}"
+    assert follow_up.state.workflow is WorkflowState.AWAITING_TICKET_CONFIRMATION
+    assert created.response.tool_calls == ["create_ticket"]
+    [ticket] = tickets.tickets
+    assert ticket.order_id == "NE-100198" and ticket.intent == "RETURN_REQUEST"
