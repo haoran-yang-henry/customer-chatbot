@@ -1,11 +1,13 @@
 """Conversation orchestrator: the ``CustomerServiceAgent`` behind the API and the evaluation.
 
 One turn: input guardrail → intent router ‖ attack classifier → state machine (``decide``) →
-handler (knowledge answer with output guardrail, order guidance, handoff). Guardrails judge;
-this class decides what the customer sees (ADR-0011).
+handler (knowledge answer with output guardrail, order guidance, ticket flow). Guardrails judge;
+this class decides what the customer sees (ADR-0011). Tickets only for confirmed change
+requests, at most one per conversation (ADR-0014).
 """
 
 import asyncio
+import re
 from collections.abc import AsyncIterator
 
 from pydantic import BaseModel, ConfigDict
@@ -18,13 +20,16 @@ from customer_agent.application.answering import (
 )
 from customer_agent.application.fallbacks import (
     PAYMENT_DATA_NOTICE,
+    TICKET_QUESTION,
+    confirm_ticket_reply,
     contact_reply,
     fallback,
-    handoff_pending_reply,
-    handoff_reply,
+    intent_of_question,
     outage_contact_reply,
-    outage_reply,
     step_reply,
+    ticket_created_reply,
+    ticket_exists_reply,
+    ticket_question,
     with_payment_data_notice,
 )
 from customer_agent.application.guardrails import PAYMENT_DATA_REASONS, check_input
@@ -43,13 +48,22 @@ from customer_agent.application.routing import IntentRouter, route_by_rules
 from customer_agent.domain.conversation import AgentResponse, Conversation, Message, Role
 from customer_agent.domain.guardrails import GuardrailDecision
 from customer_agent.domain.intents import Intent
-from customer_agent.domain.routing import RoutingResult
-from customer_agent.domain.session import Decision, NextStep, SessionState, decide
+from customer_agent.domain.orders import Order
+from customer_agent.domain.routing import RoutingResult, extract_order_id
+from customer_agent.domain.session import (
+    Decision,
+    NextStep,
+    SessionState,
+    WorkflowState,
+    decide,
+)
 from customer_agent.observability import get_logger, record_guardrail, request_id_var
 from customer_agent.observability import step as agent_step  # `step` is a Decision here
 from customer_agent.observability.metrics import AGENT_REPLIES
 
 log = get_logger("chat")
+
+_TICKET_NUMBER = re.compile(r"Ticketnummer (?:lautet )?(T-\d{6})")
 
 
 class TurnResult(BaseModel):
@@ -149,6 +163,7 @@ class ConversationOrchestrator:
         self, conversation: Conversation, state: SessionState, session_id: str
     ) -> AsyncIterator[TurnEvent]:
         text = conversation.messages[-1].content
+        state = recover_ticket_state(conversation, state)
         try:
             routing, verdict = await self._route_and_screen(conversation, state, session_id)
             if verdict is not None:
@@ -164,7 +179,8 @@ class ConversationOrchestrator:
         except ProviderUnavailableError as exc:
             log.error("provider unavailable: %s", exc)
             yield TurnResult(
-                response=await self._outage_reply(conversation, session_id),
+                # Nothing can be understood (NFR-11): contact channels at once, never a ticket.
+                response=outage_contact_reply(),
                 state=state,
                 user_text=text,
             )
@@ -195,16 +211,18 @@ class ConversationOrchestrator:
         step: Decision,
         session_id: str,
     ) -> AsyncIterator[TurnEvent]:
-        def result(response: AgentResponse) -> TurnResult:
+        def result(response: AgentResponse, state: SessionState | None = None) -> TurnResult:
             final = response.model_copy(update={"intent": step.intent})
             log.info("behavior=%s sources=%s", final.behavior, ",".join(final.sources) or "-")
             return TurnResult(
-                response=final, state=step.state, user_text=conversation.messages[-1].content
+                response=final,
+                state=state or step.state,
+                user_text=conversation.messages[-1].content,
             )
 
         match step.step:
             case NextStep.ORDER_GUIDANCE:
-                yield result(await self._order_guidance(conversation, step, session_id))
+                yield result(*await self._order_guidance(conversation, routing, step, session_id))
             case NextStep.ANSWER_FROM_KNOWLEDGE:
                 async for event in self._answers.answer_stream(
                     conversation, query=routing.standalone_query, session_id=session_id
@@ -213,24 +231,28 @@ class ConversationOrchestrator:
                         yield result(event.response)
                     else:
                         yield event
-            case NextStep.HANDOFF:
-                yield result(await self._handoff(conversation, routing, step, session_id))
-            case NextStep.HANDOFF_CONTACT:
-                yield result(contact_reply(intent=step.intent))
+            case NextStep.CONFIRM_TICKET:
+                yield result(*await self._confirm_ticket(conversation, step, session_id))
+            case NextStep.CREATE_TICKET:
+                yield result(*await self._create_ticket(conversation, step, session_id))
+            case NextStep.TICKET_EXISTS:
+                yield result(ticket_exists_reply(step.state.slots["ticket_id"], intent=step.intent))
+            case NextStep.CONTACT:
+                yield result(
+                    contact_reply(intent=step.intent, change_request=routing.change_request)
+                )
             case NextStep.CLARIFY:
                 yield result(step_reply("clarify", text=routing.clarification_question))
             case _:
                 yield result(step_reply(step.step.value))
 
-    async def _order_guidance(
-        self, conversation: Conversation, step: Decision, session_id: str
-    ) -> AgentResponse:
-        """Read-only lookup scoped to the authenticated customer, then deterministic guidance."""
+    async def _lookup(
+        self, conversation: Conversation, order_id: str, session_id: str
+    ) -> Order | None:
+        """Read-only, scoped to the authenticated customer in SQL; every lookup is audited."""
         customer_id = conversation.customer_id
-        order_id = step.state.slots["order_id"]
-        intent = step.intent or Intent.ORDER_STATUS
         if customer_id is None:  # decide() never routes anonymous users here
-            raise RuntimeError("order guidance requires an authenticated customer")
+            raise RuntimeError("order lookups require an authenticated customer")
         with agent_step("tool.get_order_status"):
             order = await self._orders.get_for_customer(
                 order_id, customer_id=customer_id, tenant_id=self._tenant_id
@@ -245,37 +267,68 @@ class ConversationOrchestrator:
                 outcome="found" if order else "not_found",
             )
         )
-        if order is None:
-            return order_not_found(order_id, intent)
-        return order_guidance(intent, order, self._clock.today())
+        return order
 
-    async def _handoff(
+    async def _order_guidance(
         self,
         conversation: Conversation,
         routing: RoutingResult,
         step: Decision,
         session_id: str,
-    ) -> AgentResponse:
-        order_id = routing.order_id or step.state.slots.get("order_id")
-        ticket_id, created = await self._open_ticket(
-            conversation, session_id, intent=step.intent, order_id=order_id
+    ) -> tuple[AgentResponse, SessionState]:
+        """Facts and eligibility for one own order; if the requested change is still possible,
+        one question whether to forward it (or a pointer to the ticket already open)."""
+        state = step.state
+        order_id = state.slots["order_id"]
+        intent = step.intent or Intent.ORDER_STATUS
+        order = await self._lookup(conversation, order_id, session_id)
+        if order is None:
+            # Never remember (or later attach to a ticket) an order that is not the customer's.
+            return order_not_found(order_id, intent), _forget_order(state)
+        guidance = order_guidance(intent, order, self._clock.today())
+        response = guidance.response
+        if not guidance.change_possible:
+            return response, state
+        if "ticket_id" in state.slots:
+            reminder = ticket_exists_reply(state.slots["ticket_id"], intent=intent).answer
+            return response.model_copy(update={"answer": f"{response.answer}\n\n{reminder}"}), state
+        question = ticket_question(intent, order_id)
+        pending = state.model_copy(
+            update={
+                "workflow": WorkflowState.AWAITING_TICKET_CONFIRMATION,
+                "slots": {**state.slots, "request": routing.standalone_query},
+            }
         )
-        if not created:
-            return handoff_pending_reply(ticket_id, intent=step.intent)
-        return handoff_reply(ticket_id, intent=step.intent)
+        return response.model_copy(update={"answer": f"{response.answer}\n\n{question}"}), pending
 
-    async def _outage_reply(self, conversation: Conversation, session_id: str) -> AgentResponse:
-        """Nobody can answer automatically (NFR-11), so a colleague takes over."""
-        if conversation.customer_id is None:
-            return outage_contact_reply()
-        try:
-            ticket_id, created = await self._open_ticket(
-                conversation, session_id, intent=None, order_id=None
-            )
-        except Exception:  # the database may be down as well; still answer without a 5xx
-            log.exception("outage ticket could not be created")
-            return fallback(["provider_unavailable"])
-        return outage_reply(ticket_id, created=created)
+    async def _confirm_ticket(
+        self, conversation: Conversation, step: Decision, session_id: str
+    ) -> tuple[AgentResponse, SessionState]:
+        """Ask once; an order the request names must be the customer's before it is mentioned."""
+        state = step.state
+        order_id = state.slots.get("order_id")
+        if order_id is not None and await self._lookup(conversation, order_id, session_id) is None:
+            slots = {k: v for k, v in state.slots.items() if k not in ("order_id", "request")}
+            idle = state.model_copy(update={"workflow": WorkflowState.IDLE, "slots": slots})
+            return order_not_found(order_id, step.intent or Intent.HUMAN_AGENT), idle
+        return confirm_ticket_reply(step.intent, order_id), state
+
+    async def _create_ticket(
+        self, conversation: Conversation, step: Decision, session_id: str
+    ) -> tuple[AgentResponse, SessionState]:
+        state = step.state
+        ticket_id, created = await self._open_ticket(
+            conversation,
+            session_id,
+            intent=step.intent,
+            order_id=state.slots.get("order_id"),
+            request=state.slots.get("request"),
+        )
+        slots = {k: v for k, v in state.slots.items() if k != "request"}
+        done = state.model_copy(update={"slots": {**slots, "ticket_id": ticket_id}})
+        if not created:
+            return ticket_exists_reply(ticket_id, intent=step.intent), done
+        return ticket_created_reply(ticket_id, intent=step.intent), done
 
     async def _open_ticket(
         self,
@@ -284,6 +337,7 @@ class ConversationOrchestrator:
         *,
         intent: Intent | None,
         order_id: str | None,
+        request: str | None,
     ) -> tuple[str, bool]:
         """``(ticket number, created)``; at the limit the newest open ticket, not a new one."""
         customer_id = conversation.customer_id
@@ -308,7 +362,8 @@ class ConversationOrchestrator:
                 await audit(f"rate_limited:{recent[0]}")
                 log.warning("ticket limit reached recent=%d", len(recent))
                 return recent[0], False
-        message = conversation.messages[-1].content
+        # The confirmed request, not the confirmation itself ("Ja, bitte").
+        summary = request or conversation.messages[-1].content
         with agent_step("tool.create_ticket"):
             ticket_id = await self._tickets.create(
                 NewTicket(
@@ -317,12 +372,45 @@ class ConversationOrchestrator:
                     session_id=session_id,
                     intent=intent.value if intent else None,
                     order_id=order_id,
-                    summary=f"{intent or 'UNKNOWN'}: {message[:500]}",
+                    summary=f"{intent or 'UNKNOWN'}: {summary[:500]}",
                 )
             )
         await audit(ticket_id)
         log.info("ticket=%s intent=%s order_id=%s", ticket_id, intent, order_id)
         return ticket_id, True
+
+
+def recover_ticket_state(conversation: Conversation, state: SessionState) -> SessionState:
+    """A stateless call (the evaluation) has the transcript but no session state. Rebuild what
+    the ticket flow needs from the assistant's own earlier messages: an open confirmation
+    question and a ticket already opened. Sessions with state keep theirs."""
+    if state != SessionState():
+        return state
+    messages = conversation.messages
+    slots: dict[str, str] = {}
+    for message in messages[:-1]:
+        if message.role is Role.ASSISTANT and (match := _TICKET_NUMBER.search(message.content)):
+            slots["ticket_id"] = match.group(1)
+    last = messages[-2] if len(messages) >= 2 else None
+    if last is None or last.role is not Role.ASSISTANT or TICKET_QUESTION not in last.content:
+        return SessionState(slots=slots) if slots else state
+    question = last.content[last.content.rfind("Soll ich") :]
+    if order_id := extract_order_id(question):
+        slots["order_id"] = order_id
+    earlier = [m.content for m in messages[:-2] if m.role is Role.USER][-3:]
+    if earlier:
+        slots["request"] = " / ".join(earlier)
+    return SessionState(
+        active_intent=intent_of_question(question),
+        workflow=WorkflowState.AWAITING_TICKET_CONFIRMATION,
+        slots=slots,
+    )
+
+
+def _forget_order(state: SessionState) -> SessionState:
+    return state.model_copy(
+        update={"slots": {k: v for k, v in state.slots.items() if k != "order_id"}}
+    )
 
 
 def _blocked_input_reply(screen: GuardrailDecision) -> AgentResponse:

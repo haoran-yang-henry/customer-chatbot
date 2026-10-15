@@ -100,6 +100,20 @@ def can_cancel(order: Order) -> Eligibility:
     raise AssertionError(f"unhandled status {order.status}")  # pragma: no cover
 
 
+def can_change_address(order: Order) -> Eligibility:
+    """faq-order-change: the service team can change the delivery address until the order is
+    being processed; after that only the carrier can redirect the parcel."""
+    if order.status in {OrderStatus.PENDING_PAYMENT, OrderStatus.PAID}:
+        return Eligibility(allowed=True, reason="not_processed")
+    if order.status is OrderStatus.PROCESSING:
+        return Eligibility(allowed=False, reason="processing")
+    if order.status is OrderStatus.SHIPPED:
+        return Eligibility(allowed=False, reason="shipped")
+    if order.status is OrderStatus.CANCELLED:
+        return Eligibility(allowed=False, reason="cancelled")
+    return Eligibility(allowed=False, reason="delivered")
+
+
 def can_return(order: Order, today: date) -> Eligibility:
     match order.status:
         case OrderStatus.DELIVERED:

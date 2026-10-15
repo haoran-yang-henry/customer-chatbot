@@ -1,3 +1,5 @@
+import pytest
+
 from customer_agent.application.routing import (
     IntentRouter,
     parse_llm_routing,
@@ -68,7 +70,7 @@ def test_parse_null_intent_with_clarification() -> None:
 
 
 def test_unusable_llm_output_falls_back_to_knowledge() -> None:
-    for text in ["Sorry, I cannot.", '{"intent": "ORDER_CHANGE"}', "{broken"]:
+    for text in ["Sorry, I cannot.", '{"intent": "ORDER_MODIFY"}', "{broken"]:
         assert parse_llm_routing(text, convo("Frage")).source is RoutingSource.FALLBACK
 
 
@@ -121,7 +123,7 @@ async def test_unsafe_clarification_question_is_replaced_by_the_default() -> Non
         '{"intent": null, "confidence": 0.2, "standalone_query": "?", '
         '"clarification_question": "Bitte melden Sie sich unter https://evil.example an."}'
     )
-    router = IntentRouter(llm, load_prompt("router", 4))
+    router = IntentRouter(llm, load_prompt("router", 5))
 
     result = await router.route(convo("Hilfe?"), SessionState(), session_id="s")
 
@@ -133,8 +135,54 @@ async def test_safe_clarification_question_is_kept() -> None:
         '{"intent": "PRODUCT_INFO", "confidence": 0.4, "standalone_query": "Kopfhörer", '
         '"clarification_question": "Was möchten Sie über die Kopfhörer wissen?"}'
     )
-    router = IntentRouter(llm, load_prompt("router", 4))
+    router = IntentRouter(llm, load_prompt("router", 5))
 
     result = await router.route(convo("Kopfhörer"), SessionState(), session_id="s")
 
     assert result.clarification_question == "Was möchten Sie über die Kopfhörer wissen?"
+
+
+ASKED = SessionState(
+    active_intent=Intent.ORDER_CHANGE, workflow=WorkflowState.AWAITING_TICKET_CONFIRMATION
+)
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("Ja", True),
+        ("ja bitte!", True),
+        ("Gerne.", True),
+        ("Okay, machen Sie das", True),
+        ("Nein danke", False),
+        ("nein", False),
+        ("Lieber nicht.", False),
+        ("Ja, aber erst nächste Woche", None),  # hedged: the LLM router decides
+        ("Ja bitte, und wo ist eigentlich meine andere Bestellung NE-100231?", None),
+        ("Wie lange dauert das?", None),
+    ],
+)
+def test_bare_answers_to_the_ticket_question_need_no_llm(text: str, expected: bool | None) -> None:
+    result = route_by_rules(convo(text), ASKED)
+
+    if expected is None:
+        assert result is None
+    else:
+        assert result is not None and result.source is RoutingSource.RULE
+        assert result.confirmation is expected and result.intent is Intent.ORDER_CHANGE
+
+
+def test_yes_without_a_pending_question_is_not_a_confirmation() -> None:
+    assert route_by_rules(convo("Ja"), SessionState()) is None
+
+
+def test_router_flags_for_change_requests_and_confirmations_are_parsed() -> None:
+    text = (
+        '{"intent": "HUMAN_AGENT", "confidence": 0.9, "change_request": true, '
+        '"confirmation": true, "standalone_query": "Adresse ändern"}'
+    )
+
+    result = parse_llm_routing(text, convo("Ja, bitte machen Sie das für mich."))
+
+    assert result.change_request is True and result.confirmation is True
+    assert parse_llm_routing('{"intent": "SHIPPING_INFO"}', convo("x")).confirmation is None

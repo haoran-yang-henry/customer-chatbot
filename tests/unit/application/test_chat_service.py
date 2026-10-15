@@ -38,15 +38,26 @@ async def test_new_session_is_created_and_turn_persisted() -> None:
 async def test_second_turn_continues_from_stored_state() -> None:
     store = InMemorySessionStore()
     chat = service(store)
-    first = await chat.chat(None, "C-1001", "Wo ist meine Bestellung?")
+    first = await chat.chat(None, "C-1002", "Wo ist meine Bestellung?")
 
-    await chat.chat(first.session_id, "C-1001", "NE-100250")
+    await chat.chat(first.session_id, "C-1002", "NE-100250")
 
     state = store.sessions[first.session_id].state
     assert (
         state.slots == {"order_id": "NE-100250"}
         and len(store.sessions[first.session_id].messages) == 4
     )
+
+
+async def test_an_order_that_was_not_found_is_not_remembered() -> None:
+    # NE-100250 belongs to C-1002: it must not reach a later ticket of C-1001.
+    store = InMemorySessionStore()
+    chat = service(store)
+    first = await chat.chat(None, "C-1001", "Wo ist meine Bestellung?")
+
+    await chat.chat(first.session_id, "C-1001", "NE-100250")
+
+    assert "order_id" not in store.sessions[first.session_id].state.slots
 
 
 @pytest.mark.parametrize("session_id", ["does-not-exist", "s1"])

@@ -234,7 +234,7 @@ def make_orchestrator(
         min_similarity=0.35,
     )
     return ConversationOrchestrator(
-        IntentRouter(llm, load_prompt("router", 4)),
+        IntentRouter(llm, load_prompt("router", 5)),
         answers,
         orders=orders or SeedOrderRepository(),
         tickets=tickets or InMemoryTicketService(),

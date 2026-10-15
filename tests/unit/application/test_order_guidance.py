@@ -82,6 +82,34 @@ def test_german_formats() -> None:
             ["policy-returns-v5"],
         ),
         (
+            "NE-100260",
+            Intent.ORDER_CHANGE,
+            Behavior.ACTION,
+            ["noch nicht in Bearbeitung", "Lieferadresse noch ändern", "stornieren"],
+            ["faq-order-change"],
+        ),
+        (
+            "NE-100245",
+            Intent.ORDER_CHANGE,
+            Behavior.ACTION,
+            ["für den Versand vorbereitet", "nicht mehr geändert", "Packstation"],
+            ["faq-order-change"],
+        ),
+        (
+            "NE-100250",
+            Intent.ORDER_CHANGE,
+            Behavior.ACTION,
+            ["bereits versendet", "DHL", "Packstation"],
+            ["faq-order-change"],
+        ),
+        (
+            "NE-100231",
+            Intent.ORDER_CHANGE,
+            Behavior.ACTION,
+            ["bereits zugestellt"],
+            ["faq-order-change"],
+        ),
+        (
             "NE-100240",
             Intent.REFUND_STATUS,
             Behavior.ACTION,
@@ -100,7 +128,7 @@ def test_german_formats() -> None:
 def test_guidance_per_order(
     order_id: str, intent: Intent, behavior: Behavior, phrases: list[str], sources: list[str]
 ) -> None:
-    response = order_guidance(intent, ORDERS[order_id], TODAY)
+    response = order_guidance(intent, ORDERS[order_id], TODAY).response
 
     assert response.behavior is behavior and response.sources == sources
     assert response.tool_calls == ["get_order_status"]
@@ -109,11 +137,33 @@ def test_guidance_per_order(
     assert "wurde storniert" not in response.answer or order_id == "NE-100170"
 
 
-def test_guidance_never_claims_to_have_acted() -> None:
+def test_guidance_never_claims_to_have_acted_and_never_offers_a_handoff() -> None:
     for order in ORDERS.values():
-        for intent in (Intent.ORDER_CANCEL, Intent.RETURN_REQUEST):
-            answer = order_guidance(intent, order, TODAY).answer
+        for intent in (Intent.ORDER_CANCEL, Intent.RETURN_REQUEST, Intent.ORDER_CHANGE):
+            answer = order_guidance(intent, order, TODAY).response.answer
             assert "habe ich storniert" not in answer and "Retoure wurde erstellt" not in answer
+            assert "Adresse wurde geändert" not in answer
+            assert "Mitarbeiter" not in answer  # ADR-0014: the orchestrator asks, if anything
+
+
+@pytest.mark.parametrize(
+    ("order_id", "intent", "possible"),
+    [
+        ("NE-100245", Intent.ORDER_CANCEL, True),
+        ("NE-100250", Intent.ORDER_CANCEL, False),
+        ("NE-100231", Intent.RETURN_REQUEST, True),
+        ("NE-100198", Intent.RETURN_REQUEST, False),
+        ("NE-100260", Intent.ORDER_CHANGE, True),
+        ("NE-100252", Intent.ORDER_CHANGE, True),
+        ("NE-100245", Intent.ORDER_CHANGE, False),
+        ("NE-100250", Intent.ORDER_STATUS, False),
+        ("NE-100240", Intent.REFUND_STATUS, False),
+    ],
+)
+def test_a_ticket_can_be_offered_only_while_the_change_is_possible(
+    order_id: str, intent: Intent, possible: bool
+) -> None:
+    assert order_guidance(intent, ORDERS[order_id], TODAY).change_possible is possible
 
 
 def test_not_found_wording_reveals_nothing() -> None:

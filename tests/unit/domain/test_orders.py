@@ -11,6 +11,7 @@ from customer_agent.domain.orders import (
     Order,
     OrderStatus,
     can_cancel,
+    can_change_address,
     can_return,
 )
 
@@ -45,6 +46,28 @@ def order(status: OrderStatus, delivered: date | None = None, sku: str = "VP-20"
 )
 def test_can_cancel_covers_every_status(status: OrderStatus, allowed: bool, reason: str) -> None:
     eligibility = can_cancel(order(status))
+
+    assert (eligibility.allowed, eligibility.reason) == (allowed, reason)
+
+
+@pytest.mark.parametrize(
+    ("status", "allowed", "reason"),
+    [
+        (OrderStatus.PENDING_PAYMENT, True, "not_processed"),
+        (OrderStatus.PAID, True, "not_processed"),
+        (OrderStatus.PROCESSING, False, "processing"),
+        (OrderStatus.SHIPPED, False, "shipped"),
+        (OrderStatus.DELIVERED, False, "delivered"),
+        (OrderStatus.RETURN_REQUESTED, False, "delivered"),
+        (OrderStatus.RETURNED, False, "delivered"),
+        (OrderStatus.CANCELLED, False, "cancelled"),
+    ],
+)
+def test_can_change_address_covers_every_status(
+    status: OrderStatus, allowed: bool, reason: str
+) -> None:
+    # faq-order-change: only while "Zahlung ausstehend" or "Bezahlt".
+    eligibility = can_change_address(order(status))
 
     assert (eligibility.allowed, eligibility.reason) == (allowed, reason)
 

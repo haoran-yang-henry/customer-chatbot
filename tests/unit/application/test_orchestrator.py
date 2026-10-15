@@ -3,7 +3,7 @@ from typing import Any
 import pytest
 
 from customer_agent.application.answering import TextDelta
-from customer_agent.application.fallbacks import PAYMENT_DATA_NOTICE
+from customer_agent.application.fallbacks import CONTACT_EMAIL, PAYMENT_DATA_NOTICE, TICKET_QUESTION
 from customer_agent.application.guardrails.classifier import PromptAttackClassifier
 from customer_agent.application.orchestrator import ConversationOrchestrator, TurnResult
 from customer_agent.domain.conversation import Behavior, Conversation, Message, Role
@@ -163,38 +163,6 @@ async def test_foreign_order_looks_exactly_like_a_missing_one() -> None:
     assert [e.outcome for e in audit.entries] == ["not_found", "not_found"]
 
 
-async def test_handoff_creates_a_ticket_with_context_and_audit_entry() -> None:
-    tickets, audit = InMemoryTicketService(), InMemoryAuditLog()
-    llm = ScriptedRouterLLM(routing("HUMAN_AGENT"))
-
-    response = await orchestrator(llm, tickets=tickets, audit=audit).respond(
-        ask("Bitte ändern Sie die Adresse von NE-100245", "C-1001")
-    )
-
-    assert response.behavior is Behavior.ESCALATE and response.tool_calls == ["create_ticket"]
-    assert "T-000001" in response.answer
-    [ticket] = tickets.tickets
-    assert (ticket.customer_id, ticket.order_id, ticket.intent) == (
-        "C-1001",
-        "NE-100245",
-        "HUMAN_AGENT",
-    )
-    assert audit.entries[0].tool == "create_ticket"
-
-
-async def test_complaint_handoff_is_empathetic_and_never_offers_goodwill() -> None:
-    response = await orchestrator(ScriptedRouterLLM(routing("COMPLAINT"))).respond(
-        ask("Schon wieder kaputt angekommen!", "C-1003")
-    )
-    anonymous = await orchestrator(ScriptedRouterLLM(routing("COMPLAINT"))).respond(
-        ask("Schon wieder kaputt angekommen!")
-    )
-    assert anonymous.answer.startswith("Das tut mir sehr leid")
-
-    assert response.answer.startswith("Das tut mir sehr leid")
-    assert "Gutschein" not in response.answer and "Kulanz" not in response.answer
-
-
 async def test_third_party_request_is_refused_without_lookup() -> None:
     orders = SeedOrderRepository()
     llm = ScriptedRouterLLM(
@@ -208,18 +176,6 @@ async def test_third_party_request_is_refused_without_lookup() -> None:
 
     assert response.behavior is Behavior.REFUSE and "Datenschutz" in response.answer
     assert orders.lookups == []
-
-
-async def test_anonymous_handoff_creates_no_ticket_and_names_contact_channels() -> None:
-    tickets = InMemoryTicketService()
-
-    response = await orchestrator(
-        ScriptedRouterLLM(routing("HUMAN_AGENT")), tickets=tickets
-    ).respond(ask("Ich will mit einem Menschen sprechen"))
-
-    assert response.behavior is Behavior.ESCALATE and tickets.tickets == []
-    assert "0800 123 4567" in response.answer and "anmelden" in response.answer
-    assert response.sources == ["info-customer-service-contact"]
 
 
 # --- Day 6: guardrails ---------------------------------------------------------------------
@@ -338,56 +294,185 @@ async def test_payment_data_never_reaches_the_router_and_the_customer_is_told() 
     assert final.user_text == "Erstattung bitte auf [IBAN entfernt] – geht das?"
 
 
-async def test_ticket_limit_points_to_the_open_ticket() -> None:
+# --- Day 7: provider outage ------------------------------------------------------------------
+
+
+async def test_outage_gives_contact_channels_and_opens_no_ticket() -> None:
+    tickets = InMemoryTicketService()
+    llm = ScriptedRouterLLM(routing("RETURN_POLICY"))
+    llm.fail = True
+    agent = orchestrator(llm, tickets=tickets)
+
+    for customer in ("C-1001", None):
+        response = await agent.respond(
+            ask("Wie lange habe ich Zeit für eine Rücksendung?", customer)
+        )
+        assert response.behavior is Behavior.ESCALATE and CONTACT_EMAIL in response.answer
+        assert response.reasons == ["provider_unavailable"] and response.tool_calls == []
+    assert tickets.tickets == []
+
+
+# --- tickets only for confirmed change requests (ADR-0014) ------------------------------------
+
+
+def change(intent: str, query: str, *, order: bool = False, confirmation: str = "null") -> str:
+    return (
+        f'{{"intent": "{intent}", "confidence": 0.9, "about_specific_order": '
+        f'{"true" if order else "false"}, "change_request": true, "confirmation": {confirmation}, '
+        f'"standalone_query": "{query}"}}'
+    )
+
+
+class Chat:
+    """A stateful conversation like ChatService keeps it: transcript plus session state."""
+
+    def __init__(self, agent: ConversationOrchestrator, customer: str) -> None:
+        self.agent, self.customer = agent, customer
+        self.messages: list[Message] = []
+        self.state = SessionState()
+
+    async def send(self, text: str) -> TurnResult:
+        self.messages.append(Message(role=Role.USER, content=text))
+        convo = Conversation(messages=self.messages, customer_id=self.customer)
+        result = await self.agent.handle(convo, self.state, session_id="s1")
+        self.messages.append(Message(role=Role.ASSISTANT, content=result.response.answer))
+        self.state = result.state
+        return result
+
+
+async def test_a_change_request_is_confirmed_once_then_one_ticket_carries_the_request() -> None:
+    tickets, audit = InMemoryTicketService(), InMemoryAuditLog()
+    llm = ScriptedRouterLLM(change("SERVICE_INFO", "E-Mail-Adresse im Kundenkonto ändern"))
+    chat = Chat(orchestrator(llm, tickets=tickets, audit=audit), "C-1001")
+
+    asked = await chat.send("Bitte ändern Sie meine E-Mail")
+    assert asked.response.behavior is Behavior.CLARIFY
+    assert asked.response.answer.endswith(TICKET_QUESTION) and tickets.tickets == []
+
+    created = await chat.send("Ja")
+    assert created.response.behavior is Behavior.ESCALATE
+    assert (
+        created.response.tool_calls == ["create_ticket"] and "T-000001" in created.response.answer
+    )
+    [ticket] = tickets.tickets
+    assert ticket.summary == "SERVICE_INFO: E-Mail-Adresse im Kundenkonto ändern"  # not "Ja"
+    assert llm.router_calls == 1  # the bare "Ja" is routed by rule
+    assert [e.tool for e in audit.entries] == ["create_ticket"]
+
+    again = await chat.send("Und bitte auch die Telefonnummer")
+    assert again.response.behavior is Behavior.ESCALATE and "T-000001" in again.response.answer
+    assert again.response.tool_calls == [] and len(tickets.tickets) == 1
+
+
+async def test_an_order_change_explains_eligibility_and_a_no_forwards_nothing() -> None:
+    tickets, audit = InMemoryTicketService(), InMemoryAuditLog()
+    llm = ScriptedRouterLLM(
+        change("ORDER_CHANGE", "Lieferadresse für NE-100260 ändern", order=True)
+    )
+    chat = Chat(orchestrator(llm, tickets=tickets, audit=audit), "C-1003")
+
+    asked = await chat.send("Bitte ändern Sie die Adresse für NE-100260")
+    assert "noch nicht in Bearbeitung" in asked.response.answer
+    assert asked.response.answer.endswith(
+        f"Soll ich Ihren Änderungswunsch zu NE-100260 {TICKET_QUESTION}"
+    )
+    assert asked.state.workflow is WorkflowState.AWAITING_TICKET_CONFIRMATION
+    assert [e.outcome for e in audit.entries] == ["found"]
+
+    declined = await chat.send("Nein danke")
+    assert declined.response.behavior is Behavior.ANSWER and tickets.tickets == []
+    assert declined.state.workflow is WorkflowState.IDLE
+
+
+async def test_a_change_that_is_no_longer_possible_is_explained_without_a_question() -> None:
+    llm = ScriptedRouterLLM(
+        change("ORDER_CHANGE", "Lieferadresse für NE-100245 ändern", order=True)
+    )
+
+    response = await orchestrator(llm).respond(
+        ask("Können Sie bitte die Lieferadresse für NE-100245 ändern?", "C-1001")
+    )
+
+    assert response.behavior is Behavior.ACTION and "nicht mehr geändert" in response.answer
+    assert TICKET_QUESTION not in response.answer and response.tool_calls == ["get_order_status"]
+
+
+async def test_a_stateless_call_recognises_its_own_question_in_the_transcript() -> None:
+    tickets = InMemoryTicketService()
+    question = f"… Soll ich Ihren Änderungswunsch zu NE-100260 {TICKET_QUESTION}"
+    convo = Conversation(
+        messages=[
+            Message(role=Role.USER, content="Bitte ändern Sie die Lieferadresse für NE-100260."),
+            Message(role=Role.ASSISTANT, content=question),
+            Message(role=Role.USER, content="Ja, gerne."),
+        ],
+        customer_id="C-1003",
+    )
+    llm = ScriptedRouterLLM(routing("HUMAN_AGENT"))
+
+    response = await orchestrator(llm, tickets=tickets).respond(convo)
+
+    assert response.tool_calls == ["create_ticket"] and response.intent is Intent.ORDER_CHANGE
+    [ticket] = tickets.tickets
+    assert ticket.order_id == "NE-100260" and "Lieferadresse" in ticket.summary
+
+
+async def test_an_order_the_customer_does_not_own_is_neither_mentioned_nor_attached() -> None:
+    tickets, orders = InMemoryTicketService(), SeedOrderRepository()
+    llm = ScriptedRouterLLM(change("HUMAN_AGENT", "Adresse für NE-100250 ändern"))
+
+    response = await orchestrator(llm, tickets=tickets, orders=orders).respond(
+        ask("Mitarbeiter bitte, die Adresse für NE-100250 ist falsch", "C-1001")
+    )
+
+    assert response.behavior is Behavior.REFUSE and "Velto" not in response.answer
+    assert TICKET_QUESTION not in response.answer and tickets.tickets == []
+
+
+@pytest.mark.parametrize("customer", ["C-1001", None])
+async def test_a_wish_to_talk_to_a_person_without_a_change_gets_the_contact_details(
+    customer: str | None,
+) -> None:
+    tickets = InMemoryTicketService()
+
+    response = await orchestrator(
+        ScriptedRouterLLM(routing("HUMAN_AGENT")), tickets=tickets
+    ).respond(ask("Ich möchte bitte mit einem Menschen sprechen.", customer))
+
+    assert response.behavior is Behavior.ESCALATE and CONTACT_EMAIL in response.answer
+    assert response.sources == ["info-customer-service-contact"] and tickets.tickets == []
+    assert TICKET_QUESTION not in response.answer
+
+
+async def test_a_complaint_without_a_change_gets_information_not_a_ticket() -> None:
+    tickets = InMemoryTicketService()
+
+    response = await orchestrator(ScriptedRouterLLM(routing("COMPLAINT")), tickets=tickets).respond(
+        ask("Schon wieder kaputt angekommen!", "C-1003")
+    )
+
+    assert response.behavior is Behavior.ANSWER and tickets.tickets == []
+    assert "Gutschein" not in response.answer and "Kulanz" not in response.answer
+
+
+async def test_the_daily_ticket_limit_still_applies_across_conversations() -> None:
     tickets, audit = InMemoryTicketService(), InMemoryAuditLog()
     agent = orchestrator(ScriptedRouterLLM(routing("HUMAN_AGENT")), tickets=tickets, audit=audit)
 
-    replies = [await agent.respond(ask(f"Mensch bitte ({n})", "C-1001")) for n in range(4)]
+    def confirmed(n: int, customer: str) -> Conversation:
+        return Conversation(
+            messages=[
+                Message(role=Role.USER, content=f"Adresse ändern ({n})"),
+                Message(role=Role.ASSISTANT, content=f"Soll ich Ihr Anliegen {TICKET_QUESTION}"),
+                Message(role=Role.USER, content="Ja"),
+            ],
+            customer_id=customer,
+        )
+
+    replies = [await agent.respond(confirmed(n, "C-1001")) for n in range(4)]
 
     assert len(tickets.tickets) == 3
     assert replies[3].tool_calls == [] and "T-000003" in replies[3].answer
     assert audit.entries[-1].outcome == "rate_limited:T-000003"
-    other = await agent.respond(ask("Mensch bitte", "C-1002"))  # the limit is per customer
+    other = await agent.respond(confirmed(0, "C-1002"))  # the limit is per customer
     assert other.tool_calls == ["create_ticket"]
-
-
-# --- Day 7: provider outage ------------------------------------------------------------------
-
-
-async def test_outage_hands_a_logged_in_customer_over_with_a_ticket() -> None:
-    tickets, audit = InMemoryTicketService(), InMemoryAuditLog()
-    llm = ScriptedRouterLLM(routing("RETURN_POLICY"))
-    llm.fail = True
-
-    response = await orchestrator(llm, tickets=tickets, audit=audit).respond(
-        ask("Wie lange habe ich Zeit für eine Rücksendung?", "C-1001")
-    )
-
-    assert response.behavior is Behavior.ESCALATE and response.tool_calls == ["create_ticket"]
-    assert response.reasons == ["provider_unavailable"] and "T-000001" in response.answer
-    [ticket] = tickets.tickets
-    assert ticket.intent is None and ticket.summary.startswith("UNKNOWN: Wie lange")
-    assert audit.entries[0].tool == "create_ticket"
-
-
-async def test_outage_gives_anonymous_customers_contact_channels() -> None:
-    llm = ScriptedRouterLLM(routing("RETURN_POLICY"))
-    llm.fail = True
-
-    response = await orchestrator(llm).respond(ask("Kosten?"))
-
-    assert response.behavior is Behavior.ESCALATE and "0800 123 4567" in response.answer
-    assert response.reasons == ["provider_unavailable"] and response.tool_calls == []
-
-
-async def test_outage_with_a_broken_ticket_store_still_answers() -> None:
-    class BrokenTickets(InMemoryTicketService):
-        async def create(self, ticket: Any) -> str:
-            raise RuntimeError("database down")
-
-    llm = ScriptedRouterLLM(routing("RETURN_POLICY"))
-    llm.fail = True
-
-    response = await orchestrator(llm, tickets=BrokenTickets()).respond(ask("Kosten?", "C-1001"))
-
-    assert response.behavior is Behavior.NO_ANSWER and response.reasons == ["provider_unavailable"]

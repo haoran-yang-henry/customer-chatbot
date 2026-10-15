@@ -35,6 +35,12 @@ class RoutingResult(BaseModel):
     third_party: bool = False
     # The customer demands money, a refund, a voucher or a discount from the assistant (Day 6).
     money_demand: bool = False
+    # The customer asks the shop to change stored data for them: an order (address, items,
+    # payment, delivery), a cancellation or return carried out by the shop, account data.
+    change_request: bool = False
+    # Reply to the assistant's question whether to forward a request to the service team:
+    # True = agrees, False = declines, None = not a reply to such a question.
+    confirmation: bool | None = None
     # Self-contained German question for retrieval ("Und in die Schweiz?" → full question).
     standalone_query: str
     clarification_question: str | None = None

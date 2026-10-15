@@ -39,7 +39,7 @@ async def test_llm_outage_reaches_the_fallback_in_time_and_the_breaker_takes_ove
         CircuitBreaker("fault-llm", failure_threshold=2, reset_after=60),
     )
     agent = ConversationOrchestrator(
-        IntentRouter(llm, load_prompt("router", 4)),
+        IntentRouter(llm, load_prompt("router", 5)),
         AnswerService(
             FakeRetriever([document("policy-returns-v5", 0.7)]),
             llm,
@@ -62,8 +62,9 @@ async def test_llm_outage_reaches_the_fallback_in_time_and_the_breaker_takes_ove
         response = await agent.respond(Conversation(messages=[message], customer_id="C-1001"))
         durations.append(time.perf_counter() - start)
         behaviors.append(response.behavior)
+        assert response.tool_calls == []  # contact channels; no ticket for a request not understood
 
-    assert behaviors == [Behavior.ESCALATE] * 4  # ticket handoff, never an exception
+    assert behaviors == [Behavior.ESCALATE] * 4  # never an exception
     assert max(durations) < NFR_11_SECONDS
     assert len(attempts) == 4  # two turns × (call + one retry); then the breaker answers
     assert max(durations[2:]) < 0.1

@@ -19,6 +19,8 @@ def routed(
     confidence: float = 0.9,
     order_id: str | None = None,
     specific: bool = False,
+    change: bool = False,
+    confirmation: bool | None = None,
     source: RoutingSource = RoutingSource.LLM,
 ) -> RoutingResult:
     return RoutingResult(
@@ -26,6 +28,8 @@ def routed(
         confidence=confidence,
         order_id=order_id,
         about_specific_order=specific or order_id is not None,
+        change_request=change,
+        confirmation=confirmation,
         standalone_query="q",
         source=source,
     )
@@ -42,8 +46,9 @@ WAITING = SessionState(active_intent=Intent.ORDER_STATUS, workflow=WorkflowState
         (Intent.PRODUCT_INFO, NextStep.ANSWER_FROM_KNOWLEDGE),
         (Intent.GREETING, NextStep.GREET),
         (Intent.OUT_OF_SCOPE, NextStep.REFUSE_OUT_OF_SCOPE),
-        (Intent.COMPLAINT, NextStep.HANDOFF),
-        (Intent.HUMAN_AGENT, NextStep.HANDOFF),
+        # ADR-0014: no change request, no ticket — information or the contact details.
+        (Intent.COMPLAINT, NextStep.ANSWER_FROM_KNOWLEDGE),
+        (Intent.HUMAN_AGENT, NextStep.CONTACT),
     ],
 )
 def test_non_transactional_intents(intent: Intent, step: NextStep) -> None:
@@ -146,11 +151,14 @@ def test_unclear_money_message_is_clarified_not_refused(
     assert decide(IDLE, routing, authenticated=True).step is NextStep.CLARIFY
 
 
-@pytest.mark.parametrize("intent", [Intent.COMPLAINT, Intent.HUMAN_AGENT])
-def test_money_demand_in_a_complaint_still_reaches_a_human(intent: Intent) -> None:
+@pytest.mark.parametrize(
+    ("intent", "step"),
+    [(Intent.COMPLAINT, NextStep.ANSWER_FROM_KNOWLEDGE), (Intent.HUMAN_AGENT, NextStep.CONTACT)],
+)
+def test_money_demand_in_a_complaint_opens_no_ticket(intent: Intent, step: NextStep) -> None:
     routing = routed(intent).model_copy(update={"money_demand": True})
 
-    assert decide(IDLE, routing, authenticated=True).step is NextStep.HANDOFF
+    assert decide(IDLE, routing, authenticated=True).step is step
 
 
 def test_topic_switch_while_waiting_abandons_the_workflow_explicitly() -> None:
@@ -174,6 +182,83 @@ def test_order_id_extraction(text: str, expected: str | None) -> None:
     assert extract_order_id(text) == expected
 
 
-@pytest.mark.parametrize("intent", [Intent.HUMAN_AGENT, Intent.COMPLAINT])
-def test_anonymous_handoff_gives_contact_channels_instead_of_a_ticket(intent: Intent) -> None:
-    assert decide(IDLE, routed(intent), authenticated=False).step is NextStep.HANDOFF_CONTACT
+# --- tickets (ADR-0014) ------------------------------------------------------------------------
+
+PENDING = SessionState(
+    active_intent=Intent.ORDER_CHANGE,
+    workflow=WorkflowState.AWAITING_TICKET_CONFIRMATION,
+    slots={"order_id": "NE-100260", "request": "Lieferadresse für NE-100260 ändern"},
+)
+
+
+@pytest.mark.parametrize("intent", [Intent.HUMAN_AGENT, Intent.SERVICE_INFO, Intent.COMPLAINT])
+def test_a_change_request_is_confirmed_once_before_a_ticket(intent: Intent) -> None:
+    decision = decide(IDLE, routed(intent, change=True, order_id="NE-100260"), authenticated=True)
+
+    assert decision.step is NextStep.CONFIRM_TICKET
+    assert decision.state.workflow is WorkflowState.AWAITING_TICKET_CONFIRMATION
+    assert decision.state.slots == {"order_id": "NE-100260", "request": "q"}
+
+
+@pytest.mark.parametrize("change", [False, True])
+def test_anonymous_customers_get_contact_details_never_a_ticket(change: bool) -> None:
+    for intent in (Intent.HUMAN_AGENT, Intent.SERVICE_INFO):
+        decision = decide(IDLE, routed(intent, change=change), authenticated=False)
+        if intent is Intent.SERVICE_INFO and not change:
+            assert decision.step is NextStep.ANSWER_FROM_KNOWLEDGE
+        else:
+            assert decision.step is NextStep.CONTACT
+
+
+def test_an_order_change_takes_the_order_path_first() -> None:
+    specific = routed(Intent.ORDER_CHANGE, order_id="NE-100260", change=True)
+    general = routed(Intent.ORDER_CHANGE)  # "Wie kann ich die Lieferadresse ändern?"
+
+    assert decide(IDLE, specific, authenticated=True).step is NextStep.ORDER_GUIDANCE
+    assert decide(IDLE, general, authenticated=True).step is NextStep.ANSWER_FROM_KNOWLEDGE
+    unknown_order = routed(Intent.ORDER_CHANGE, specific=True, change=True)
+    assert decide(IDLE, unknown_order, authenticated=True).step is NextStep.ASK_ORDER_ID
+
+
+@pytest.mark.parametrize(
+    "routing",
+    [
+        routed(None, confirmation=True, source=RoutingSource.RULE),
+        routed(Intent.HUMAN_AGENT),  # "Ja, leiten Sie das bitte an einen Mitarbeiter weiter"
+    ],
+)
+def test_agreement_opens_the_ticket_for_the_pending_request(routing: RoutingResult) -> None:
+    decision = decide(PENDING, routing, authenticated=True)
+
+    assert decision.step is NextStep.CREATE_TICKET
+    assert decision.intent is Intent.ORDER_CHANGE  # what was asked about, not "Ja"
+    assert decision.state.slots["request"] == "Lieferadresse für NE-100260 ändern"
+    assert decision.state.workflow is WorkflowState.IDLE
+
+
+def test_declining_forwards_nothing() -> None:
+    decision = decide(PENDING, routed(None, confirmation=False), authenticated=True)
+
+    assert decision.step is NextStep.TICKET_DECLINED
+    assert "request" not in decision.state.slots
+    assert decision.state.workflow is WorkflowState.IDLE
+
+
+def test_a_new_topic_lets_the_question_lapse() -> None:
+    decision = decide(PENDING, routed(Intent.SHIPPING_INFO), authenticated=True)
+
+    assert decision.step is NextStep.ANSWER_FROM_KNOWLEDGE
+    assert decision.state.workflow is WorkflowState.IDLE and "request" not in decision.state.slots
+
+
+def test_one_conversation_opens_at_most_one_ticket() -> None:
+    done = SessionState(active_intent=Intent.ORDER_CHANGE, slots={"ticket_id": "T-000007"})
+    pending_after_ticket = PENDING.model_copy(
+        update={"slots": {**PENDING.slots, "ticket_id": "T-000007"}}
+    )
+
+    another = decide(done, routed(Intent.HUMAN_AGENT, change=True), authenticated=True)
+    agreed = decide(pending_after_ticket, routed(None, confirmation=True), authenticated=True)
+
+    assert another.step is NextStep.TICKET_EXISTS
+    assert agreed.step is NextStep.TICKET_EXISTS
