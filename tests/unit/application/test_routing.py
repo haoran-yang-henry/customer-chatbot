@@ -2,6 +2,7 @@ import pytest
 
 from customer_agent.application.routing import (
     IntentRouter,
+    describe_state,
     parse_llm_routing,
     route_by_rules,
 )
@@ -189,3 +190,17 @@ def test_router_flags_for_change_requests_and_confirmations_are_parsed() -> None
         '{"intent": "RETURN_REQUEST", "defect_reported": true}', convo("x")
     ).defect_reported
     assert parse_llm_routing('{"intent": "SHIPPING_INFO"}', convo("x")).confirmation is None
+
+
+@pytest.mark.parametrize(
+    ("intent", "described"),
+    [
+        (Intent.OUT_OF_SCOPE, "New conversation."),
+        (Intent.GREETING, "New conversation."),
+        (Intent.ORDER_STATUS, "Previous intent: ORDER_STATUS."),
+    ],
+)
+def test_a_refused_or_greeting_turn_is_no_context_for_the_next(
+    intent: Intent, described: str
+) -> None:
+    assert describe_state(SessionState(active_intent=intent)) == described

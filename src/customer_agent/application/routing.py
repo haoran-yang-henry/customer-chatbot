@@ -11,7 +11,7 @@ from customer_agent.application.guardrails import check_generated_text
 from customer_agent.application.ports import ChatMessage, LLMProvider
 from customer_agent.application.prompts import PromptTemplate
 from customer_agent.domain.conversation import Conversation
-from customer_agent.domain.intents import Intent
+from customer_agent.domain.intents import Intent, IntentGroup
 from customer_agent.domain.routing import RoutingResult, RoutingSource, extract_order_id
 from customer_agent.domain.session import SessionState, WorkflowState
 from customer_agent.observability import elapsed_ms, get_logger, step
@@ -153,8 +153,10 @@ def describe_state(state: SessionState) -> str:
         return f"The assistant asked for an order number for {state.active_intent}."
     if state.workflow is WorkflowState.AWAITING_TICKET_CONFIRMATION:
         return "The assistant asked whether to forward the customer's request to the service team."
-    if state.active_intent:
+    if state.active_intent and state.active_intent.group is not IntentGroup.CONTROL:
         return f"Previous intent: {state.active_intent}."
+    # A greeting or a refused off-topic message is no context for the next one: "Previous intent:
+    # OUT_OF_SCOPE" made the router refuse a plain shop question (demo test 2026-10-15).
     return "New conversation."
 
 
