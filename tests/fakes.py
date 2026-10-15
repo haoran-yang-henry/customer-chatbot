@@ -228,13 +228,13 @@ def make_orchestrator(
     answers = AnswerService(
         retriever or FakeRetriever([document("policy-returns-v5", 0.7)]),
         llm,
-        load_prompt("answer", 3),
+        load_prompt("answer", 4),
         FixedClock(today),
         tenant_id="nordelektro",
         min_similarity=0.35,
     )
     return ConversationOrchestrator(
-        IntentRouter(llm, load_prompt("router", 4)),
+        IntentRouter(llm, load_prompt("router", 5)),
         answers,
         orders=orders or SeedOrderRepository(),
         tickets=tickets or InMemoryTicketService(),

@@ -11,7 +11,10 @@ from customer_agent.domain.orders import (
     Order,
     OrderStatus,
     can_cancel,
+    can_change_address,
+    can_claim_warranty,
     can_return,
+    defect_presumed,
 )
 
 
@@ -47,6 +50,59 @@ def test_can_cancel_covers_every_status(status: OrderStatus, allowed: bool, reas
     eligibility = can_cancel(order(status))
 
     assert (eligibility.allowed, eligibility.reason) == (allowed, reason)
+
+
+@pytest.mark.parametrize(
+    ("status", "allowed", "reason"),
+    [
+        (OrderStatus.PENDING_PAYMENT, True, "not_processed"),
+        (OrderStatus.PAID, True, "not_processed"),
+        (OrderStatus.PROCESSING, False, "processing"),
+        (OrderStatus.SHIPPED, False, "shipped"),
+        (OrderStatus.DELIVERED, False, "delivered"),
+        (OrderStatus.RETURN_REQUESTED, False, "delivered"),
+        (OrderStatus.RETURNED, False, "delivered"),
+        (OrderStatus.CANCELLED, False, "cancelled"),
+    ],
+)
+def test_can_change_address_covers_every_status(
+    status: OrderStatus, allowed: bool, reason: str
+) -> None:
+    # faq-order-change: only while "Zahlung ausstehend" or "Bezahlt".
+    eligibility = can_change_address(order(status))
+
+    assert (eligibility.allowed, eligibility.reason) == (allowed, reason)
+
+
+@pytest.mark.parametrize(
+    ("delivered", "today", "allowed", "deadline"),
+    [
+        (date(2026, 8, 10), date(2026, 10, 5), True, date(2028, 8, 10)),
+        (date(2024, 8, 10), date(2026, 8, 10), True, date(2026, 8, 10)),  # last day
+        (date(2024, 8, 10), date(2026, 8, 11), False, date(2026, 8, 10)),
+        (date(2024, 2, 29), date(2026, 2, 28), True, date(2026, 2, 28)),  # leap day
+    ],
+)
+def test_warranty_runs_two_years_from_delivery(
+    delivered: date, today: date, allowed: bool, deadline: date
+) -> None:
+    eligibility = can_claim_warranty(order(OrderStatus.DELIVERED, delivered), today)
+
+    assert (eligibility.allowed, eligibility.deadline) == (allowed, deadline)
+
+
+@pytest.mark.parametrize(
+    "status", [OrderStatus.SHIPPED, OrderStatus.RETURNED, OrderStatus.CANCELLED]
+)
+def test_warranty_needs_a_delivered_order(status: OrderStatus) -> None:
+    assert not can_claim_warranty(order(status, date(2026, 8, 10)), date(2026, 10, 5)).allowed
+
+
+def test_defect_is_presumed_in_the_first_twelve_months() -> None:
+    delivered = order(OrderStatus.DELIVERED, date(2025, 10, 5))
+
+    assert defect_presumed(delivered, date(2026, 10, 5))
+    assert not defect_presumed(delivered, date(2026, 10, 6))
 
 
 DELIVERED = date(2026, 9, 20)

@@ -3,7 +3,10 @@
 Blocking checks come first (citation, size, secrets, prompt leak, language). Then redaction:
 a sentence that contains a link, e-mail address, phone number or code which neither the trusted
 evidence nor the customer's own messages contain is removed — the typical payload of an
-indirect injection ("Gutscheincode GRATIS100") or of a hallucination. Payment data is masked.
+indirect injection ("Gutscheincode GRATIS100") or of a hallucination. So is a sentence that
+offers to forward the request or connect to a person, or claims that it was forwarded: only the
+state machine asks that, and only a ticket that exists may be announced (ADR-0014). Payment data
+is masked.
 """
 
 import re
@@ -24,6 +27,17 @@ SHOP_DOMAIN = "nordelektro.example"
 # words with the English instructions by accident.
 LEAK_NGRAM = 8
 _UNIT = re.compile(r"(?<=[.!?])\s+|\n+")  # sentences and lines (lists have no full stops)
+# The model copies the assistant's earlier ticket question from the history, offers a handoff
+# of its own accord ("Gern verbinde ich Sie mit einem Mitarbeiter"), or announces one that never
+# happened ("Ich gebe Ihre Defektmeldung weiter", "Sie erhalten eine Ticketnummer").
+HANDOFF_OFFER = re.compile(
+    r"\b(weitergeben|weiterleiten|verbinden)\?|verbinde ich sie"
+    r"|mit einem (mitarbeiter|kollegen|menschen) (sprechen|verbinden)\?"
+    r"|\b(ich|wir) (gebe|geben|leite|leiten)\b[^.!?\n]{0,80}\bweiter\b"
+    r"|\b(weitergeleitet|weitergegeben)\b|\bticket"
+    r"|\b(kann|könnte|würde) ich\b[^.!?\n]{0,80}\b(weiterleiten|weitergeben|verbinden|übergeben)\b",
+    re.IGNORECASE,
+)
 
 
 def _compact(text: str) -> str:
@@ -97,11 +111,16 @@ def _blocking_reasons(text: str, prompt: str, max_chars: int) -> list[str]:
 def _redact(answer: str, evidence: Evidence) -> tuple[str, list[str]]:
     reasons: list[str] = []
     text = answer
-    offending = [unit for unit in _UNIT.split(answer) if unverified_tokens(unit, evidence)]
+    units = _UNIT.split(answer)
+    offending = [unit for unit in units if unverified_tokens(unit, evidence)]
     if offending:
         reasons.append("unverified_content")
-        for unit in offending:
-            text = text.replace(unit, "")
+    offers = [unit for unit in units if HANDOFF_OFFER.search(unit)]
+    if offers:
+        reasons.append("handoff_offer")
+    for unit in offending + offers:
+        text = text.replace(unit, "")
+    if offending or offers:
         text = re.sub(r"\n{3,}", "\n\n", re.sub(r"[ \t]{2,}", " ", text)).strip()
     text, pii = mask_personal_data(text, kinds=("pii_iban", "pii_payment_card"))
     if pii:

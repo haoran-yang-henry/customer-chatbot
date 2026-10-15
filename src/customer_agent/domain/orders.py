@@ -9,6 +9,8 @@ from enum import StrEnum
 from pydantic import BaseModel, ConfigDict
 
 RETURN_WINDOW_DAYS = 30  # policy-returns-v5
+WARRANTY_YEARS = 2  # policy-warranty: statutory warranty from delivery
+PRESUMPTION_MONTHS = 12  # policy-warranty: defect presumed present at delivery
 # In-ear headphones: returnable only with an intact hygiene seal (policy-return-exceptions).
 HYGIENE_SEAL_SKUS = frozenset({"KW-BUDSS"})
 
@@ -98,6 +100,44 @@ def can_cancel(order: Order) -> Eligibility:
     if order.status in _ON_THE_WAY_OR_LATER:
         return Eligibility(allowed=False, reason="already_shipped")
     raise AssertionError(f"unhandled status {order.status}")  # pragma: no cover
+
+
+def can_change_address(order: Order) -> Eligibility:
+    """faq-order-change: the service team can change the delivery address until the order is
+    being processed; after that only the carrier can redirect the parcel."""
+    if order.status in {OrderStatus.PENDING_PAYMENT, OrderStatus.PAID}:
+        return Eligibility(allowed=True, reason="not_processed")
+    if order.status is OrderStatus.PROCESSING:
+        return Eligibility(allowed=False, reason="processing")
+    if order.status is OrderStatus.SHIPPED:
+        return Eligibility(allowed=False, reason="shipped")
+    if order.status is OrderStatus.CANCELLED:
+        return Eligibility(allowed=False, reason="cancelled")
+    return Eligibility(allowed=False, reason="delivered")
+
+
+def _years_after(day: date, years: int) -> date:
+    try:
+        return day.replace(year=day.year + years)
+    except ValueError:  # 29 February: the period ends on 28 February
+        return day.replace(year=day.year + years, day=28)
+
+
+def can_claim_warranty(order: Order, today: date) -> Eligibility:
+    """policy-warranty: a defect can be claimed until two years after delivery."""
+    delivered = order.shipping.delivered_at
+    if order.status is not OrderStatus.DELIVERED or delivered is None:
+        return Eligibility(allowed=False, reason="not_delivered")
+    deadline = _years_after(delivered, WARRANTY_YEARS)
+    if today > deadline:
+        return Eligibility(allowed=False, reason="warranty_expired", deadline=deadline)
+    return Eligibility(allowed=True, reason="within_warranty", deadline=deadline)
+
+
+def defect_presumed(order: Order, today: date) -> bool:
+    """Within the first 12 months the defect is presumed to have existed at delivery."""
+    delivered = order.shipping.delivered_at
+    return delivered is not None and today <= _years_after(delivered, 1)
 
 
 def can_return(order: Order, today: date) -> Eligibility:

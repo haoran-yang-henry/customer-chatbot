@@ -1,18 +1,35 @@
-"""Order-specific guidance (Day 5, ADR-0006): facts from the order, eligibility from domain rules,
-self-service steps with a link, and a handoff offer. Deterministic templates, no LLM: order
-facts (status, dates, amounts) must be exact.
+"""Order-specific guidance (Day 5, ADR-0006): facts from the order, eligibility from domain rules
+and self-service steps with a link. Deterministic templates, no LLM: order facts (status, dates,
+amounts) must be exact. When a change is still possible, ``Guidance.change_possible`` lets the
+orchestrator ask whether to forward it to the service team (ADR-0014).
 """
 
+from dataclasses import dataclass
 from datetime import date
 
+from customer_agent.application.fallbacks import CONTACT_EMAIL
 from customer_agent.application.formatting import format_date_de, format_eur
 from customer_agent.domain.conversation import AgentResponse, Behavior
 from customer_agent.domain.intents import Intent
-from customer_agent.domain.orders import Order, OrderStatus, can_cancel, can_return
+from customer_agent.domain.orders import (
+    Order,
+    OrderStatus,
+    can_cancel,
+    can_change_address,
+    can_claim_warranty,
+    can_return,
+    defect_presumed,
+)
 
 ACCOUNT_URL = "https://www.nordelektro.example/konto/bestellungen"  # as in the knowledge base
 TOOL = "get_order_status"
-_HANDOFF_OFFER = "Wenn Sie möchten, verbinde ich Sie auch gern mit einem Mitarbeiter."
+
+
+@dataclass(frozen=True)
+class Guidance:
+    response: AgentResponse
+    change_possible: bool = False  # the customer's change can still be made: offer a ticket
+    question_subject: str | None = None  # what the ticket question names, if not the intent's
 
 
 def _reply(text: str, behavior: Behavior, intent: Intent, sources: list[str]) -> AgentResponse:
@@ -104,7 +121,7 @@ def _refund(order: Order) -> tuple[str, list[str]]:
     )
 
 
-def _cancel(order: Order) -> AgentResponse:
+def _cancel(order: Order) -> Guidance:
     oid, eligibility = order.order_id, can_cancel(order)
     sources = ["policy-order-cancellation"]
     if eligibility.allowed:
@@ -112,21 +129,24 @@ def _cancel(order: Order) -> AgentResponse:
             f"Ihre Bestellung {oid} ({_items(order)}, {format_eur(order.total)}) ist noch nicht "
             "versendet und kann kostenlos storniert werden. So geht's: Kundenkonto → „Meine "
             f"Bestellungen“ → „Stornieren“: {ACCOUNT_URL} – bereits gezahlte Beträge erstatten "
-            f"wir innerhalb von 5 Werktagen. {_HANDOFF_OFFER}"
+            "wir innerhalb von 5 Werktagen."
         )
+        return Guidance(_reply(text, Behavior.ANSWER, Intent.ORDER_CANCEL, sources), True)
     elif eligibility.reason == "already_cancelled":
         text = f"Ihre Bestellung {oid} ist bereits storniert."
     else:
         text = (
             f"Ihre Bestellung {oid} wurde bereits versendet und kann daher nicht mehr storniert "
             "werden. Sie können die Annahme des Pakets verweigern oder den Artikel nach Erhalt "
-            f"innerhalb von 30 Tagen zurücksenden. {_HANDOFF_OFFER}"
+            "innerhalb von 30 Tagen zurücksenden."
         )
-    return _reply(text, Behavior.ANSWER, Intent.ORDER_CANCEL, sources)
+    return Guidance(_reply(text, Behavior.ANSWER, Intent.ORDER_CANCEL, sources))
 
 
-def _return(order: Order, today: date) -> AgentResponse:
+def _return(order: Order, today: date, *, defect: bool) -> Guidance:
     oid, eligibility = order.order_id, can_return(order, today)
+    if defect and eligibility.reason == "window_expired":
+        return _warranty(order, today)  # the return window is over, the warranty is not
     shipping = order.shipping
     if eligibility.allowed and eligibility.deadline and shipping.delivered_at:
         seal = (
@@ -141,19 +161,20 @@ def _return(order: Order, today: date) -> AgentResponse:
             "geht's: Kundenkonto → „Meine Bestellungen“ → „Artikel zurücksenden“, dann das "
             "Retourenlabel ausdrucken oder den QR-Code in einer DHL-Filiale vorzeigen: "
             f"{ACCOUNT_URL}. Die Rücksendung innerhalb Deutschlands ist kostenlos, aus Österreich "
-            f"berechnen wir 6,95 €.{seal} {_HANDOFF_OFFER}"
+            f"berechnen wir 6,95 €.{seal}"
         )
-        return _reply(text, Behavior.ANSWER, Intent.RETURN_REQUEST, ["policy-returns-v5"])
+        return Guidance(
+            _reply(text, Behavior.ANSWER, Intent.RETURN_REQUEST, ["policy-returns-v5"]), True
+        )
     if eligibility.reason == "window_expired" and eligibility.deadline:
         text = (
             f"Die 30-tägige Rückgabefrist für Ihre Bestellung {oid} ist am "
             f"{format_date_de(eligibility.deadline)} abgelaufen. Ist der Artikel defekt, gilt die "
             "gesetzliche Gewährleistung von 2 Jahren ab Zustellung: Kundenkonto → „Meine "
-            f"Bestellungen“ → „Problem melden“: {ACCOUNT_URL}. {_HANDOFF_OFFER}"
+            f"Bestellungen“ → „Problem melden“: {ACCOUNT_URL}."
         )
-        return _reply(
-            text, Behavior.ANSWER, Intent.RETURN_REQUEST, ["policy-returns-v5", "policy-warranty"]
-        )
+        sources = ["policy-returns-v5", "policy-warranty"]
+        return Guidance(_reply(text, Behavior.ANSWER, Intent.RETURN_REQUEST, sources))
     messages = {
         "return_in_progress": f"Für Ihre Bestellung {oid} ist bereits eine Rücksendung angemeldet.",
         "already_returned": f"Ihre Bestellung {oid} wurde bereits zurückgesendet.",
@@ -163,19 +184,90 @@ def _return(order: Order, today: date) -> AgentResponse:
             "Zustellung möglich; solange sie nicht versendet ist, können Sie sie stornieren."
         ),
     }
-    text = messages.get(eligibility.reason, f"Zu Ihrer Bestellung {oid} {_HANDOFF_OFFER}")
-    return _reply(text, Behavior.ANSWER, Intent.RETURN_REQUEST, ["policy-returns-v5"])
+    text = messages.get(
+        eligibility.reason,
+        f"Eine Rücksendung zu Ihrer Bestellung {oid} kann ich leider nicht prüfen. Unser "
+        f"Service-Team erreichen Sie per E-Mail an {CONTACT_EMAIL}.",
+    )
+    return Guidance(_reply(text, Behavior.ANSWER, Intent.RETURN_REQUEST, ["policy-returns-v5"]))
 
 
-def order_guidance(intent: Intent, order: Order, today: date) -> AgentResponse:
+def _warranty(order: Order, today: date) -> Guidance:
+    """policy-warranty: the customer reported a defect after the return window."""
+    oid, claim = order.order_id, can_claim_warranty(order, today)
+    sources = ["policy-warranty"]
+    if not claim.allowed or claim.deadline is None:
+        until = f" ist am {format_date_de(claim.deadline)} abgelaufen" if claim.deadline else ""
+        text = (
+            f"Die gesetzliche Gewährleistung für Ihre Bestellung {oid}{until}. Ob der Hersteller "
+            f"eine Garantie gewährt, klärt unser Service-Team per E-Mail an {CONTACT_EMAIL}."
+        )
+        return Guidance(_reply(text, Behavior.ANSWER, Intent.RETURN_REQUEST, sources))
+    presumption = (
+        " Da die Zustellung weniger als 12 Monate zurückliegt, wird vermutet, dass der Mangel "
+        "schon bei der Übergabe vorlag."
+        if defect_presumed(order, today)
+        else ""
+    )
+    text = (
+        f"Für Ihre Bestellung {oid} ({_items(order)}) gilt die gesetzliche Gewährleistung noch "
+        f"bis zum {format_date_de(claim.deadline)}.{presumption} Sie können zwischen Reparatur "
+        "und Ersatzlieferung wählen; die Rücksendung der defekten Ware ist für Sie kostenlos. So "
+        "melden Sie den Defekt: Kundenkonto → „Meine Bestellungen“ → „Problem melden“: "
+        f"{ACCOUNT_URL}."
+    )
+    reply = _reply(text, Behavior.ANSWER, Intent.RETURN_REQUEST, sources)
+    return Guidance(reply, change_possible=True, question_subject="Ihre Defektmeldung")
+
+
+def _change(order: Order) -> Guidance:
+    """faq-order-change. Items cannot be changed at all; the address only before processing."""
+    oid, eligibility = order.order_id, can_change_address(order)
+    sources = ["faq-order-change"]
+    if eligibility.allowed:
+        text = (
+            f"Ihre Bestellung {oid} ({_items(order)}) ist noch nicht in Bearbeitung, daher kann "
+            "unser Service-Team die Lieferadresse noch ändern. Artikel lassen sich nach der "
+            "Bestellung nicht mehr hinzufügen oder entfernen – dafür stornieren Sie die "
+            "Bestellung und bestellen neu."
+        )
+        return Guidance(_reply(text, Behavior.ACTION, Intent.ORDER_CHANGE, sources), True)
+    shipping = order.shipping
+    redirect = (
+        f"Über die Sendungsverfolgung von {shipping.carrier} können Sie die Zustellung an eine "
+        "Packstation oder Filiale umleiten."
+    )
+    texts = {
+        "processing": (
+            f"Ihre Bestellung {oid} wird bereits für den Versand vorbereitet; die Lieferadresse "
+            "kann daher nicht mehr geändert werden. Sobald sie versendet ist, können Sie die "
+            "Zustellung über die DHL-Sendungsverfolgung an eine Packstation oder Filiale umleiten."
+        ),
+        "shipped": (
+            f"Ihre Bestellung {oid} wurde bereits versendet; die Lieferadresse kann nicht mehr "
+            f"geändert werden. {redirect}"
+            + (f" Sendungsnummer: {shipping.tracking_number}." if shipping.tracking_number else "")
+        ),
+        "cancelled": f"Ihre Bestellung {oid} wurde storniert; eine Änderung ist nicht möglich.",
+        "delivered": f"Ihre Bestellung {oid} wurde bereits zugestellt; eine Änderung ist nicht "
+        "mehr möglich.",
+    }
+    return Guidance(
+        _reply(texts[eligibility.reason], Behavior.ACTION, Intent.ORDER_CHANGE, sources)
+    )
+
+
+def order_guidance(intent: Intent, order: Order, today: date, *, defect: bool = False) -> Guidance:
     match intent:
         case Intent.ORDER_CANCEL:
             return _cancel(order)
         case Intent.RETURN_REQUEST:
-            return _return(order, today)
+            return _return(order, today, defect=defect)
+        case Intent.ORDER_CHANGE:
+            return _change(order)
         case Intent.REFUND_STATUS:
             text, sources = _refund(order)
-            return _reply(text, Behavior.ACTION, intent, sources)
+            return Guidance(_reply(text, Behavior.ACTION, intent, sources))
         case _:
             text, sources = _status(order)
-            return _reply(text, Behavior.ACTION, Intent.ORDER_STATUS, sources)
+            return Guidance(_reply(text, Behavior.ACTION, Intent.ORDER_STATUS, sources))

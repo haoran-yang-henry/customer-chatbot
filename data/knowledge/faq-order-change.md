@@ -2,7 +2,7 @@
 id: faq-order-change
 title: Bestellung oder Lieferadresse ändern
 topic: order-change
-intents: [ORDER_CANCEL, SERVICE_INFO]
+intents: [ORDER_CANCEL, ORDER_CHANGE, SERVICE_INFO]
 source_type: faq
 language: de
 version: 1

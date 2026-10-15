@@ -77,10 +77,15 @@ INJECTION_SIGNALS: tuple[Signal, ...] = (
     Signal(
         "jailbreak",
         1.0,
-        _p(
-            r"\b(do anything now|developer mode|dev mode|entwicklermodus|jailbreak\w*|"
-            r"god ?mode|unrestricted mode|uneingeschränkte[nr]? modus)\b"
-        ),
+        _p(r"\b(do anything now|god ?mode|unrestricted mode|uneingeschränkte[nr]? modus)\b"),
+    ),
+    # Words with an ordinary meaning in an electronics shop ("Smartphone jailbreaken", Android's
+    # "Entwicklermodus"): alone they do not block, together with an override or "ohne Regeln"
+    # they do (demo test 2026-10-15).
+    Signal(
+        "jailbreak_term",
+        0.5,
+        _p(r"\b(developer mode|dev mode|entwicklermodus|entwickleroptionen|jailbreak\w*)\b"),
     ),
     Signal("jailbreak", 1.0, re.compile(r"\bDAN\b")),  # case-sensitive: "Dan" is a name
     Signal(

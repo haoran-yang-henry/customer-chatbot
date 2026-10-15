@@ -11,8 +11,9 @@ precise German answers that are grounded in a governed knowledge base, cite thei
 never promise what the shop has not written down.
 
 The agent **informs and guides; it never changes data on its own**. Order questions are answered
-from read-only order data with deterministic policy checks, and anything a human must decide
-goes to the service team as a ticket.
+from read-only order data with deterministic policy checks. A request to change data — an
+address, an order, account details — goes to the service team as a ticket once the customer has
+confirmed it; questions never create tickets.
 
 ## Highlights
 
@@ -68,7 +69,9 @@ flowchart TD
     decide -- own order --> lookup[Order lookup<br/>ownership in SQL]
     lookup --> guidance[Deterministic guidance<br/>eligibility · steps · link]
     guidance --> reply
-    decide -- needs a human --> ticket[Ticket + audit entry]
+    decide -- asks to change data --> confirm{Customer confirms<br/>once?}
+    confirm -- yes --> ticket[Ticket + audit entry<br/>one per conversation]
+    confirm -- no --> reply
     ticket --> reply
     decide -- unclear · out of scope --> clarify[Clarifying question or refusal]
     clarify --> reply
@@ -77,7 +80,7 @@ flowchart TD
 
 Answers stream token by token over Server-Sent Events; the final event is authoritative, because
 the output guardrail may still replace a draft. If the model provider fails, timeouts and a
-circuit breaker turn the turn into a handoff to the service team within seconds.
+circuit breaker answer with the service team's contact details within seconds.
 
 ### Code organisation
 
@@ -97,16 +100,18 @@ composition root (`bootstrap.py`), which keeps the domain free of I/O and easy t
 
 | Area | Method | Current result |
 |---|---|---|
-| Answer quality | 71 German conversations: behaviour, intent, sources, tools, required and forbidden phrases | **69 / 71** passed |
+| Answer quality | 81 German conversations: behaviour, intent, sources, tools, required and forbidden phrases | **80 / 81** passed |
 | Retrieval | Recall@5 / MRR on 36 questions; confirmed on 28 held-out questions | **1.00 / 0.95** (held-out 1.00 / 0.87) |
-| Safety | 37 attacks: direct and indirect injection, obfuscation, data exfiltration, social engineering | **2.7 %** attack success, no harmful output |
-| Over-blocking | Benign conversations stopped by a guardrail | **0 / 75** |
+| Safety | 37 attacks: direct and indirect injection, obfuscation, data exfiltration, social engineering | **0 / 37** attacks succeeded, no harmful output |
+| Over-blocking | Benign conversations stopped by a guardrail, incl. device words such as "jailbreak" | **0 / 87** |
 | System overhead | k6, 20 concurrent customers, model mocked out | **p95 54 ms** |
 | Time to first token | 56 questions against the real model, one after another | p50 5.6 s, p95 7.2 s — above the 3 s target; one bare call to the development provider already takes 3–4 s |
-| Resilience | Fault injection: model provider unreachable | Handoff in every turn, **< 10 s** |
+| Resilience | Fault injection: model provider unreachable | Contact details in every turn, **< 10 s** |
 
-Groundedness is additionally scored by an LLM judge; its verdicts are not yet calibrated
-against human labels and are therefore not listed as a result.
+Intent routing is done by a language model, so borderline cases can flip between runs: the
+one failure (A-004, "Kopfhörer") is always clarified correctly, but labelled with the expected
+intent in only about 30 % of samples. Groundedness is additionally scored by an LLM judge; its
+verdicts are not yet calibrated against human labels and are therefore not listed as a result.
 
 ## Getting started
 
@@ -179,7 +184,8 @@ flowchart LR
 | `GET /metrics` | Prometheus metrics — expose to the scraper only |
 
 `behavior` tells the client what happened: `answer`, `action` (based on the customer's order),
-`clarify`, `refuse`, `escalate` (handed over, with a ticket number) or `no_answer`. Errors follow
+`clarify`, `refuse`, `escalate` (forwarded with a ticket number, or the service team's contact
+details) or `no_answer`. Errors follow
 RFC 9457 (`application/problem+json`); every response carries an `x-request-id`.
 
 ## Configuration
@@ -204,8 +210,8 @@ All settings are environment variables with the prefix `CA_` (see `.env.example`
   retrieval, model calls, tools). `make up-observability` starts Jaeger at http://localhost:16686.
 - **Metrics** — request and step latencies, LLM tokens and time to first token, guardrail
   decisions, circuit breaker states, rate-limit rejections.
-- **Resilience** — per-role timeouts with one retry, a circuit breaker per provider, handoff with a
-  ticket when the model is down, rate limit per customer or client address.
+- **Resilience** — per-role timeouts with one retry, a circuit breaker per provider, contact
+  details when the model is down, rate limit per customer or client address.
 - **Security** — identity only from verified tokens, tenant- and customer-scoped data access,
   append-only audit log of every order lookup and ticket, non-root container, dependencies and
   images scanned in CI.
@@ -222,7 +228,7 @@ All settings are environment variables with the prefix `CA_` (see `.env.example`
 | `make audit` | Secret, vulnerability and misconfiguration scans (gitleaks, Trivy, pip-audit) |
 
 Every pull request runs four CI jobs: **check** (lint, types, unit and integration tests),
-**eval-gate** (the real agent, database and retrieval on 22 smoke conversations; every one must
+**eval-gate** (the real agent, database and retrieval on 24 smoke conversations; every one must
 pass), **security** (gitleaks over the full history, Trivy, pip-audit) and **image** (build,
 vulnerability scan, smoke start). Actions are pinned to commit SHAs and images to digests.
 

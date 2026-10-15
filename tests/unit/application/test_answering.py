@@ -196,7 +196,7 @@ async def test_code_that_only_untrusted_content_contains_is_cut_from_the_answer(
 
 
 async def test_answer_that_repeats_the_system_prompt_is_replaced() -> None:
-    prompt = load_prompt("answer", 3)
+    prompt = load_prompt("answer", 4)
     leaked = " ".join(prompt.system.split()[:12])
     llm = FakeLLM(f"{leaked} [policy-returns-v5]")
     answers = AnswerService(

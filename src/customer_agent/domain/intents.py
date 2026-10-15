@@ -21,6 +21,7 @@ class Intent(StrEnum):
     # transactional
     ORDER_STATUS = "ORDER_STATUS"
     ORDER_CANCEL = "ORDER_CANCEL"
+    ORDER_CHANGE = "ORDER_CHANGE"
     RETURN_REQUEST = "RETURN_REQUEST"
     REFUND_STATUS = "REFUND_STATUS"
     # support
@@ -48,6 +49,7 @@ _INTENT_GROUPS: dict[Intent, IntentGroup] = {
     Intent.SERVICE_INFO: IntentGroup.KNOWLEDGE,
     Intent.ORDER_STATUS: IntentGroup.TRANSACTIONAL,
     Intent.ORDER_CANCEL: IntentGroup.TRANSACTIONAL,
+    Intent.ORDER_CHANGE: IntentGroup.TRANSACTIONAL,
     Intent.RETURN_REQUEST: IntentGroup.TRANSACTIONAL,
     Intent.REFUND_STATUS: IntentGroup.TRANSACTIONAL,
     Intent.COMPLAINT: IntentGroup.SUPPORT,

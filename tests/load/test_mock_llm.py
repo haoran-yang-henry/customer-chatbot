@@ -22,7 +22,7 @@ def client() -> AsyncOpenAI:
 
 async def test_router_prompt_gets_a_routing_and_answers_cite_the_evidence() -> None:
     llm = OpenAICompatibleLLM(client(), "mock-model")
-    router = load_prompt("router", 4)
+    router = load_prompt("router", 5)
 
     routing = await llm.complete(
         [

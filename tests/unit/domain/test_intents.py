@@ -14,6 +14,7 @@ def test_only_transactional_intents_require_authentication() -> None:
     assert requiring == {
         Intent.ORDER_STATUS,
         Intent.ORDER_CANCEL,
+        Intent.ORDER_CHANGE,
         Intent.RETURN_REQUEST,
         Intent.REFUND_STATUS,
     }

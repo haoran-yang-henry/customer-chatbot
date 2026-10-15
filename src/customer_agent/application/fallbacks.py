@@ -3,7 +3,15 @@
 from customer_agent.domain.conversation import AgentResponse, Behavior
 from customer_agent.domain.intents import Intent
 
-_HANDOFF = "Gern verbinde ich Sie mit einem Mitarbeiter unseres Kundenservice."
+# Contact facts duplicated from the knowledge base (info-customer-service-contact); a data test
+# fails if they drift apart (tests/data/test_knowledge_base.py).
+CONTACT_PHONE = "0800 123 4567"
+CONTACT_EMAIL = "service@nordelektro.example"
+CONTACT_HOURS = "Montag bis Freitag 8–20 Uhr, Samstag 9–16 Uhr"
+CONTACT_SOURCE = "info-customer-service-contact"
+
+# The agent never offers to hand over (ADR-0014): when it cannot help, it names the channel.
+_EMAIL = f"Unser Service-Team erreichen Sie per E-Mail an {CONTACT_EMAIL}."
 _SUPPORTED_TOPICS = (
     "Gern beantworte ich Fragen zu Bestellungen, Versand, Rücksendungen, Zahlung, Garantie und "
     "unseren Produkten."
@@ -24,16 +32,9 @@ _BY_REASON: dict[str, tuple[Behavior, str]] = {
     "provider_unavailable": (
         Behavior.NO_ANSWER,
         "Entschuldigung, ich kann Ihre Anfrage gerade nicht bearbeiten. Bitte versuchen Sie es in "
-        f"Kürze erneut. {_HANDOFF}",
+        f"Kürze erneut. {_EMAIL}",
     ),
 }
-
-# Contact facts duplicated from the knowledge base (info-customer-service-contact); a data test
-# fails if they drift apart (tests/data/test_knowledge_base.py).
-CONTACT_PHONE = "0800 123 4567"
-CONTACT_EMAIL = "service@nordelektro.example"
-CONTACT_HOURS = "Montag bis Freitag 8–20 Uhr, Samstag 9–16 Uhr"
-CONTACT_SOURCE = "info-customer-service-contact"
 
 _STEP_REPLIES: dict[str, tuple[Behavior, str]] = {
     # The greeting discloses that the customer talks to an AI (EU AI Act, transparency).
@@ -47,12 +48,13 @@ _STEP_REPLIES: dict[str, tuple[Behavior, str]] = {
         Behavior.REFUSE,
         "Erstattungen, Gutschriften, Gutscheine oder Rabatte kann ich leider weder veranlassen "
         "noch zusagen – auch nicht auf Grundlage von Absprachen, die ich nicht überprüfen kann. "
-        "Wenn Sie möchten, verbinde ich Sie gern mit einem Mitarbeiter, der Ihr Anliegen prüft.",
+        f"Für Fragen zu einer Erstattung erreichen Sie unser Service-Team per E-Mail an "
+        f"{CONTACT_EMAIL}.",
     ),
     "ask_order_id": (
         Behavior.CLARIFY,
-        "Gern helfe ich Ihnen weiter. Um welche Bestellung geht es? Bitte nennen Sie mir Ihre "
-        "Bestellnummer (zum Beispiel NE-123456).",
+        "Gern helfe ich Ihnen weiter. Um welche Bestellung geht es? Bitte nennen Sie mir die "
+        "Bestellnummer aus Ihrer Bestellbestätigung (sie beginnt mit „NE-“).",
     ),
     "refuse_third_party": (
         Behavior.REFUSE,
@@ -64,16 +66,9 @@ _STEP_REPLIES: dict[str, tuple[Behavior, str]] = {
         "Zu einzelnen Bestellungen kann ich Ihnen nur Auskunft geben, wenn Sie in Ihrem "
         "Kundenkonto angemeldet sind. Bitte melden Sie sich an und schreiben Sie mir dann erneut.",
     ),
-    "handoff": (
-        Behavior.ESCALATE,
-        "Ich leite Ihr Anliegen gern an einen Mitarbeiter unseres Kundenservice weiter. Sie "
-        "erhalten eine Rückmeldung, sobald sich ein Kollege Ihr Anliegen angesehen hat.",
-    ),
-    "handoff_complaint": (
-        Behavior.ESCALATE,
-        "Das tut mir sehr leid. Ich leite Ihr Anliegen an einen Mitarbeiter unseres "
-        "Kundenservice weiter, der sich persönlich darum kümmert. Sie erhalten innerhalb von "
-        "2 Werktagen eine Rückmeldung.",
+    "ticket_declined": (
+        Behavior.ANSWER,
+        "In Ordnung, dann gebe ich nichts weiter. Kann ich Ihnen sonst noch helfen?",
     ),
     "clarify": (
         Behavior.CLARIFY,
@@ -94,7 +89,7 @@ def step_reply(
 
 _NO_ANSWER = (
     Behavior.NO_ANSWER,
-    f"Dazu liegen mir leider keine gesicherten Informationen vor. {_HANDOFF}",
+    f"Dazu liegen mir leider keine gesicherten Informationen vor. {_EMAIL}",
 )
 
 
@@ -104,25 +99,64 @@ def fallback(reasons: list[str]) -> AgentResponse:
     return AgentResponse(answer=text, behavior=behavior, reasons=reasons)
 
 
-def handoff_reply(ticket_id: str, *, intent: Intent | None) -> AgentResponse:
-    """Handoff with the ticket number the customer can refer to (Day 5)."""
-    key = "handoff_complaint" if intent is Intent.COMPLAINT else "handoff"
-    behavior, text = _STEP_REPLIES[key]
+# --- tickets (ADR-0014) -----------------------------------------------------------------------
+
+# Every confirmation question ends like this; a stateless call recognises it in the transcript.
+TICKET_QUESTION = "an unser Service-Team weitergeben?"
+# What a question offers to forward, and the intent its confirmation belongs to.
+_QUESTION_SUBJECTS: dict[str, Intent] = {
+    "Ihren Änderungswunsch": Intent.ORDER_CHANGE,
+    "die Stornierung": Intent.ORDER_CANCEL,
+    "die Rücksendung": Intent.RETURN_REQUEST,
+    "Ihre Defektmeldung": Intent.RETURN_REQUEST,
+}
+
+
+def ticket_question(
+    intent: Intent | None, order_id: str | None, *, subject: str | None = None
+) -> str:
+    if subject is None:
+        subject = next((s for s, i in _QUESTION_SUBJECTS.items() if i is intent), "Ihr Anliegen")
+    about = f" zu {order_id}" if order_id else ""
+    return f"Soll ich {subject}{about} {TICKET_QUESTION}"
+
+
+def intent_of_question(question: str) -> Intent | None:
+    return next((i for subject, i in _QUESTION_SUBJECTS.items() if subject in question), None)
+
+
+def confirm_ticket_reply(intent: Intent | None, order_id: str | None) -> AgentResponse:
+    """A change only the service team can make: ask once before a ticket is opened."""
     return AgentResponse(
-        answer=f"{text} Ihre Ticketnummer lautet {ticket_id}.",
-        behavior=behavior,
+        answer=(
+            "Diese Änderung kann ich nicht selbst vornehmen, aber unser Service-Team kann sie "
+            f"prüfen. {ticket_question(intent, order_id)}"
+        ),
+        behavior=Behavior.CLARIFY,
+        intent=intent,
+    )
+
+
+def ticket_created_reply(ticket_id: str, *, intent: Intent | None) -> AgentResponse:
+    """The confirmed request is with the team; the customer can refer to the number."""
+    return AgentResponse(
+        answer=(
+            f"Vielen Dank. Ich habe Ihr Anliegen an unser Service-Team weitergegeben "
+            f"(Ticketnummer {ticket_id}). Das Team bearbeitet es und meldet sich bei Ihnen."
+        ),
+        behavior=Behavior.ESCALATE,
         intent=intent,
         tool_calls=["create_ticket"],
     )
 
 
-def handoff_pending_reply(ticket_id: str, *, intent: Intent | None) -> AgentResponse:
-    """The customer reached the ticket limit (Day 6): point to the open ticket instead of
-    opening another one, so a loop or a script cannot flood the service team."""
+def ticket_exists_reply(ticket_id: str, *, intent: Intent | None) -> AgentResponse:
+    """One ticket per conversation (and the daily limit, T12): point to the open one."""
     return AgentResponse(
         answer=(
-            f"Ihr Anliegen liegt unseren Mitarbeitern bereits vor (Ticketnummer {ticket_id}). "
-            "Sie erhalten eine Rückmeldung, sobald sich ein Kollege darum gekümmert hat."
+            f"Ihr Anliegen liegt unserem Service-Team bereits vor (Ticketnummer {ticket_id}). "
+            "Weitere Wünsche nennen Sie bitte dem Team, wenn es sich bei Ihnen meldet, oder per "
+            f"E-Mail an {CONTACT_EMAIL}."
         ),
         behavior=Behavior.ESCALATE,
         intent=intent,
@@ -132,29 +166,13 @@ def handoff_pending_reply(ticket_id: str, *, intent: Intent | None) -> AgentResp
 _OUTAGE = "Entschuldigung, ich kann Ihre Anfrage gerade nicht automatisch bearbeiten."
 
 
-def outage_reply(ticket_id: str, *, created: bool) -> AgentResponse:
-    """The model provider is down (NFR-11): a colleague takes over through a ticket."""
-    return AgentResponse(
-        answer=(
-            f"{_OUTAGE} Ich habe sie an unseren Kundenservice weitergegeben (Ticketnummer "
-            f"{ticket_id}). Sie erhalten eine Rückmeldung, sobald sich ein Kollege darum gekümmert "
-            "hat."
-            if created
-            else f"{_OUTAGE} Ihr Anliegen liegt unseren Mitarbeitern bereits vor (Ticketnummer "
-            f"{ticket_id})."
-        ),
-        behavior=Behavior.ESCALATE,
-        tool_calls=["create_ticket"] if created else [],
-        reasons=["provider_unavailable"],
-    )
-
-
 def outage_contact_reply() -> AgentResponse:
-    """Outage, anonymous customer: contact channels instead of an untraceable ticket."""
+    """The model provider is down (NFR-11): nothing can be understood, so nothing is forwarded;
+    the customer gets the contact channels at once."""
     return AgentResponse(
         answer=(
-            f"{_OUTAGE} Unsere Mitarbeiter erreichen Sie telefonisch unter {CONTACT_PHONE} "
-            f"({CONTACT_HOURS}) oder per E-Mail an {CONTACT_EMAIL}."
+            f"{_OUTAGE} Unsere Mitarbeiter erreichen Sie per E-Mail an {CONTACT_EMAIL} oder "
+            f"telefonisch unter {CONTACT_PHONE} ({CONTACT_HOURS})."
         ),
         behavior=Behavior.ESCALATE,
         sources=[CONTACT_SOURCE],
@@ -172,15 +190,20 @@ def with_payment_data_notice(response: AgentResponse) -> AgentResponse:
     return response.model_copy(update={"answer": f"{PAYMENT_DATA_NOTICE}\n\n{response.answer}"})
 
 
-def contact_reply(*, intent: Intent | None) -> AgentResponse:
-    """Handoff for anonymous customers: how to reach a human, no ticket (it could not be
-    answered without contact details, and the chat does not collect them)."""
+def contact_reply(*, intent: Intent | None, change_request: bool = False) -> AgentResponse:
+    """How to reach a person, without a ticket: nothing needs changing, or the customer is
+    anonymous (a ticket could not be answered without verified contact details)."""
     opening = "Das tut mir sehr leid. " if intent is Intent.COMPLAINT else ""
+    login = (
+        " Änderungswünsche kann ich an das Team weitergeben, wenn Sie in Ihrem Kundenkonto "
+        "angemeldet sind."
+        if change_request
+        else ""
+    )
     return AgentResponse(
         answer=(
-            f"{opening}Unsere Mitarbeiter erreichen Sie telefonisch unter {CONTACT_PHONE} "
-            f"({CONTACT_HOURS}) oder per E-Mail an {CONTACT_EMAIL}. Wenn Sie sich in Ihrem "
-            "Kundenkonto anmelden, kann ich Ihr Anliegen auch direkt an einen Kollegen übergeben."
+            f"{opening}Unser Service-Team erreichen Sie per E-Mail an {CONTACT_EMAIL} oder "
+            f"telefonisch unter {CONTACT_PHONE} ({CONTACT_HOURS}).{login}"
         ),
         behavior=Behavior.ESCALATE,
         intent=intent,
