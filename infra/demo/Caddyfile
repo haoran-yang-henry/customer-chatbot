@@ -1,0 +1,29 @@
+# Public entry point of the browser demo (infra/demo/public.sh): the Cloudflare tunnel ends here.
+# Only what the demo needs is routed; everything else - the Keycloak admin and account consoles,
+# the master realm, /metrics, the API docs - answers 404 and stays reachable only locally.
+{
+	admin off
+	auto_https off
+}
+
+:80 {
+	# Login, token, refresh and logout of the nordelektro realm, and the login page's assets.
+	@login path /realms/nordelektro/protocol/openid-connect/* /realms/nordelektro/login-actions/* /resources/*
+	handle @login {
+		reverse_proxy keycloak:8080 {
+			# The tunnel terminates TLS; tell Keycloak the browser connection is secure.
+			header_up X-Forwarded-Proto https
+		}
+	}
+
+	@api path /v1/chat /v1/chat/stream /health/live /health/ready
+	handle @api {
+		reverse_proxy app:8000 {
+			flush_interval -1 # Server-Sent Events: pass every event on at once
+		}
+	}
+
+	handle {
+		respond "Not found" 404
+	}
+}

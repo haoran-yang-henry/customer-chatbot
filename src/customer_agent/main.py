@@ -4,6 +4,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from customer_agent import __version__
 from customer_agent.api import chat as chat_api
@@ -67,7 +68,18 @@ def create_app(
         # exporters, metrics and logs stay configured in one place: customer_agent.observability.
         telemetry={"auto_configure": False, "metrics": False, "logs": False},
     )
+    app.state.auth_required = settings.auth_required
     app.add_middleware(RequestContextMiddleware)
+    if settings.cors_origins:
+        # Added last, so outermost: preflights are answered and 401/429 responses carry the headers.
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=settings.cors_origins,
+            allow_methods=["GET", "POST"],
+            allow_headers=["authorization", "content-type", "x-request-id"],
+            expose_headers=["x-request-id", "retry-after"],
+            max_age=600,
+        )
     register_problem_handlers(app)
     app.include_router(health.router)
     app.include_router(metrics.router)

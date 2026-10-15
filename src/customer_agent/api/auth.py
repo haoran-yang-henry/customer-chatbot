@@ -1,4 +1,5 @@
-"""Authentication dependency: anonymous requests are allowed, bad tokens are not."""
+"""Authentication dependency: anonymous requests are allowed unless ``CA_AUTH_REQUIRED``; bad
+tokens never are."""
 
 from typing import Annotated
 
@@ -13,6 +14,8 @@ async def current_principal(request: Request) -> Principal | None:
     """``None`` for anonymous requests. A presented token must be valid and for this tenant."""
     header = request.headers.get("authorization")
     if header is None:
+        if request.app.state.auth_required:
+            raise HTTPException(401, "please log in", {"WWW-Authenticate": "Bearer"})
         return None
     scheme, _, token = header.partition(" ")
     if scheme.lower() != "bearer" or not token:

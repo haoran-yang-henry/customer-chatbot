@@ -179,3 +179,39 @@ def test_token_without_configured_authentication_is_rejected() -> None:
         )
 
     assert response.status_code == 401
+
+
+def test_anonymous_requests_are_rejected_when_login_is_required() -> None:
+    chat = FakeChat()
+    settings = Settings(_env_file=None, app_env="test", auth_required=True)
+    with TestClient(create_app(settings, chat=chat, verifier=FakeVerifier())) as c:  # type: ignore[arg-type]
+        anonymous = c.post("/v1/chat", json={"message": "Hallo"})
+        logged_in = c.post(
+            "/v1/chat", json={"message": "Hallo"}, headers={"authorization": "Bearer anna"}
+        )
+
+    assert anonymous.status_code == 401
+    assert anonymous.headers["www-authenticate"] == "Bearer"
+    assert logged_in.status_code == 200
+    assert chat.calls == [(None, "C-1001", "Hallo")]
+
+
+def test_only_configured_browser_origins_may_call_the_api(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CA_CORS_ORIGINS", "https://demo.example.org/, http://localhost:3000")
+    settings = Settings(_env_file=None, app_env="test")
+    preflight = {
+        "access-control-request-method": "POST",
+        "access-control-request-headers": "authorization,content-type",
+    }
+    with TestClient(create_app(settings, chat=FakeChat())) as c:  # type: ignore[arg-type]
+        allowed = c.options("/v1/chat", headers={"origin": "https://demo.example.org", **preflight})
+        foreign = c.options("/v1/chat", headers={"origin": "https://evil.example", **preflight})
+        answer = c.post(
+            "/v1/chat", json={"message": "Hallo"}, headers={"origin": "https://demo.example.org"}
+        )
+
+    assert allowed.status_code == 200
+    assert allowed.headers["access-control-allow-origin"] == "https://demo.example.org"
+    assert "access-control-allow-origin" not in foreign.headers
+    assert answer.headers["access-control-allow-origin"] == "https://demo.example.org"
+    assert "x-request-id" in answer.headers["access-control-expose-headers"]

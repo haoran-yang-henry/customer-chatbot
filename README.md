@@ -144,6 +144,31 @@ Order questions need a logged-in customer: `make token USER=anna.schneider` prin
 demo customer; send it as `Authorization: Bearer <token>`. To run the API as a container instead,
 use `make up-app`.
 
+### Browser demo
+
+A small chat page ([`frontend/`](frontend/public): static files, no build step, no dependencies)
+is published to GitHub Pages. It signs in with OpenID Connect (authorization code flow with PKCE)
+against Keycloak and streams the answers. The backend is not hosted anywhere: `make demo-public`
+exposes this machine through a Cloudflare quick tunnel and prints a link plus a fresh password
+for the three demo customers.
+
+```mermaid
+flowchart LR
+    browser([Browser]) -- page --> pages[GitHub Pages<br/>static frontend]
+    browser -- "login · chat (HTTPS)" --> tunnel[Cloudflare<br/>quick tunnel]
+    tunnel --> proxy[Caddy<br/>allow-list of paths]
+    proxy --> kc[Keycloak<br/>nordelektro realm]
+    proxy --> api[Agent API]
+```
+
+- Only chat, health and the realm's login endpoints pass the proxy; the Keycloak admin and
+  account consoles, `/metrics` and the API docs do not.
+- Chat requires a login (`CA_AUTH_REQUIRED`), browser origins are allow-listed
+  (`CA_CORS_ORIGINS`), each customer may send 10 messages a minute, and Keycloak locks an account
+  after repeated failed logins.
+- The link works while this machine runs; `make demo-public-down` stops it. `make demo-frontend`
+  serves the page locally on port 3000 for development.
+
 ## API
 
 | Endpoint | Description |
@@ -167,6 +192,7 @@ All settings are environment variables with the prefix `CA_` (see `.env.example`
 | `CA_OPENAI_API_KEY`, `CA_EMBEDDING_MODEL` | Embedding model |
 | `CA_LLM_API_KEY`, `CA_LLM_BASE_URL`, `CA_LLM_MODEL` | Chat model (any OpenAI-compatible endpoint); `CA_ROUTER_*` / `CA_ANSWER_*` override per role |
 | `CA_AUTH_ISSUER`, `CA_AUTH_AUDIENCE` | OpenID Connect issuer and audience; unset = anonymous only |
+| `CA_AUTH_REQUIRED`, `CA_CORS_ORIGINS` | Reject anonymous chat; browser origins allowed to call the API (comma-separated) |
 | `CA_LOG_FORMAT`, `CA_OTEL_ENDPOINT` | `json` logs for collectors; OTLP/HTTP endpoint for traces |
 | `CA_RATE_LIMIT_PER_MINUTE`, `CA_ROUTER_TIMEOUT_SECONDS`, `CA_BREAKER_*` | Rate limit, timeouts, circuit breaker |
 
@@ -216,7 +242,9 @@ src/customer_agent/
   observability/    logs, traces, metrics
   evaluation/       datasets, scoring, judge, CLI
 data/               knowledge base (Markdown) and demo customers and orders
-eval/               evaluation datasets and results
+eval/               evaluation datasets, results and the CI cassette
+frontend/           browser demo (GitHub Pages)
+infra/              Keycloak realm, browser demo proxy and tunnel
 prompts/            versioned prompt templates
 migrations/         database schema (Alembic)
 tests/              unit, data, integration and load tests

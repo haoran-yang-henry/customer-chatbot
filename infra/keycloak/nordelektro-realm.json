@@ -4,6 +4,10 @@
   "displayName": "NordElektro (development)",
   "accessTokenLifespan": 900,
   "sslRequired": "none",
+  "bruteForceProtected": true,
+  "failureFactor": 10,
+  "waitIncrementSeconds": 60,
+  "maxFailureWaitSeconds": 900,
   "components": {
     "org.keycloak.userprofile.UserProfileProvider": [
       {
@@ -25,13 +29,16 @@
       "standardFlowEnabled": true,
       "directAccessGrantsEnabled": true,
       "redirectUris": [
-        "http://localhost:3000/*"
+        "http://localhost:3000/*",
+        "https://haoran-yang-henry.github.io/customer-chatbot/*"
       ],
       "webOrigins": [
-        "http://localhost:3000"
+        "http://localhost:3000",
+        "https://haoran-yang-henry.github.io"
       ],
       "attributes": {
-        "pkce.code.challenge.method": "S256"
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "+"
       },
       "protocolMappers": [
         {
