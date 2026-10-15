@@ -2,10 +2,10 @@
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -67,6 +67,10 @@ class Settings(BaseSettings):
     auth_issuer: str | None = None  # e.g. http://localhost:8080/realms/nordelektro
     auth_audience: str = "customer-agent-api"
     auth_jwks_url: str | None = None  # default: <issuer>/protocol/openid-connect/certs
+    # Reject anonymous chat requests (public demo: every message costs model calls).
+    auth_required: bool = False
+    # Browser origins allowed to call the API (comma-separated), e.g. the GitHub Pages demo.
+    cors_origins: Annotated[list[str], NoDecode] = Field(default_factory=list)
 
     # Retrieval: RRF weight of the full-text list relative to the vector list (1.0 = equal).
     # 0.25: chosen on core.jsonl, confirmed on retrieval_holdout.jsonl (Day 5, architecture §6.4).
@@ -111,6 +115,13 @@ class Settings(BaseSettings):
     @classmethod
     def _empty_as_none(cls, value: Any) -> Any:
         return None if value == "" else value
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def _comma_separated(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            return [origin.strip().rstrip("/") for origin in value.split(",") if origin.strip()]
+        return value
 
     @model_validator(mode="after")
     def _no_evaluation_shortcuts_in_prod(self) -> "Settings":
