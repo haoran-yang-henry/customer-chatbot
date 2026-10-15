@@ -2,26 +2,27 @@
   "target": "agent",
   "dataset": "eval/datasets/core.jsonl",
   "current_day": 8,
-  "started_at": "2026-10-15T10:08:49.090737Z",
+  "started_at": "2026-10-15T10:40:55.092128Z",
   "config": {
     "router_model": "deepseek-v4-flash",
     "answer_model": "deepseek-v4-flash",
-    "answer_prompt": "answer/v3",
+    "answer_prompt": "answer/v4",
     "router_prompt": "router/v5",
     "guard_prompt": "guard/v1",
     "embedding_model": "text-embedding-3-small",
     "min_answer_similarity": "0.35",
-    "guard_classifier": "on (threshold 0.7)"
+    "guard_classifier": "on (threshold 0.7)",
+    "judge_prompt": "judge/v1"
   },
   "overall": {
-    "passed": 76,
-    "total": 76,
-    "rate": 1.0
+    "passed": 78,
+    "total": 79,
+    "rate": 0.9873417721518988
   },
   "gated": {
-    "passed": 76,
-    "total": 76,
-    "rate": 1.0
+    "passed": 78,
+    "total": 79,
+    "rate": 0.9873417721518988
   },
   "by_category": {
     "adversarial": {
@@ -30,9 +31,9 @@
       "rate": 1.0
     },
     "ambiguous": {
-      "passed": 6,
+      "passed": 5,
       "total": 6,
-      "rate": 1.0
+      "rate": 0.8333333333333334
     },
     "knowledge_governance": {
       "passed": 5,
@@ -50,8 +51,8 @@
       "rate": 1.0
     },
     "multi_turn": {
-      "passed": 9,
-      "total": 9,
+      "passed": 12,
+      "total": 12,
       "rate": 1.0
     },
     "normal": {
@@ -72,33 +73,33 @@
   },
   "by_check": {
     "behavior": {
-      "passed": 76,
-      "total": 76,
+      "passed": 79,
+      "total": 79,
       "rate": 1.0
     },
     "intent": {
-      "passed": 68,
-      "total": 68,
-      "rate": 1.0
+      "passed": 70,
+      "total": 71,
+      "rate": 0.9859154929577465
     },
     "must_contain": {
-      "passed": 46,
-      "total": 46,
+      "passed": 49,
+      "total": 49,
       "rate": 1.0
     },
     "must_not_contain": {
-      "passed": 31,
-      "total": 31,
+      "passed": 33,
+      "total": 33,
       "rate": 1.0
     },
     "sources": {
-      "passed": 39,
-      "total": 39,
+      "passed": 41,
+      "total": 41,
       "rate": 1.0
     },
     "tool": {
-      "passed": 13,
-      "total": 13,
+      "passed": 15,
+      "total": 15,
       "rate": 1.0
     }
   },
@@ -112,17 +113,21 @@
   "safety": {
     "attacks": 8,
     "successful_attacks": 0,
-    "benign": 68,
+    "benign": 71,
     "blocked_benign": 0,
     "redacted_benign": 0,
     "attack_success_rate": 0.0,
     "false_positive_rate": 0.0
   },
   "usage": {
-    "prompt_tokens_per_turn": 2517.7,
-    "completion_tokens_per_turn": 128.4
+    "prompt_tokens_per_turn": 2589.1,
+    "completion_tokens_per_turn": 129.5
   },
-  "groundedness": null,
+  "groundedness": {
+    "passed": 32,
+    "total": 32,
+    "rate": 1.0
+  },
   "intent_confusion": {
     "COMPLAINT": {
       "COMPLAINT": 1
@@ -149,7 +154,8 @@
       "PAYMENT_INFO": 5
     },
     "PRODUCT_INFO": {
-      "PRODUCT_INFO": 9
+      "PRODUCT_INFO": 8,
+      "None": 1
     },
     "REFUND_STATUS": {
       "REFUND_STATUS": 2
@@ -158,7 +164,7 @@
       "RETURN_POLICY": 8
     },
     "RETURN_REQUEST": {
-      "RETURN_REQUEST": 3
+      "RETURN_REQUEST": 6
     },
     "SERVICE_INFO": {
       "SERVICE_INFO": 2
@@ -188,7 +194,7 @@
       "source_recall": 1.0,
       "expected_intent": "RETURN_POLICY",
       "response": {
-        "answer": "Sie haben **30 Tage ab Zustellung** Zeit, Artikel ohne Angabe von Gründen zurückzugeben.\n\nWichtig: Nach der Anmeldung im Kundenkonto unter „Meine Bestellungen“ → „Artikel zurücksenden“ müssen Sie das Paket innerhalb von **14 Tagen** abgeben.\n\nBitte beachten Sie auch mögliche Ausnahmen vom Rückgaberecht, z. B. bei In-Ear-Kopfhörern oder personalisierten Artikeln.",
+        "answer": "Sie haben 30 Tage ab Zustellung Zeit, Artikel ohne Angabe von Gründen zurückzugeben. Bitte melden Sie die Rücksendung im Kundenkonto unter „Meine Bestellungen“ → „Artikel zurücksenden“ an und geben Sie das Paket innerhalb von 14 Tagen nach der Anmeldung ab. Beachten Sie, dass für einige Artikel Ausnahmen vom Rückgaberecht gelten.",
         "behavior": "answer",
         "intent": "RETURN_POLICY",
         "sources": [
@@ -198,7 +204,7 @@
         "tool_calls": [],
         "reasons": []
       },
-      "grounded": null,
+      "grounded": true,
       "passed": true
     },
     {
@@ -216,7 +222,7 @@
       "source_recall": 1.0,
       "expected_intent": "RETURN_POLICY",
       "response": {
-        "answer": "Die Rücksendung ist innerhalb Deutschlands für Sie kostenlos; das Retourenlabel erstellen Sie in Ihrem Kundenkonto unter „Meine Bestellungen“.\n\nAus Österreich berechnen wir eine Rücksendepauschale von 6,95 €, die von der Erstattung abgezogen wird.\n\nRücksendungen aus der Schweiz sind kostenpflichtig; bitte kontaktieren Sie dafür den Kundenservice für ein Label.",
+        "answer": "Die Kosten hängen vom Land ab:\n\n- **Deutschland:** Die Rücksendung ist für Sie kostenlos.\n- **Österreich:** Es fällt eine Rücksendepauschale von 6,95 € an, die von der Erstattung abgezogen wird.\n- **Schweiz:** Rücksendungen sind kostenpflichtig; bitte kontaktieren Sie den Kundenservice für ein Label.",
         "behavior": "answer",
         "intent": "RETURN_POLICY",
         "sources": [
@@ -225,7 +231,7 @@
         "tool_calls": [],
         "reasons": []
       },
-      "grounded": null,
+      "grounded": true,
       "passed": true
     },
     {
@@ -244,17 +250,18 @@
       "source_recall": 1.0,
       "expected_intent": "SHIPPING_INFO",
       "response": {
-        "answer": "Ab einem Bestellwert von 50 € ist der Standardversand innerhalb Deutschlands kostenlos. Der Bestellwert wird nach Abzug von Gutscheinen berechnet. Nach Österreich ist der Versand ab 100 € Bestellwert kostenlos, in die Schweiz ist kein kostenloser Versand möglich.",
+        "answer": "Der Standardversand innerhalb Deutschlands ist ab einem Bestellwert von 50 € kostenlos.\n\nFür Lieferungen nach Österreich ist der Versand ab 100 € Bestellwert kostenlos.",
         "behavior": "answer",
         "intent": "SHIPPING_INFO",
         "sources": [
           "info-shipping-costs",
+          "info-shipping-options",
           "info-shipping-international"
         ],
         "tool_calls": [],
         "reasons": []
       },
-      "grounded": null,
+      "grounded": true,
       "passed": true
     },
     {
@@ -271,7 +278,7 @@
       "source_recall": 1.0,
       "expected_intent": "SHIPPING_INFO",
       "response": {
-        "answer": "Der Expressversand dauert in Deutschland 1–2 Werktage und kostet 9,95 €. Expressbestellungen, die werktags bis 14 Uhr bezahlt sind, verlassen unser Lager am selben Tag; der Expressversand ist nur innerhalb Deutschlands verfügbar. Die Kosten betragen 9,95 € unabhängig vom Bestellwert.",
+        "answer": "Der Expressversand innerhalb Deutschlands dauert 1–2 Werktage und kostet 9,95 €, unabhängig vom Bestellwert.\n\nWerktags bis 14 Uhr bezahlte Expressbestellungen verlassen unser Lager am selben Tag.\n\nExpressversand ist nur innerhalb Deutschlands verfügbar.",
         "behavior": "answer",
         "intent": "SHIPPING_INFO",
         "sources": [
@@ -281,7 +288,7 @@
         "tool_calls": [],
         "reasons": []
       },
-      "grounded": null,
+      "grounded": true,
       "passed": true
     },
     {
@@ -298,7 +305,7 @@
       "source_recall": 1.0,
       "expected_intent": "SHIPPING_INFO",
       "response": {
-        "answer": "Ja, wir liefern in die Schweiz.\n\nDie Lieferzeit beträgt 4–7 Werktage, die Kosten belaufen sich auf 14,95 €. Bei Lieferungen in die Schweiz fallen zusätzlich Zoll und Einfuhrumsatzsteuer an, die bei Zustellung vom Empfänger zu zahlen sind. Expressversand ist für Auslandslieferungen nicht verfügbar.",
+        "answer": "Ja, wir liefern in die Schweiz. Die Lieferzeit beträgt 4–7 Werktage und die Versandkosten betragen 14,95 €.\n\nBei Lieferungen in die Schweiz fallen zusätzlich Zoll und Einfuhrumsatzsteuer an, die bei Zustellung vom Empfänger zu zahlen sind.\n\nExpressversand ist für Auslandslieferungen nicht verfügbar.",
         "behavior": "answer",
         "intent": "SHIPPING_INFO",
         "sources": [
@@ -307,7 +314,7 @@
         "tool_calls": [],
         "reasons": []
       },
-      "grounded": null,
+      "grounded": true,
       "passed": true
     },
     {
@@ -324,7 +331,7 @@
       "source_recall": 1.0,
       "expected_intent": "PAYMENT_INFO",
       "response": {
-        "answer": "Ja, Sie können auf Rechnung bezahlen. Bei NordElektro ist der **Klarna Rechnung**-Kauf mit einem Zahlungsziel von 14 Tagen möglich; dabei erfolgt eine Bonitätsprüfung durch Klarna.",
+        "answer": "Ja, Sie können per Klarna Rechnung bezahlen. Das Zahlungsziel beträgt 14 Tage; dabei erfolgt eine Bonitätsprüfung durch Klarna.",
         "behavior": "answer",
         "intent": "PAYMENT_INFO",
         "sources": [
@@ -333,7 +340,7 @@
         "tool_calls": [],
         "reasons": []
       },
-      "grounded": null,
+      "grounded": true,
       "passed": true
     },
     {
@@ -350,7 +357,7 @@
       "source_recall": 1.0,
       "expected_intent": "PAYMENT_INFO",
       "response": {
-        "answer": "Nein, Nachnahme wird bei NordElektro nicht angeboten.",
+        "answer": "Nachnahme bieten wir nicht an.",
         "behavior": "answer",
         "intent": "PAYMENT_INFO",
         "sources": [
@@ -359,7 +366,7 @@
         "tool_calls": [],
         "reasons": []
       },
-      "grounded": null,
+      "grounded": true,
       "passed": true
     },
     {
@@ -376,7 +383,7 @@
       "source_recall": 1.0,
       "expected_intent": "RETURN_POLICY",
       "response": {
-        "answer": "Ihre Erstattung erhalten wir innerhalb von 14 Tagen nach Eingang der Rücksendung in unserem Lager; nach Prüfung bekommen Sie eine E-Mail.\n\nDie Gutschrift erfolgt über die ursprüngliche Zahlungsart: bei PayPal meist in 1–3 Werktagen nach Freigabe, bei Kreditkarte in 3–5 Werktagen je nach Bank. Bei Klarna Rechnung wird die Rechnung angepasst, bei Vorkasse auf das ursprüngliche Konto überwiesen.\n\nDen Status sehen Sie im Kundenkonto unter „Meine Bestellungen“.",
+        "answer": "Die Erstattung des Kaufpreises erfolgt innerhalb von 14 Tagen nach Eingang der Rücksendung in unserem Lager.\n\nDie Gutschrift erfolgt über die ursprüngliche Zahlungsart: bei PayPal meist innerhalb von 1–3 Werktagen nach Freigabe, bei Kreditkarte innerhalb von 3–5 Werktagen.",
         "behavior": "answer",
         "intent": "RETURN_POLICY",
         "sources": [
@@ -385,7 +392,7 @@
         "tool_calls": [],
         "reasons": []
       },
-      "grounded": null,
+      "grounded": true,
       "passed": true
     },
     {
@@ -402,7 +409,7 @@
       "source_recall": 1.0,
       "expected_intent": "WARRANTY_INFO",
       "response": {
-        "answer": "Die gesetzliche Gewährleistung gilt bei uns 2 Jahre ab Zustellung.\n\nTritt innerhalb der ersten 12 Monate ein Mangel auf, wird vermutet, dass er bereits bei der Übergabe vorlag; danach müssten Sie nachweisen, dass der Mangel schon bei Übergabe bestand.",
+        "answer": "Die gesetzliche Gewährleistung gilt für alle Artikel 2 Jahre ab Zustellung.",
         "behavior": "answer",
         "intent": "WARRANTY_INFO",
         "sources": [
@@ -411,7 +418,7 @@
         "tool_calls": [],
         "reasons": []
       },
-      "grounded": null,
+      "grounded": true,
       "passed": true
     },
     {
@@ -428,7 +435,7 @@
       "source_recall": 1.0,
       "expected_intent": "WARRANTY_INFO",
       "response": {
-        "answer": "Die **Gewährleistung** ist gesetzlich vorgeschrieben: NordElektro haftet als Verkäufer 2 Jahre dafür, dass die Ware bei Übergabe mangelfrei war.\n\nDie **Garantie** ist dagegen eine freiwillige Zusage des Herstellers. Dauer und Bedingungen legt der Hersteller fest; sie stehen in den Produktinformationen oder auf der Garantiekarte.\n\nEine Garantie kann über die Gewährleistung hinausgehen, ersetzt sie aber nicht.\n\nBei einem Defekt können Sie frei wählen, ob Sie sich an uns (Gewährleistung) oder an den Hersteller (Garantie) wenden.",
+        "answer": "Gern erklärt:\n\nDie **Gewährleistung** ist gesetzlich vorgeschrieben. NordElektro haftet als Verkäufer 2 Jahre dafür, dass die Ware bei Übergabe mangelfrei war.\n\nDie **Garantie** ist eine freiwillige Zusage des Herstellers. Dauer und Bedingungen legt der Hersteller fest; sie stehen in den Produktinformationen oder auf der Garantiekarte. Eine Garantie kann über die Gewährleistung hinausgehen, ersetzt sie aber nicht.\n\nBei einem Defekt können Sie frei wählen, ob Sie sich an uns (Gewährleistung) oder an den Hersteller (Garantie) wenden.",
         "behavior": "answer",
         "intent": "WARRANTY_INFO",
         "sources": [
@@ -437,7 +444,7 @@
         "tool_calls": [],
         "reasons": []
       },
-      "grounded": null,
+      "grounded": true,
       "passed": true
     },
     {
@@ -465,7 +472,7 @@
         "tool_calls": [],
         "reasons": []
       },
-      "grounded": null,
+      "grounded": true,
       "passed": true
     },
     {
@@ -482,7 +489,7 @@
       "source_recall": 1.0,
       "expected_intent": "PRODUCT_INFO",
       "response": {
-        "answer": "Ja, die VoltPack 20 darf bei den meisten Fluggesellschaften im Handgepäck mitgenommen werden, da sie mit 74 Wh unter der Grenze von 100 Wh liegt.\n\nIm aufgegebenen Gepäck sind Powerbanks nicht erlaubt. Bitte prüfen Sie vor dem Flug die Bestimmungen Ihrer Airline.",
+        "answer": "Ja, die VoltPack 20 darf bei den meisten Fluggesellschaften im Handgepäck mitgenommen werden, da sie mit 74 Wh unter der Grenze von 100 Wh liegt. Im aufgegebenen Gepäck sind Powerbanks nicht erlaubt. Bitte prüfen Sie vor dem Flug die Bestimmungen Ihrer Airline.",
         "behavior": "answer",
         "intent": "PRODUCT_INFO",
         "sources": [
@@ -491,7 +498,7 @@
         "tool_calls": [],
         "reasons": []
       },
-      "grounded": null,
+      "grounded": true,
       "passed": true
     },
     {
@@ -509,7 +516,7 @@
       "source_recall": 1.0,
       "expected_intent": "PRODUCT_INFO",
       "response": {
-        "answer": "Ja, die Velto Watch 3 ist wasserdicht: Sie hat eine Wasserdichtigkeit von 5 ATM und ist damit zum Schwimmen geeignet, jedoch nicht zum Tauchen.",
+        "answer": "Die Velto Watch 3 ist nach 5 ATM wasserdicht und eignet sich zum Schwimmen, jedoch nicht zum Tauchen.",
         "behavior": "answer",
         "intent": "PRODUCT_INFO",
         "sources": [
@@ -518,7 +525,7 @@
         "tool_calls": [],
         "reasons": []
       },
-      "grounded": null,
+      "grounded": true,
       "passed": true
     },
     {
@@ -544,7 +551,7 @@
         "tool_calls": [],
         "reasons": []
       },
-      "grounded": null,
+      "grounded": true,
       "passed": true
     },
     {
@@ -561,7 +568,7 @@
       "source_recall": 1.0,
       "expected_intent": "SHIPPING_INFO",
       "response": {
-        "answer": "Bitte prüfen Sie zunächst, ob das Paket bei einem Nachbarn, an einem Ablageort oder in einer Packstation hinterlegt wurde – Hinweise dazu finden Sie in der DHL-Sendungsverfolgung.\n\nWarten Sie bitte einen Werktag, da der Status manchmal zu früh gesetzt wird.\n\nIst das Paket dann noch nicht da, melden Sie sich innerhalb von 7 Tagen bei unserem Kundenservice. Wir starten einen Nachforschungsauftrag bei DHL und senden bei Verlust kostenlos Ersatz oder erstatten den Kaufpreis.",
+        "answer": "Prüfen Sie bitte zuerst, ob das Paket bei einem Nachbarn, an einem Ablageort oder in einer Packstation hinterlegt wurde; Hinweise dazu finden Sie in der DHL-Sendungsverfolgung.\n\nWarten Sie dann bitte einen Werktag – manchmal wird der Status zu früh gesetzt.\n\nIst das Paket danach noch nicht da, melden Sie sich innerhalb von 7 Tagen bei unserem Kundenservice. Wir starten einen Nachforschungsauftrag bei DHL und senden bei Verlust kostenlos Ersatz oder erstatten den Kaufpreis.",
         "behavior": "answer",
         "intent": "SHIPPING_INFO",
         "sources": [
@@ -570,7 +577,7 @@
         "tool_calls": [],
         "reasons": []
       },
-      "grounded": null,
+      "grounded": true,
       "passed": true
     },
     {
@@ -587,7 +594,7 @@
       "source_recall": 1.0,
       "expected_intent": "SERVICE_INFO",
       "response": {
-        "answer": "Sie können Ihr Konto selbst löschen: unter „Mein Konto“ → „Einstellungen“ → „Konto löschen“.\n\nBitte beachten Sie, dass offene Bestellungen und Rücksendungen vorher abgeschlossen sein müssen. Rechnungsdaten bewahren wir aus steuerrechtlichen Gründen bis zu 10 Jahre auf und sperren sie für andere Zwecke.",
+        "answer": "Sie können Ihr Konto selbst löschen: unter „Mein Konto“ → „Einstellungen“ → „Konto löschen“.\n\nBitte beachten Sie, dass offene Bestellungen und Rücksendungen vorher abgeschlossen sein müssen. Rechnungsdaten bewahren wir aus steuerrechtlichen Gründen bis zu 10 Jahre auf; sie werden für andere Zwecke gesperrt.",
         "behavior": "answer",
         "intent": "SERVICE_INFO",
         "sources": [
@@ -596,7 +603,7 @@
         "tool_calls": [],
         "reasons": []
       },
-      "grounded": null,
+      "grounded": true,
       "passed": true
     },
     {
@@ -613,7 +620,7 @@
       "source_recall": 1.0,
       "expected_intent": "SERVICE_INFO",
       "response": {
-        "answer": "Unser Kundenservice ist telefonisch Montag bis Freitag von 8–20 Uhr und Samstag von 9–16 Uhr erreichbar. Die Telefonnummer lautet 0800 123 4567 (kostenlos aus dem deutschen Festnetz und Mobilfunknetz). An Sonn- und Feiertagen ist keine persönliche Beratung verfügbar.",
+        "answer": "Unser Kundenservice ist telefonisch Montag bis Freitag von 8–20 Uhr und Samstag von 9–16 Uhr erreichbar. An Sonn- und Feiertagen gibt es keine persönliche Beratung. Sie erreichen uns unter der kostenlosen Nummer 0800 123 4567.",
         "behavior": "answer",
         "intent": "SERVICE_INFO",
         "sources": [
@@ -622,7 +629,7 @@
         "tool_calls": [],
         "reasons": []
       },
-      "grounded": null,
+      "grounded": true,
       "passed": true
     },
     {
@@ -639,7 +646,7 @@
       "source_recall": 1.0,
       "expected_intent": "PAYMENT_INFO",
       "response": {
-        "answer": "Ja, das ist möglich. Geben Sie bei der Bestellung im Feld „Firma“ den Firmennamen und Ihre USt-IdNr. an. Die Rechnung steht nach dem Versand als PDF im Kundenkonto unter „Meine Bestellungen“ zum Download bereit; die Mehrwertsteuer (19 %) ist ausgewiesen.",
+        "answer": "Ja, das ist möglich. Geben Sie bei der Bestellung im Feld „Firma“ den Firmennamen und Ihre USt-IdNr. an.\n\nDie Rechnung steht nach dem Versand als PDF im Kundenkonto unter „Meine Bestellungen“ zum Download bereit; die Mehrwertsteuer (19 %) ist ausgewiesen.",
         "behavior": "answer",
         "intent": "PAYMENT_INFO",
         "sources": [
@@ -648,7 +655,7 @@
         "tool_calls": [],
         "reasons": []
       },
-      "grounded": null,
+      "grounded": true,
       "passed": true
     },
     {
@@ -665,17 +672,16 @@
       "source_recall": 1.0,
       "expected_intent": "RETURN_POLICY",
       "response": {
-        "answer": "In-Ear-Kopfhörer sind aus Hygienegründen nur bei unbeschädigtem Hygienesiegel rückgabefähig; nach dem Öffnen des Siegels ist eine Rückgabe nicht mehr möglich. Beim Klangwerk Buds S gilt ebenfalls: Rückgabe nur mit unbeschädigtem Hygienesiegel. Over-Ear-Kopfhörer sind davon nicht betroffen.",
+        "answer": "In-Ear-Kopfhörer sind aus Hygienegründen nur rückgabefähig, wenn das Hygienesiegel unbeschädigt ist. Nach dem Öffnen des Siegels ist eine Rückgabe nicht mehr möglich.",
         "behavior": "answer",
         "intent": "RETURN_POLICY",
         "sources": [
-          "policy-return-exceptions",
-          "product-klangwerk-buds-s"
+          "policy-return-exceptions"
         ],
         "tool_calls": [],
         "reasons": []
       },
-      "grounded": null,
+      "grounded": true,
       "passed": true
     },
     {
@@ -716,7 +722,7 @@
       "source_recall": 1.0,
       "expected_intent": "RETURN_POLICY",
       "response": {
-        "answer": "Sie haben **30 Tage ab Zustellung** Zeit, Artikel ohne Angabe von Gründen zurückzugeben.\n\nBitte melden Sie die Rücksendung im Kundenkonto unter „Meine Bestellungen“ → „Artikel zurücksenden“ an und geben Sie das Paket innerhalb von **14 Tagen nach Anmeldung** ab.",
+        "answer": "Sie haben 30 Tage ab Zustellung Zeit, Artikel ohne Angabe von Gründen zurückzugeben.\n\nBitte melden Sie die Rücksendung im Kundenkonto unter „Meine Bestellungen“ → „Artikel zurücksenden“ an und geben Sie das Paket innerhalb von 14 Tagen nach der Anmeldung ab.",
         "behavior": "answer",
         "intent": "RETURN_POLICY",
         "sources": [
@@ -725,7 +731,7 @@
         "tool_calls": [],
         "reasons": []
       },
-      "grounded": null,
+      "grounded": true,
       "passed": true
     },
     {
@@ -742,7 +748,7 @@
       "source_recall": 1.0,
       "expected_intent": "SHIPPING_INFO",
       "response": {
-        "answer": "Der Standardversand nach Österreich kostet 7,95 € und ist ab einem Bestellwert von 100 € kostenlos. Die Lieferzeit beträgt 3–5 Werktage.",
+        "answer": "Nach Österreich betragen die Versandkosten 7,95 €, kostenlos ab einem Bestellwert von 100 €. Die Lieferzeit liegt bei 3–5 Werktagen.",
         "behavior": "answer",
         "intent": "SHIPPING_INFO",
         "sources": [
@@ -751,7 +757,7 @@
         "tool_calls": [],
         "reasons": []
       },
-      "grounded": null,
+      "grounded": true,
       "passed": true
     },
     {
@@ -768,7 +774,7 @@
       "source_recall": 1.0,
       "expected_intent": "PAYMENT_INFO",
       "response": {
-        "answer": "Ja, das ist möglich. Bei NordElektro können Sie per **Klarna Ratenkauf** bezahlen: ab einem Bestellwert von 100 €, mit einer Laufzeit von 6, 12 oder 24 Monaten.",
+        "answer": "Ja, ein Ratenkauf ist möglich: Der Klarna Ratenkauf ist ab einem Bestellwert von 100 € verfügbar, mit einer Laufzeit von 6, 12 oder 24 Monaten.",
         "behavior": "answer",
         "intent": "PAYMENT_INFO",
         "sources": [
@@ -777,7 +783,7 @@
         "tool_calls": [],
         "reasons": []
       },
-      "grounded": null,
+      "grounded": true,
       "passed": true
     },
     {
@@ -827,16 +833,17 @@
       "source_recall": 1.0,
       "expected_intent": "RETURN_POLICY",
       "response": {
-        "answer": "Sie haben **30 Tage ab Zustellung** Zeit, Artikel ohne Angabe von Gründen zurückzugeben.",
+        "answer": "Bei NordElektro haben Sie 30 Tage ab Zustellung Zeit, Artikel ohne Angabe von Gründen zurückzugeben. Bitte beachten Sie, dass für einige Artikel Ausnahmen gelten können.",
         "behavior": "answer",
         "intent": "RETURN_POLICY",
         "sources": [
-          "policy-returns-v5"
+          "policy-returns-v5",
+          "policy-return-exceptions"
         ],
         "tool_calls": [],
         "reasons": []
       },
-      "grounded": null,
+      "grounded": true,
       "passed": true
     },
     {
@@ -874,9 +881,9 @@
       "source_recall": null,
       "expected_intent": null,
       "response": {
-        "answer": "Worauf bezieht sich Ihre Frage genau – auf eine Bestellung, eine Retoure oder etwas anderes? Bitte nennen Sie mir gegebenenfalls Ihre Bestellnummer.",
+        "answer": "Könnten Sie Ihr Anliegen bitte etwas genauer beschreiben? Dann helfe ich Ihnen gern weiter.",
         "behavior": "clarify",
-        "intent": null,
+        "intent": "ORDER_STATUS",
         "sources": [],
         "tool_calls": [],
         "reasons": []
@@ -895,7 +902,7 @@
       "source_recall": null,
       "expected_intent": null,
       "response": {
-        "answer": "Worauf bezieht sich Ihre Frage genau – zum Beispiel auf den Versand, eine Retoure oder eine Erstattung?",
+        "answer": "Worauf bezieht sich Ihre Frage genau – auf den Versand, eine Retoure, eine Erstattung oder etwas anderes?",
         "behavior": "clarify",
         "intent": null,
         "sources": [],
@@ -912,20 +919,20 @@
       "tags": [],
       "checks": {
         "behavior": true,
-        "intent": true
+        "intent": false
       },
       "source_recall": null,
       "expected_intent": "PRODUCT_INFO",
       "response": {
-        "answer": "Was möchten Sie zu Kopfhörern wissen? Suchen Sie ein bestimmtes Produkt oder haben Sie eine Frage zu einem Kopfhörer?",
+        "answer": "Worum geht es Ihnen bei den Kopfhörern? Möchten Sie Informationen zu einem Produkt, eine Bestellung aufgeben oder etwas zurückschicken?",
         "behavior": "clarify",
-        "intent": "PRODUCT_INFO",
+        "intent": null,
         "sources": [],
         "tool_calls": [],
         "reasons": []
       },
       "grounded": null,
-      "passed": true
+      "passed": false
     },
     {
       "case_id": "A-005",
@@ -938,7 +945,7 @@
       "source_recall": null,
       "expected_intent": null,
       "response": {
-        "answer": "Worum geht es genau bei Ihrem Anliegen zu Ihrem Geld? Handelt es sich um eine Erstattung für eine Retoure, um eine fehlgeschlagene Zahlung oder um etwas anderes? Bitte nennen Sie mir Ihre Bestellnummer und Ihr Anliegen.",
+        "answer": "Könnten Sie mir bitte genauer sagen, worum es bei Ihrem Anliegen geht? Handelt es sich um eine Bestellung, eine Retoure oder eine Erstattung?",
         "behavior": "clarify",
         "intent": null,
         "sources": [],
@@ -984,7 +991,7 @@
       "source_recall": 1.0,
       "expected_intent": "WARRANTY_INFO",
       "response": {
-        "answer": "Für die Klangwerk ANC 700 gilt eine Herstellergarantie von 3 Jahren, zusätzlich zur gesetzlichen Gewährleistung.\n\nDie gesetzliche Gewährleistung beträgt 2 Jahre ab Zustellung.",
+        "answer": "Für die Klangwerk ANC 700 gilt eine Herstellergarantie von 3 Jahren, zusätzlich zur gesetzlichen Gewährleistung. Die gesetzliche Gewährleistung beträgt 2 Jahre ab Zustellung.",
         "behavior": "answer",
         "intent": "WARRANTY_INFO",
         "sources": [
@@ -994,7 +1001,7 @@
         "tool_calls": [],
         "reasons": []
       },
-      "grounded": null,
+      "grounded": true,
       "passed": true
     },
     {
@@ -1013,7 +1020,7 @@
       "source_recall": 1.0,
       "expected_intent": "SHIPPING_INFO",
       "response": {
-        "answer": "In die Schweiz kostet der Versand 14,95 €, die Lieferzeit beträgt 4–7 Werktage.\n\nBitte beachten Sie: Bei Lieferungen in die Schweiz fallen zusätzlich Zoll und Einfuhrumsatzsteuer an, die bei Zustellung vom Empfänger zu zahlen sind.\n\nExpressversand ist für Auslandslieferungen nicht verfügbar.",
+        "answer": "Der Versand in die Schweiz kostet 14,95 €, die Lieferzeit beträgt 4–7 Werktage. Bei Lieferungen in die Schweiz fallen zusätzlich Zoll und Einfuhrumsatzsteuer an, die bei Zustellung vom Empfänger zu zahlen sind. Expressversand ist für Auslandslieferungen nicht verfügbar.",
         "behavior": "answer",
         "intent": "SHIPPING_INFO",
         "sources": [
@@ -1022,7 +1029,7 @@
         "tool_calls": [],
         "reasons": []
       },
-      "grounded": null,
+      "grounded": true,
       "passed": true
     },
     {
@@ -1123,7 +1130,7 @@
       "source_recall": 1.0,
       "expected_intent": "PAYMENT_INFO",
       "response": {
-        "answer": "Ja, Sie können bei NordElektro mit PayPal bezahlen.",
+        "answer": "Ja, Sie können mit PayPal bezahlen.",
         "behavior": "answer",
         "intent": "PAYMENT_INFO",
         "sources": [
@@ -1132,7 +1139,7 @@
         "tool_calls": [],
         "reasons": []
       },
-      "grounded": null,
+      "grounded": true,
       "passed": true
     },
     {
@@ -1380,7 +1387,7 @@
       "source_recall": 1.0,
       "expected_intent": "COMPLAINT",
       "response": {
-        "answer": "Es tut mir leid, dass Ihr Paket erneut beschädigt angekommen ist. Bei einem beschädigten Artikel fotografieren Sie bitte Verpackung und Artikel und melden Sie den Schaden innerhalb von 7 Tagen beim Kundenservice; wir senden dann Ersatz oder erstatten den Kaufpreis.\n\nWenn die Verpackung bereits sichtbar beschädigt ist, können Sie die Annahme künftig verweigern.",
+        "answer": "Es tut mir leid, dass Ihr Paket beschädigt ankam. Ist die Verpackung sichtbar beschädigt, können Sie die Annahme verweigern.\n\nWurde ein beschädigter Artikel zugestellt, fotografieren Sie bitte Verpackung und Artikel und melden Sie den Schaden innerhalb von 7 Tagen beim Kundenservice. Wir senden dann Ersatz oder erstatten den Kaufpreis.",
         "behavior": "answer",
         "intent": "COMPLAINT",
         "sources": [
@@ -1389,7 +1396,7 @@
         "tool_calls": [],
         "reasons": []
       },
-      "grounded": null,
+      "grounded": true,
       "passed": true
     },
     {
@@ -1665,7 +1672,7 @@
       "source_recall": 1.0,
       "expected_intent": "RETURN_POLICY",
       "response": {
-        "answer": "Nein, Sie haben weiterhin **30 Tage ab Zustellung** Zeit, Artikel ohne Angabe von Gründen zurückzugeben.",
+        "answer": "Bei NordElektro haben Sie 30 Tage ab Zustellung Zeit, Artikel ohne Angabe von Gründen zurückzugeben.",
         "behavior": "answer",
         "intent": "RETURN_POLICY",
         "sources": [
@@ -1674,7 +1681,7 @@
         "tool_calls": [],
         "reasons": []
       },
-      "grounded": null,
+      "grounded": true,
       "passed": true
     },
     {
@@ -1691,7 +1698,7 @@
       "source_recall": 1.0,
       "expected_intent": "RETURN_POLICY",
       "response": {
-        "answer": "Für Rücksendungen aus Deutschland ist die Rücksendung für Sie kostenlos; das Retourenlabel erstellen Sie in Ihrem Kundenkonto unter „Meine Bestellungen“.\n\nFür Rücksendungen aus Österreich berechnen wir eine Rücksendepauschale von 6,95 €, die von der Erstattung abgezogen wird.",
+        "answer": "Für Rücksendungen aus Deutschland ist die Rücksendung für Sie kostenlos. Für Österreich berechnen wir eine Rücksendepauschale von 6,95 €, die von der Erstattung abgezogen wird. Bei Rücksendungen aus der Schweiz kontaktieren Sie bitte den Kundenservice für ein Label.",
         "behavior": "answer",
         "intent": "RETURN_POLICY",
         "sources": [
@@ -1700,7 +1707,7 @@
         "tool_calls": [],
         "reasons": []
       },
-      "grounded": null,
+      "grounded": true,
       "passed": true
     },
     {
@@ -1743,17 +1750,16 @@
       "source_recall": 1.0,
       "expected_intent": "PRODUCT_INFO",
       "response": {
-        "answer": "Gern! So verbinden Sie die Velto Watch 3 mit Ihrem Smartphone:\n\n1. App „Velto Health“ aus dem App Store oder Google Play installieren.\n2. Bluetooth am Smartphone aktivieren.\n3. Uhr einschalten und in der App „Gerät hinzufügen“ wählen.\n4. Den auf der Uhr angezeigten Code in der App bestätigen.\n\nEin Community-Tipp: Falls die Verbindung nicht klappt, kann es helfen, die Uhr in der Bluetooth-Liste des Handys zu entfernen und die App neu zu installieren.\n\nDie Uhr ist mit Android ab Version 10 und iOS ab Version 16 kompatibel.",
+        "answer": "Die Velto Watch 3 verbinden Sie so: 1. App „Velto Health“ im App Store oder bei Google Play installieren. 2. Bluetooth am Smartphone aktivieren. 3. Uhr einschalten und in der App „Gerät hinzufügen“ wählen. 4. Den auf der Uhr angezeigten Code in der App bestätigen. Die Uhr ist mit Android ab Version 10 und iOS ab Version 16 kompatibel.",
         "behavior": "answer",
         "intent": "PRODUCT_INFO",
         "sources": [
-          "product-velto-watch-3",
-          "community-velto-watch-pairing-tip"
+          "product-velto-watch-3"
         ],
         "tool_calls": [],
         "reasons": []
       },
-      "grounded": null,
+      "grounded": true,
       "passed": true
     },
     {
@@ -1986,7 +1992,7 @@
       "source_recall": 1.0,
       "expected_intent": "ORDER_CANCEL",
       "response": {
-        "answer": "Eine Bestellung können Sie kostenlos stornieren, solange sie noch nicht versendet wurde (Status „Zahlung ausstehend“, „Bezahlt“ oder „In Bearbeitung“).\n\nSo stornieren Sie:\n- im Kundenkonto unter „Meine Bestellungen“ → „Stornieren“: https://www.nordelektro.example/konto/bestellungen\n- oder über einen Mitarbeiter unseres Kundenservices.\n\nBereits gezahlte Beträge erstatten wir innerhalb von 5 Werktagen über die ursprüngliche Zahlungsart.\n\nWurde die Bestellung bereits versendet, ist keine Stornierung mehr möglich; Sie können die Annahme verweigern oder den Artikel innerhalb von 30 Tagen zurücksenden.",
+        "answer": "Sie können eine Bestellung kostenlos stornieren, solange sie noch nicht versendet wurde – also im Status „Zahlung ausstehend\", „Bezahlt\" oder „In Bearbeitung\".\n\nDie Stornierung ist möglich im Kundenkonto unter „Meine Bestellungen\" → „Stornieren\" oder über einen Mitarbeiter unseres Kundenservices.\n\nBereits gezahlte Beträge erstatten wir innerhalb von 5 Werktagen über die ursprüngliche Zahlungsart.\n\nWurde die Bestellung bereits versendet, ist keine Stornierung mehr möglich. Sie können dann die Annahme des Pakets verweigern oder den Artikel nach Erhalt im Rahmen des 30-tägigen Rückgaberechts zurücksenden.",
         "behavior": "answer",
         "intent": "ORDER_CANCEL",
         "sources": [
@@ -1995,7 +2001,7 @@
         "tool_calls": [],
         "reasons": []
       },
-      "grounded": null,
+      "grounded": true,
       "passed": true
     },
     {
@@ -2154,6 +2160,89 @@
         "intent": "SERVICE_INFO",
         "sources": [],
         "tool_calls": [],
+        "reasons": []
+      },
+      "grounded": null,
+      "passed": true
+    },
+    {
+      "case_id": "M-010",
+      "category": "multi_turn",
+      "target_day": 8,
+      "tags": [],
+      "checks": {
+        "behavior": true,
+        "intent": true,
+        "sources": true,
+        "tool": true,
+        "must_contain": true,
+        "must_not_contain": true
+      },
+      "source_recall": 1.0,
+      "expected_intent": "RETURN_REQUEST",
+      "response": {
+        "answer": "Für Ihre Bestellung NE-100198 (NordBook Air 14) gilt die gesetzliche Gewährleistung noch bis zum 10. August 2028. Da die Zustellung weniger als 12 Monate zurückliegt, wird vermutet, dass der Mangel schon bei der Übergabe vorlag. Sie können zwischen Reparatur und Ersatzlieferung wählen; die Rücksendung der defekten Ware ist für Sie kostenlos. So melden Sie den Defekt: Kundenkonto → „Meine Bestellungen“ → „Problem melden“: https://www.nordelektro.example/konto/bestellungen.\n\nSoll ich Ihre Defektmeldung zu NE-100198 an unser Service-Team weitergeben?",
+        "behavior": "answer",
+        "intent": "RETURN_REQUEST",
+        "sources": [
+          "policy-warranty"
+        ],
+        "tool_calls": [
+          "get_order_status"
+        ],
+        "reasons": []
+      },
+      "grounded": null,
+      "passed": true
+    },
+    {
+      "case_id": "M-011",
+      "category": "multi_turn",
+      "target_day": 8,
+      "tags": [],
+      "checks": {
+        "behavior": true,
+        "intent": true,
+        "sources": true,
+        "must_contain": true,
+        "must_not_contain": true
+      },
+      "source_recall": 1.0,
+      "expected_intent": "RETURN_REQUEST",
+      "response": {
+        "answer": "Sie melden den Defekt im Kundenkonto unter „Meine Bestellungen“ → „Problem melden“ oder über den Kundenservice. Die Rücksendung defekter Ware ist für Sie kostenlos.\n\nSoll ich Ihre Defektmeldung zu NE-100198 an unser Service-Team weitergeben?",
+        "behavior": "answer",
+        "intent": "RETURN_REQUEST",
+        "sources": [
+          "policy-warranty"
+        ],
+        "tool_calls": [],
+        "reasons": []
+      },
+      "grounded": true,
+      "passed": true
+    },
+    {
+      "case_id": "M-012",
+      "category": "multi_turn",
+      "target_day": 8,
+      "tags": [],
+      "checks": {
+        "behavior": true,
+        "intent": true,
+        "tool": true,
+        "must_contain": true
+      },
+      "source_recall": null,
+      "expected_intent": "RETURN_REQUEST",
+      "response": {
+        "answer": "Vielen Dank. Ich habe Ihr Anliegen an unser Service-Team weitergegeben (Ticketnummer T-000003). Das Team bearbeitet es und meldet sich bei Ihnen.",
+        "behavior": "escalate",
+        "intent": "RETURN_REQUEST",
+        "sources": [],
+        "tool_calls": [
+          "create_ticket"
+        ],
         "reasons": []
       },
       "grounded": null,

@@ -100,16 +100,17 @@ composition root (`bootstrap.py`), which keeps the domain free of I/O and easy t
 
 | Area | Method | Current result |
 |---|---|---|
-| Answer quality | 76 German conversations: behaviour, intent, sources, tools, required and forbidden phrases | **76 / 76** passed |
+| Answer quality | 79 German conversations: behaviour, intent, sources, tools, required and forbidden phrases | **78 / 79** passed |
 | Retrieval | Recall@5 / MRR on 36 questions; confirmed on 28 held-out questions | **1.00 / 0.95** (held-out 1.00 / 0.87) |
 | Safety | 37 attacks: direct and indirect injection, obfuscation, data exfiltration, social engineering | **0 / 37** attacks succeeded, no harmful output |
-| Over-blocking | Benign conversations stopped by a guardrail | **0 / 80** |
+| Over-blocking | Benign conversations stopped by a guardrail | **0 / 83** |
 | System overhead | k6, 20 concurrent customers, model mocked out | **p95 54 ms** |
 | Time to first token | 56 questions against the real model, one after another | p50 5.6 s, p95 7.2 s — above the 3 s target; one bare call to the development provider already takes 3–4 s |
 | Resilience | Fault injection: model provider unreachable | Contact details in every turn, **< 10 s** |
 
-Intent routing is done by a language model, so single borderline cases can flip between runs
-(two of them failed in earlier runs). Groundedness is additionally scored by an LLM judge; its
+Intent routing is done by a language model, so borderline cases can flip between runs: the
+one failure (A-004, "Kopfhörer") is always clarified correctly, but labelled with the expected
+intent in only about 30 % of samples. Groundedness is additionally scored by an LLM judge; its
 verdicts are not yet calibrated against human labels and are therefore not listed as a result.
 
 ## Getting started
