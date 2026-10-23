@@ -52,7 +52,7 @@ from customer_agent.infrastructure.models import (
 )
 from customer_agent.infrastructure.prompts import load_prompt
 from customer_agent.infrastructure.resilience import BreakerEmbeddings, CircuitBreaker
-from customer_agent.observability import configure_langfuse, get_logger, instrument_openai
+from customer_agent.observability import configure_langfuse, get_logger
 
 log = get_logger("bootstrap")
 
@@ -136,7 +136,10 @@ def create_chat_models(
         }
         return {
             role: ReplayChatModel(
-                cassette=cassette, inner=inner[role] if inner else None, label=labels[role]
+                name=role,
+                cassette=cassette,
+                inner=inner[role] if inner else None,
+                label=labels[role],
             )
             for role in roles
         }
@@ -169,6 +172,7 @@ def _chat_models(
         name = model_override or settings.llm_model
         effort = effort_override or settings.llm_reasoning_effort
         model: BaseChatModel = BreakerChatModel(
+            name=role,  # the run name in traces
             inner=ProviderChatModel(
                 model_name=name,
                 openai_api_key=settings.llm_api_key,
@@ -185,7 +189,7 @@ def _chat_models(
         if settings.llm_cache_dir is not None:
             namespace = f"{settings.llm_base_url or 'openai-default'}|{name}|reasoning={effort}"
             model = CachedChatModel(
-                inner=model, directory=settings.llm_cache_dir, namespace=namespace
+                name=role, inner=model, directory=settings.llm_cache_dir, namespace=namespace
             )
         models[role] = model
     return models
@@ -202,8 +206,9 @@ def start_langfuse(
     version: str,
     environment: str | None = None,
 ) -> bool:
-    """Langfuse tracing of turns and model calls, when configured (see ``langfuse_enabled``).
-    ``environment`` separates evaluation runs from chat traces (default: ``CA_APP_ENV``)."""
+    """Langfuse tracing of turns, agent runs and model calls, when configured (see
+    ``langfuse_enabled``). ``environment`` separates evaluation runs from chat traces (default:
+    ``CA_APP_ENV``)."""
     key, secret = settings.langfuse_public_key, settings.langfuse_secret_key
     if not settings.langfuse_enabled or key is None or secret is None:
         return False
@@ -215,7 +220,6 @@ def start_langfuse(
         release=version,
         tracer_provider=tracer_provider,
     )
-    instrument_openai()
     log.info("langfuse tracing enabled base_url=%s", settings.langfuse_base_url or "default")
     return True
 

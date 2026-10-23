@@ -4,7 +4,7 @@ is importable from here."""
 
 from customer_agent.observability.langfuse_tracing import (
     configure_langfuse,
-    instrument_openai,
+    langchain_callbacks,
     langfuse_client,
     shutdown_langfuse,
     trace_turn,
@@ -27,7 +27,7 @@ __all__ = [
     "configure_tracing",
     "elapsed_ms",
     "get_logger",
-    "instrument_openai",
+    "langchain_callbacks",
     "langfuse_client",
     "record_guardrail",
     "record_tokens",

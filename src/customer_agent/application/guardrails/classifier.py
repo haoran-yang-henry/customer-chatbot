@@ -81,6 +81,7 @@ class PromptAttackClassifier:
         try:
             reply = await self._llm.ainvoke(
                 messages,
+                {"run_name": "classifier"},  # the router's model, a different task
                 session_id=session_id,
                 max_tokens=CLASSIFIER_MAX_TOKENS,
                 temperature=0.0,

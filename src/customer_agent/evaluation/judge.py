@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict
 from customer_agent.application.prompts import PromptTemplate
 from customer_agent.domain.knowledge import KnowledgeDocument
 from customer_agent.evaluation.scoring import CaseResult
+from customer_agent.observability import langchain_callbacks
 
 _JSON_OBJECT = re.compile(r"\{.*\}", re.DOTALL)
 
@@ -55,6 +56,7 @@ class GroundednessJudge:
         text = "\n\n".join(f'<document id="{d.meta.id}">\n{d.body}\n</document>' for d in cited)
         reply = await self._llm.ainvoke(
             self._prompt.render_messages(sources=text, answer=answer),
+            {"callbacks": langchain_callbacks(), "run_name": "judge"},  # in the case's trace
             session_id="judge-" + hashlib.sha256(answer.encode()).hexdigest()[:24],
             max_tokens=600,
             temperature=0.0,

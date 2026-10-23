@@ -37,7 +37,7 @@ from customer_agent.application.understanding import UnderstandAgent
 from customer_agent.domain.conversation import AgentResponse, Conversation, Message, Role
 from customer_agent.domain.routing import extract_order_id
 from customer_agent.domain.session import SessionState, WorkflowState
-from customer_agent.observability import get_logger, record_guardrail
+from customer_agent.observability import get_logger, langchain_callbacks, record_guardrail
 from customer_agent.observability import step as agent_step
 
 log = get_logger("chat")
@@ -146,9 +146,13 @@ class ConversationOrchestrator:
         config: RunnableConfig | None = None,
     ) -> AsyncIterator[TurnEvent]:
         """Stage 1, then stage 2 with only the masked message; ``earlier``: what the graph's
-        transcript lacks before it (empty when the checkpoint has it)."""
+        transcript lacks before it (empty when the checkpoint has it). Both stages report to
+        the same tracing callbacks; the agents, tools and the retriever inherit them."""
+        callbacks: RunnableConfig = {"callbacks": langchain_callbacks()}
         with agent_step("understand"):
-            understood = await self._understand.run(conversation, state, session_id=session_id)
+            understood = await self._understand.run(
+                conversation, state, session_id=session_id, config=callbacks
+            )
         record_guardrail(understood.input)
         text = understood.text or "[leere Nachricht]"
         final = turn_input(
@@ -163,7 +167,7 @@ class ConversationOrchestrator:
         )
         parts = graph.astream(
             final,
-            config,
+            {**callbacks, **(config or {})},
             context=context,
             stream_mode=["custom", "values"],
             # One checkpoint per turn (rebuild plan §9, phase 0); stateless runs keep none.
