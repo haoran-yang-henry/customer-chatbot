@@ -200,6 +200,7 @@ All settings are environment variables with the prefix `CA_` (see `.env.example`
 | `CA_AUTH_ISSUER`, `CA_AUTH_AUDIENCE` | OpenID Connect issuer and audience; unset = anonymous only |
 | `CA_AUTH_REQUIRED`, `CA_CORS_ORIGINS` | Reject anonymous chat; browser origins allowed to call the API (comma-separated) |
 | `CA_LOG_FORMAT`, `CA_OTEL_ENDPOINT` | `json` logs for collectors; OTLP/HTTP endpoint for traces |
+| `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASE_URL` | Langfuse traces and evaluation experiments; unset = off, never on with `CA_APP_ENV=test` or `ci` |
 | `CA_RATE_LIMIT_PER_MINUTE`, `CA_ROUTER_TIMEOUT_SECONDS`, `CA_BREAKER_*` | Rate limit, timeouts, circuit breaker |
 
 ## Operations
@@ -208,6 +209,10 @@ All settings are environment variables with the prefix `CA_` (see `.env.example`
   (e-mail, phone, IBAN, card numbers, secrets) is masked before anything is written.
 - **Traces** — one OpenTelemetry trace per request with a span per step (guardrails, routing,
   retrieval, model calls, tools). `make up-observability` starts Jaeger at http://localhost:16686.
+- **Langfuse** — with the `LANGFUSE_*` keys set, every chat turn is also a Langfuse trace (same
+  trace id) with session, customer, the agent's steps and each model call's prompt, tokens and
+  cost; payloads are masked like the logs before they leave the process. Langfuse is not part of
+  readiness: when it is down, turns go on and only traces are lost.
 - **Metrics** — request and step latencies, LLM tokens and time to first token, guardrail
   decisions, circuit breaker states, rate-limit rejections.
 - **Resilience** — per-role timeouts with one retry, a circuit breaker per provider, contact
@@ -222,7 +227,8 @@ All settings are environment variables with the prefix `CA_` (see `.env.example`
 |---|---|
 | `make check` | Lint, format check, strict type check, unit and data tests — no Docker or keys needed |
 | `make test-integration` | Repository tests against a throwaway PostgreSQL (Testcontainers) |
-| `make eval` · `make eval-redteam` | End-to-end evaluation and red team against the real model (cached) |
+| `make eval` · `make eval-redteam` | End-to-end evaluation and red team against the real model (cached); `LANGFUSE=1` records them as Langfuse experiments and queues judged answers for human labels |
+| `make eval-labels` | Export the human labels from Langfuse and report the judge's agreement with them |
 | `make eval-smoke` | The CI quality gate locally: smoke conversations with recorded model answers, no keys |
 | `make load-test` | k6 load test with the model mocked out |
 | `make audit` | Secret, vulnerability and misconfiguration scans (gitleaks, Trivy, pip-audit) |
