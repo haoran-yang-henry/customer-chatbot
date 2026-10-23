@@ -3,14 +3,14 @@
 from collections import defaultdict
 from collections.abc import Sequence
 
+from langchain_core.retrievers import BaseRetriever
 from pydantic import BaseModel, ConfigDict
 
-from customer_agent.application.retrieval import RetrievalService
 from customer_agent.domain.conversation import Role
-from customer_agent.domain.retrieval import SearchMode, SearchScope
+from customer_agent.domain.retrieval import SearchMode
 from customer_agent.evaluation.schema import EvalCase
 
-RANKING_DEPTH = 10  # MRR looks this deep; Recall@k uses the first k
+RANKING_DEPTH = 10  # the retriever's k: MRR looks this deep; Recall@k uses the first k
 
 
 def retrieval_query(case: EvalCase) -> str:
@@ -60,18 +60,18 @@ class RetrievalReport(BaseModel):
 
 async def run_retrieval_evaluation(
     cases: Sequence[EvalCase],
-    service: RetrievalService,
-    scope: SearchScope,
+    retriever: BaseRetriever,
     *,
     mode: SearchMode,
     embedding_model: str,
     k: int = 5,
 ) -> RetrievalReport:
+    """Any LangChain retriever whose documents carry ``document_id`` in their metadata; it
+    should return ``RANKING_DEPTH`` documents."""
     results = []
     for case in (c for c in cases if c.expected_sources):
         query = retrieval_query(case)
-        documents = await service.retrieve(query, scope, top_k=RANKING_DEPTH, mode=mode)
-        ranked = [d.document_id for d in documents]
+        ranked = [d.metadata["document_id"] for d in await retriever.ainvoke(query)]
         results.append(
             RetrievalCaseResult(
                 case_id=case.id,

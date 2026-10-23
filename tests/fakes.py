@@ -4,10 +4,16 @@ from collections.abc import AsyncIterator
 from datetime import date
 from typing import TYPE_CHECKING, Any
 
-from langchain_core.callbacks import AsyncCallbackManagerForLLMRun, CallbackManagerForLLMRun
+from langchain_core.callbacks import (
+    AsyncCallbackManagerForLLMRun,
+    CallbackManagerForLLMRun,
+    CallbackManagerForRetrieverRun,
+)
+from langchain_core.documents import Document
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, UsageMetadata
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
+from langchain_core.retrievers import BaseRetriever
 from pydantic import Field
 
 from customer_agent.application.ports import (
@@ -18,56 +24,67 @@ from customer_agent.application.ports import (
 from customer_agent.domain.conversation import AgentResponse, Message, Role
 from customer_agent.domain.knowledge import SourceType, TrustLevel
 from customer_agent.domain.orders import Order
-from customer_agent.domain.retrieval import (
-    ChunkHit,
-    RetrievedDocument,
-    SearchMode,
-    SearchScope,
-)
+from customer_agent.domain.retrieval import SearchMode, SearchScope
 from customer_agent.domain.session import SessionState
 from customer_agent.infrastructure.memory import InMemoryAuditLog, InMemoryTicketService
 
 if TYPE_CHECKING:
     from customer_agent.application.guardrails.classifier import PromptAttackClassifier
     from customer_agent.application.orchestrator import ConversationOrchestrator
+    from customer_agent.application.retrieval import HybridRetriever
 
 
-def document(doc_id: str, similarity: float | None, content: str = "Inhalt.") -> RetrievedDocument:
-    hit = ChunkHit(
-        chunk_id=hash(doc_id) % 10_000,
-        document_id=doc_id,
-        title=doc_id,
-        source_type=SourceType.POLICY,
-        trust_level=TrustLevel.OFFICIAL,
-        content=content,
-        score=0.03,
-        similarity=similarity,
+def document(
+    doc_id: str,
+    similarity: float | None,
+    content: str = "Inhalt.",
+    *,
+    trust: TrustLevel = TrustLevel.OFFICIAL,
+) -> Document:
+    """A retrieved knowledge document as ``HybridRetriever`` returns it."""
+    metadata = {
+        "document_id": doc_id,
+        "title": doc_id,
+        "source_type": SourceType.POLICY.value,
+        "trust_level": trust.value,
+        "score": 0.03,
+        "similarity": similarity,
+        "chunk_ids": [hash(doc_id) % 10_000],
+    }
+    return Document(page_content=content, metadata=metadata)
+
+
+class FakeRetriever(BaseRetriever):
+    """Returns its documents for every query and records the queries."""
+
+    documents: list[Document]
+    queries: list[str] = Field(default_factory=list)
+
+    def _get_relevant_documents(
+        self, query: str, *, run_manager: CallbackManagerForRetrieverRun
+    ) -> list[Document]:
+        self.queries.append(query)
+        return self.documents
+
+
+async def search(
+    retriever: "HybridRetriever",
+    query: str,
+    scope: SearchScope,
+    *,
+    k: int = 5,
+    mode: SearchMode = SearchMode.HYBRID,
+) -> list[Document]:
+    """One search with this scope, depth and mode; the retriever's own are left as they are."""
+    configured = retriever.model_copy(
+        update={
+            "clock": FixedClock(scope.today),
+            "tenant_id": scope.tenant_id,
+            "k": k,
+            "mode": mode,
+        }
     )
-    return RetrievedDocument(
-        document_id=doc_id,
-        title=doc_id,
-        source_type=SourceType.POLICY,
-        trust_level=TrustLevel.OFFICIAL,
-        score=0.03,
-        chunks=[hit],
-    )
-
-
-class FakeRetriever:
-    def __init__(self, documents: list[RetrievedDocument]) -> None:
-        self.documents = documents
-        self.queries: list[tuple[str, SearchScope]] = []
-
-    async def retrieve(
-        self,
-        query: str,
-        scope: SearchScope,
-        *,
-        top_k: int = 5,
-        mode: SearchMode = SearchMode.HYBRID,
-    ) -> list[RetrievedDocument]:
-        self.queries.append((query, scope))
-        return self.documents[:top_k]
+    return await configured.ainvoke(query)
 
 
 class FakeLLM(BaseChatModel):
@@ -262,11 +279,9 @@ def make_orchestrator(
     from customer_agent.infrastructure.prompts import load_prompt
 
     answers = AnswerService(
-        retriever or FakeRetriever([document("policy-returns-v5", 0.7)]),
+        retriever or FakeRetriever(documents=[document("policy-returns-v5", 0.7)]),
         llm,
         load_prompt("answer", 4),
-        FixedClock(today),
-        tenant_id="nordelektro",
         min_similarity=0.35,
     )
     return ConversationOrchestrator(

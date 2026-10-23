@@ -1,13 +1,21 @@
-"""Retrieval use case: hybrid search with Reciprocal Rank Fusion, aggregated to documents."""
+"""Retrieval: hybrid search with Reciprocal Rank Fusion, aggregated to documents, as a LangChain
+retriever (rebuild phase 2)."""
 
 import asyncio
 from collections import defaultdict
 from collections.abc import Sequence
 
+from langchain_core.callbacks import (
+    AsyncCallbackManagerForRetrieverRun,
+    CallbackManagerForRetrieverRun,
+)
+from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
+from langchain_core.retrievers import BaseRetriever
+from pydantic import SkipValidation
 
-from customer_agent.application.ports import KnowledgeSearch
-from customer_agent.domain.retrieval import ChunkHit, RetrievedDocument, SearchMode, SearchScope
+from customer_agent.application.ports import Clock, KnowledgeSearch
+from customer_agent.domain.retrieval import ChunkHit, SearchMode, SearchScope
 from customer_agent.observability import step
 
 RRF_K = 60
@@ -57,74 +65,78 @@ def reciprocal_rank_fusion(
     return [hits[c].model_copy(update={"score": fused[c]}) for c in order]
 
 
-def aggregate_by_document(hits: Sequence[ChunkHit]) -> list[RetrievedDocument]:
-    """A document scores as its best chunk; chunks stay attached for answer generation (D3)."""
+def aggregate_by_document(hits: Sequence[ChunkHit]) -> list[Document]:
+    """One ``Document`` per knowledge document, scored as its best chunk; its chunks stay
+    together as the text for answer generation (D3). ``similarity`` is the best cosine
+    similarity, ``None`` if only full-text search found the document."""
     grouped: dict[str, list[ChunkHit]] = defaultdict(list)
     for hit in hits:
         grouped[hit.document_id].append(hit)
-    documents = [
-        RetrievedDocument(
-            document_id=doc_id,
-            title=chunks[0].title,
-            source_type=chunks[0].source_type,
-            trust_level=chunks[0].trust_level,
-            score=max(c.score for c in chunks),
-            chunks=chunks,
-        )
-        for doc_id, chunks in grouped.items()
-    ]
-    return sorted(documents, key=lambda d: d.score, reverse=True)
+    documents = []
+    for doc_id, chunks in grouped.items():
+        similarities = [c.similarity for c in chunks if c.similarity is not None]
+        metadata = {
+            "document_id": doc_id,
+            "title": chunks[0].title,
+            "source_type": chunks[0].source_type.value,
+            "trust_level": chunks[0].trust_level.value,
+            "score": max(c.score for c in chunks),
+            "similarity": max(similarities) if similarities else None,
+            "chunk_ids": [c.chunk_id for c in chunks],
+        }
+        content = "\n\n".join(c.content for c in chunks)
+        documents.append(Document(page_content=content, metadata=metadata))
+    return sorted(documents, key=lambda d: float(d.metadata["score"]), reverse=True)
 
 
-class RetrievalService:
-    def __init__(
-        self,
-        search: KnowledgeSearch,
-        embeddings: Embeddings,
-        *,
-        fulltext_weight: float = 1.0,
-    ) -> None:
-        self._search = search
-        self._embeddings = embeddings
-        self._fulltext_weight = fulltext_weight
+class HybridRetriever(BaseRetriever):
+    """Full-text and vector search over the knowledge base, fused by rank. The search applies
+    the scope filters (status, validity, tenant); ``clock`` and ``tenant_id`` set the scope."""
 
-    async def _semantic(self, query: str, scope: SearchScope) -> list[ChunkHit]:
-        vector = await self._embeddings.aembed_query(query)
-        return await self._search.search_vector(vector, scope, CANDIDATES_PER_LIST)
+    search: SkipValidation[KnowledgeSearch]
+    embeddings: Embeddings
+    clock: SkipValidation[Clock]
+    tenant_id: str
+    k: int = 5
+    mode: SearchMode = SearchMode.HYBRID
+    fulltext_weight: float = 1.0
 
-    async def retrieve(
-        self,
-        query: str,
-        scope: SearchScope,
-        *,
-        top_k: int = 5,
-        mode: SearchMode = SearchMode.HYBRID,
-    ) -> list[RetrievedDocument]:
+    def _get_relevant_documents(
+        self, query: str, *, run_manager: CallbackManagerForRetrieverRun
+    ) -> list[Document]:
+        raise NotImplementedError("HybridRetriever is async only")
+
+    async def _aget_relevant_documents(
+        self, query: str, *, run_manager: AsyncCallbackManagerForRetrieverRun
+    ) -> list[Document]:
         query = query.strip()[:MAX_QUERY_CHARS]
         if not query:
             return []
-        with step("retrieve", mode=mode) as span:
-            documents = await self._retrieve(query, scope, top_k=top_k, mode=mode)
-            span.set_attribute("documents", [d.document_id for d in documents])
+        scope = SearchScope(today=self.clock.today(), tenant_id=self.tenant_id)
+        with step("retrieve", mode=self.mode) as span:
+            documents = await self._retrieve(query, scope)
+            span.set_attribute("documents", [d.metadata["document_id"] for d in documents])
             return documents
 
-    async def _retrieve(
-        self, query: str, scope: SearchScope, *, top_k: int, mode: SearchMode
-    ) -> list[RetrievedDocument]:
+    async def _semantic(self, query: str, scope: SearchScope) -> list[ChunkHit]:
+        vector = await self.embeddings.aembed_query(query)
+        return await self.search.search_vector(vector, scope, CANDIDATES_PER_LIST)
+
+    async def _retrieve(self, query: str, scope: SearchScope) -> list[Document]:
         lexical_query = " ".join(filter(None, [query, umlaut_variant(query)]))
         # Both branches run concurrently; if one fails, the TaskGroup cancels the other.
         try:
             async with asyncio.TaskGroup() as group:
                 lexical = (
                     group.create_task(
-                        self._search.search_fulltext(lexical_query, scope, CANDIDATES_PER_LIST)
+                        self.search.search_fulltext(lexical_query, scope, CANDIDATES_PER_LIST)
                     )
-                    if mode in (SearchMode.FULLTEXT, SearchMode.HYBRID)
+                    if self.mode in (SearchMode.FULLTEXT, SearchMode.HYBRID)
                     else None
                 )
                 semantic = (
                     group.create_task(self._semantic(query, scope))
-                    if mode in (SearchMode.VECTOR, SearchMode.HYBRID)
+                    if self.mode in (SearchMode.VECTOR, SearchMode.HYBRID)
                     else None
                 )
         except ExceptionGroup as errors:
@@ -134,9 +146,9 @@ class RetrievalService:
         ranked_lists, weights = [], []
         if lexical is not None:
             ranked_lists.append(lexical.result())
-            weights.append(self._fulltext_weight)
+            weights.append(self.fulltext_weight)
         if semantic is not None:
             ranked_lists.append(semantic.result())
             weights.append(1.0)
         fused = reciprocal_rank_fusion(ranked_lists, weights=weights)
-        return aggregate_by_document(fused)[:top_k]
+        return aggregate_by_document(fused)[: self.k]

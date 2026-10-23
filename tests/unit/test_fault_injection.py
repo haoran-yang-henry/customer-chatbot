@@ -2,6 +2,7 @@
 fallback within 10 s without a 5xx, and once the breaker opens the provider is not called."""
 
 import time
+from datetime import date
 
 import httpx2
 from pydantic import SecretStr
@@ -15,7 +16,8 @@ from customer_agent.infrastructure.models import BreakerChatModel, ProviderChatM
 from customer_agent.infrastructure.prompts import load_prompt
 from customer_agent.infrastructure.resilience import CircuitBreaker
 from tests.fakes import FakeRetriever, FixedClock, SeedOrderRepository, document
-from tests.unit.application.test_answering import TODAY
+
+TODAY = date(2026, 10, 5)
 
 NFR_11_SECONDS = 10.0
 
@@ -41,11 +43,9 @@ async def test_llm_outage_reaches_the_fallback_in_time_and_the_breaker_takes_ove
     agent = ConversationOrchestrator(
         UnderstandAgent(llm, load_prompt("router", 5)),
         AnswerService(
-            FakeRetriever([document("policy-returns-v5", 0.7)]),
+            FakeRetriever(documents=[document("policy-returns-v5", 0.7)]),
             llm,
             load_prompt("answer", 4),
-            FixedClock(TODAY),
-            tenant_id="nordelektro",
             min_similarity=0.35,
         ),
         orders=SeedOrderRepository(),

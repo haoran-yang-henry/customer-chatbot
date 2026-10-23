@@ -11,8 +11,6 @@ from customer_agent.domain.knowledge import KnowledgeChunk, KnowledgeDocumentMet
 from customer_agent.domain.orders import Order
 from customer_agent.domain.retrieval import (
     ChunkHit,
-    RetrievedDocument,
-    SearchMode,
     SearchScope,
 )
 from customer_agent.domain.session import SessionState
@@ -92,17 +90,6 @@ class ProviderUnavailableError(RuntimeError):
 
 class Clock(Protocol):
     def today(self) -> date: ...
-
-
-class Retriever(Protocol):
-    async def retrieve(
-        self,
-        query: str,
-        scope: SearchScope,
-        *,
-        top_k: int = 5,
-        mode: SearchMode = SearchMode.HYBRID,
-    ) -> list[RetrievedDocument]: ...
 
 
 class StoredSession(BaseModel):

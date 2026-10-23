@@ -14,7 +14,7 @@ the complete model output, so the streaming and non-streaming paths make identic
 
 import hashlib
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from typing import Any, NotRequired, cast
 
@@ -26,8 +26,10 @@ from langchain.agents.middleware import (
     ModelRequest,
     ModelResponse,
 )
+from langchain_core.documents import Document
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, SystemMessage
+from langchain_core.retrievers import BaseRetriever
 from langgraph.runtime import Runtime
 from pydantic import BaseModel, ConfigDict
 
@@ -45,12 +47,10 @@ from customer_agent.application.guardrails.output import (
     output_decision,
     screen_output,
 )
-from customer_agent.application.ports import Clock, Retriever
 from customer_agent.application.prompts import PromptTemplate
 from customer_agent.domain.conversation import AgentResponse, Behavior, Conversation, Role
 from customer_agent.domain.guardrails import GuardrailAction
 from customer_agent.domain.knowledge import TrustLevel
-from customer_agent.domain.retrieval import RetrievedDocument, SearchScope
 from customer_agent.observability import elapsed_ms, get_logger, record_guardrail, step
 
 log = get_logger("answer")
@@ -88,32 +88,33 @@ def stateless_session_id(conversation: Conversation) -> str:
     return hashlib.sha256(seed.encode()).hexdigest()[:32]
 
 
-def _text(doc: RetrievedDocument) -> str:
-    return "\n\n".join(chunk.content for chunk in doc.chunks)
+def _id(doc: Document) -> str:
+    return str(doc.metadata["document_id"])
 
 
-def format_evidence(documents: list[RetrievedDocument]) -> str:
+def _untrusted(doc: Document) -> bool:
+    return TrustLevel(doc.metadata["trust_level"]) is TrustLevel.UNTRUSTED
+
+
+def format_evidence(documents: Sequence[Document]) -> str:
     """Untrusted documents are quoted, with instruction-like lines dropped (T02, Day 6)."""
     blocks = []
     for doc in documents:
-        text = _text(doc)
-        if doc.trust_level is TrustLevel.UNTRUSTED:
+        text = doc.page_content
+        if _untrusted(doc):
             text, dropped = quote_untrusted(text)
             if dropped:
-                log.warning("untrusted document=%s dropped_lines=%d", doc.document_id, dropped)
-        blocks.append(
-            f'<document id="{doc.document_id}" trust="{doc.trust_level}">\n{text}\n</document>'
-        )
+                log.warning("untrusted document=%s dropped_lines=%d", _id(doc), dropped)
+        trust = doc.metadata["trust_level"]
+        blocks.append(f'<document id="{_id(doc)}" trust="{trust}">\n{text}\n</document>')
     return "\n\n".join(blocks)
 
 
-def answer_evidence(documents: list[RetrievedDocument], conversation: Conversation) -> Evidence:
+def answer_evidence(documents: Sequence[Document], conversation: Conversation) -> Evidence:
     """What the answer may repeat verbatim (links, codes, numbers): see guardrails.output."""
-    trusted = [d for d in documents if d.trust_level is not TrustLevel.UNTRUSTED]
-    untrusted = [d for d in documents if d.trust_level is TrustLevel.UNTRUSTED]
     return Evidence(
-        trusted="\n".join(_text(d) for d in trusted),
-        untrusted="\n".join(_text(d) for d in untrusted),
+        trusted="\n".join(d.page_content for d in documents if not _untrusted(d)),
+        untrusted="\n".join(d.page_content for d in documents if _untrusted(d)),
         customer=search_query(conversation),
     )
 
@@ -132,7 +133,7 @@ class AnswerContext:
     repeat, the earlier turns (masked, formatted) and the session id. Runtime context, so it is
     neither state nor traced as input."""
 
-    documents: tuple[RetrievedDocument, ...]
+    documents: tuple[Document, ...]
     evidence: Evidence
     history: str
     session_id: str
@@ -179,7 +180,7 @@ class UntrustedEvidence(Middleware):
     def before_model(
         self, state: AnswerState, runtime: Runtime[AnswerContext]
     ) -> dict[str, Any] | None:
-        return {"evidence_text": format_evidence(list(runtime.context.documents))}
+        return {"evidence_text": format_evidence(runtime.context.documents)}
 
 
 class AnswerPrompt(Middleware):
@@ -235,7 +236,7 @@ class OutputGuard(Middleware):
         if is_no_answer(raw):
             return {"declined": True}
         answer, cited = extract_citations(raw)
-        offered = {d.document_id for d in runtime.context.documents}
+        offered = {_id(d) for d in runtime.context.documents}
         with step("output_guardrail"):
             screen = screen_output(
                 answer,
@@ -269,7 +270,7 @@ def _response(state: AnswerState, context: AnswerContext) -> AgentResponse:
         return fallback(decision.reasons)
     if decision.action is GuardrailAction.REDACT:
         log.warning("output redacted reasons=%s", ",".join(decision.reasons))
-    offered = {d.document_id for d in context.documents}
+    offered = {_id(d) for d in context.documents}
     sources = [c for c in state.get("cited", []) if c in offered]
     answer = state.get("answer_text", "")
     log.info("answer sources=%s chars=%d", ",".join(sources), len(answer))
@@ -323,35 +324,26 @@ class AnswerAgent:
 class AnswerService:
     def __init__(
         self,
-        retriever: Retriever,
+        retriever: BaseRetriever,
         llm: BaseChatModel,
         prompt: PromptTemplate,
-        clock: Clock,
         *,
-        tenant_id: str,
         min_similarity: float,
-        top_k: int = 4,
         max_tokens: int = 800,
     ) -> None:
         self._retriever = retriever
         self._agent = AnswerAgent(llm, prompt, max_tokens=max_tokens)
-        self._clock = clock
-        self._tenant_id = tenant_id
         self._min_similarity = min_similarity
-        self._top_k = top_k
 
     async def _prepare(
         self, conversation: Conversation, query: str | None, session: str | None
     ) -> AnswerContext | AgentResponse:
         start = time.perf_counter()
-        scope = SearchScope(today=self._clock.today(), tenant_id=self._tenant_id)
-        documents = await self._retriever.retrieve(
-            query or search_query(conversation), scope, top_k=self._top_k
-        )
-        best = max((d.similarity or 0.0 for d in documents), default=0.0)
+        documents = await self._retriever.ainvoke(query or search_query(conversation))
+        best = max((d.metadata["similarity"] or 0.0 for d in documents), default=0.0)
         log.info(
             "retrieved=%s best_similarity=%.3f took=%dms",
-            ",".join(d.document_id for d in documents) or "-",
+            ",".join(_id(d) for d in documents) or "-",
             best,
             elapsed_ms(start),
         )

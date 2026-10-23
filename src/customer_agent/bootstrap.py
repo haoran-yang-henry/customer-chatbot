@@ -24,7 +24,7 @@ from customer_agent.application.ports import (
     TicketService,
     TokenVerifier,
 )
-from customer_agent.application.retrieval import RetrievalService
+from customer_agent.application.retrieval import HybridRetriever
 from customer_agent.application.understanding import UnderstandAgent
 from customer_agent.config import Settings
 from customer_agent.infrastructure.auth import JwtVerifier, jwks_resolver
@@ -280,19 +280,19 @@ def build_container(
     llms = create_chat_models(settings, breakers["llm"])
     answer_prompt = load_prompt("answer", settings.answer_prompt_version)
     router_prompt = load_prompt("router", settings.router_prompt_version)
-    retrieval = RetrievalService(
-        create_knowledge_repository(engine),
-        embeddings,
+    retriever = HybridRetriever(
+        search=create_knowledge_repository(engine),
+        embeddings=embeddings,
+        clock=clock,
+        tenant_id=settings.tenant_id,
+        k=settings.answer_top_k,
         fulltext_weight=settings.retrieval_fulltext_weight,
     )
     answers = AnswerService(
-        retrieval,
+        retriever,
         llms["answer"],
         answer_prompt,
-        clock,
-        tenant_id=settings.tenant_id,
         min_similarity=settings.min_answer_similarity,
-        top_k=settings.answer_top_k,
         max_tokens=settings.answer_max_tokens,
     )
     classifier = (

@@ -4,16 +4,21 @@ import argparse
 import asyncio
 from pathlib import Path
 
-from customer_agent.application.retrieval import RetrievalService
+from customer_agent.application.retrieval import HybridRetriever
 from customer_agent.bootstrap import (
     create_embedding_provider,
     create_engine,
     create_knowledge_repository,
 )
 from customer_agent.config import get_settings
-from customer_agent.domain.retrieval import SearchMode, SearchScope
-from customer_agent.evaluation.retrieval import RetrievalReport, run_retrieval_evaluation
+from customer_agent.domain.retrieval import SearchMode
+from customer_agent.evaluation.retrieval import (
+    RANKING_DEPTH,
+    RetrievalReport,
+    run_retrieval_evaluation,
+)
 from customer_agent.evaluation.schema import DATASET_REFERENCE_DATE, load_dataset
+from customer_agent.infrastructure.clock import FixedClock
 from customer_agent.infrastructure.lifecycle import aclose_all
 
 
@@ -43,7 +48,6 @@ def _print(report: RetrievalReport) -> None:
 async def _run(args: argparse.Namespace) -> list[RetrievalReport]:
     settings = get_settings()
     cases = load_dataset(args.dataset)
-    scope = SearchScope(today=DATASET_REFERENCE_DATE, tenant_id=settings.tenant_id)
     modes = list(SearchMode) if args.mode == "all" else [SearchMode(args.mode)]
     engine = create_engine(settings)
     embeddings = None
@@ -54,12 +58,21 @@ async def _run(args: argparse.Namespace) -> list[RetrievalReport]:
             if args.fulltext_weight is not None
             else settings.retrieval_fulltext_weight
         )
-        service = RetrievalService(
-            create_knowledge_repository(engine), embeddings, fulltext_weight=weight
+        retriever = HybridRetriever(
+            search=create_knowledge_repository(engine),
+            embeddings=embeddings,
+            clock=FixedClock(DATASET_REFERENCE_DATE),
+            tenant_id=settings.tenant_id,
+            k=RANKING_DEPTH,
+            fulltext_weight=weight,
         )
         return [
             await run_retrieval_evaluation(
-                cases, service, scope, mode=m, embedding_model=settings.embedding_model, k=args.k
+                cases,
+                retriever.model_copy(update={"mode": m}),
+                mode=m,
+                embedding_model=settings.embedding_model,
+                k=args.k,
             )
             for m in modes
         ]

@@ -9,7 +9,7 @@ from langchain_core.embeddings import Embeddings
 from customer_agent.application.answering import AnswerService
 from customer_agent.application.ingestion import IngestionService
 from customer_agent.application.orchestrator import ConversationOrchestrator, TurnResult
-from customer_agent.application.retrieval import RetrievalService
+from customer_agent.application.retrieval import HybridRetriever
 from customer_agent.application.understanding import UnderstandAgent
 from customer_agent.bootstrap import create_chat_model
 from customer_agent.config import Settings
@@ -38,12 +38,17 @@ async def agent(
         load_knowledge_directory(KNOWLEDGE_DIR)
     )
     llm = create_chat_model(settings)
+    retriever = HybridRetriever(
+        search=repository,
+        embeddings=embeddings,
+        clock=FixedClock(REFERENCE_DATE),
+        tenant_id=TENANT_ID,
+        k=settings.answer_top_k,
+    )
     answers = AnswerService(
-        RetrievalService(repository, embeddings),
+        retriever,
         llm,
         load_prompt("answer", settings.answer_prompt_version),
-        FixedClock(REFERENCE_DATE),
-        tenant_id=TENANT_ID,
         min_similarity=settings.min_answer_similarity,
     )
     return ConversationOrchestrator(

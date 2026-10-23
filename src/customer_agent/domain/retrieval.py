@@ -1,9 +1,9 @@
-"""Retrieval value objects shared by the retrieval use case, adapters and evaluation."""
+"""Retrieval value objects shared by the retriever and the search adapters."""
 
 from datetime import date
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
 from customer_agent.domain.knowledge import SourceType, TrustLevel
 
@@ -41,20 +41,3 @@ class ChunkHit(BaseModel):
     content: str
     score: float
     similarity: float | None = None
-
-
-class RetrievedDocument(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    document_id: str
-    title: str
-    source_type: SourceType
-    trust_level: TrustLevel
-    score: float
-    chunks: list[ChunkHit] = Field(min_length=1)
-
-    @property
-    def similarity(self) -> float | None:
-        """Best cosine similarity among the chunks; ``None`` if only full-text search found it."""
-        values = [c.similarity for c in self.chunks if c.similarity is not None]
-        return max(values) if values else None
