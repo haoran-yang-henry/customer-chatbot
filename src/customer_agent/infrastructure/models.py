@@ -32,7 +32,7 @@ from langchain_core.messages import (
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from langchain_openai import ChatOpenAI
 from opentelemetry import trace
-from pydantic import ConfigDict
+from pydantic import ConfigDict, model_validator
 
 from customer_agent.application.ports import ProviderUnavailableError
 from customer_agent.infrastructure.cassette import (
@@ -107,6 +107,17 @@ class ProviderChatModel(ChatOpenAI):
     session_header: str | None = None
     """Per-conversation header (``x-opencode-session``, ADR-0008); OpenCode Go answers 400
     without it."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _own_http_clients(cls, values: Any) -> Any:
+        """Without them, every ``ChatOpenAI`` shares LangChain's process-wide HTTP client, and
+        ``aclose`` would close it for every other model too (the evaluation's judge runs after
+        the agent has shut down)."""
+        if isinstance(values, dict):
+            values.setdefault("http_client", openai.DefaultHttpxClient())
+            values.setdefault("http_async_client", openai.DefaultAsyncHttpxClient())
+        return values
 
     def _with_session(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         """Callers pass the conversation's id as the provider-neutral ``session_id`` keyword

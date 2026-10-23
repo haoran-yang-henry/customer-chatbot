@@ -142,6 +142,20 @@ async def test_models_close_their_http_clients() -> None:
     assert embeddings.client._client.is_closed()
 
 
+async def test_closing_one_model_leaves_the_others_usable() -> None:
+    """``ChatOpenAI`` shares one process-wide HTTP client unless given its own; the evaluation's
+    judge is created after the agent's models are closed."""
+    first, second = (
+        ProviderChatModel(model_name="m", openai_api_key=SecretStr("t")) for _ in range(2)
+    )
+
+    await aclose_all(first)
+
+    assert first.root_async_client is not None and first.root_async_client.is_closed()
+    assert second.root_async_client is not None and not second.root_async_client.is_closed()
+    assert second.root_client is not None and not second.root_client.is_closed()
+
+
 # --- the real SDK against a mocked transport ------------------------------------------------
 
 Handler = Callable[[httpx2.Request], httpx2.Response]
