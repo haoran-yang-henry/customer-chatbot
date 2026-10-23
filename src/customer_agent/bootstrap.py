@@ -186,8 +186,14 @@ def create_llm_provider(settings: Settings) -> LLMProvider:
     return create_llm_providers(settings)["answer"]
 
 
-def start_langfuse(settings: Settings, tracer_provider: TracerProvider, version: str) -> bool:
-    """Langfuse tracing of turns and model calls, when configured (see ``langfuse_enabled``)."""
+def start_langfuse(
+    settings: Settings,
+    tracer_provider: TracerProvider,
+    version: str,
+    environment: str | None = None,
+) -> bool:
+    """Langfuse tracing of turns and model calls, when configured (see ``langfuse_enabled``).
+    ``environment`` separates evaluation runs from chat traces (default: ``CA_APP_ENV``)."""
     key, secret = settings.langfuse_public_key, settings.langfuse_secret_key
     if not settings.langfuse_enabled or key is None or secret is None:
         return False
@@ -195,7 +201,7 @@ def start_langfuse(settings: Settings, tracer_provider: TracerProvider, version:
         public_key=key,
         secret_key=secret.get_secret_value(),
         base_url=settings.langfuse_base_url,
-        environment=settings.app_env,
+        environment=environment or settings.app_env,
         release=version,
         tracer_provider=tracer_provider,
     )

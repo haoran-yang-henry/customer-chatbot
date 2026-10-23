@@ -67,6 +67,11 @@ def configure_langfuse(
     return _client
 
 
+def langfuse_client() -> Langfuse | None:
+    """The configured client, for the evaluation's experiments; ``None`` when off."""
+    return _client
+
+
 def instrument_openai() -> None:
     """Patch the OpenAI SDK process-wide: every completion and embedding becomes a generation.
     Only after configure_langfuse, and never in tests."""

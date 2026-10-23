@@ -1,18 +1,22 @@
 """``customer-agent-eval --dataset eval/datasets/core.jsonl --day 3 --target agent [--judge]``.
 
 ``--dataset`` may be repeated and ``--tag`` selects cases, e.g. the CI smoke gate:
-``--dataset core.jsonl --dataset redteam.jsonl --tag smoke --min-pass-rate 1``."""
+``--dataset core.jsonl --dataset redteam.jsonl --tag smoke --min-pass-rate 1``.
+``--langfuse`` records the run as one Langfuse experiment per dataset (rebuild phase 1)."""
 
 import argparse
 import asyncio
 import faulthandler
 import json
+import subprocess
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
+from customer_agent.application.ports import CustomerServiceAgent
 from customer_agent.evaluation.runner import EvalReport, build_report, run_cases
 from customer_agent.evaluation.schema import EvalCase, load_dataset
+from customer_agent.evaluation.scoring import CaseResult
 from customer_agent.evaluation.targets import TARGETS
 from customer_agent.observability import configure_logging
 from customer_agent.observability.metrics import token_totals
@@ -27,6 +31,11 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--out", type=Path, help="Result file (default: eval/results/<ts>.json).")
     parser.add_argument("--concurrency", type=int, default=4)
     parser.add_argument("--judge", action="store_true", help="Run the groundedness LLM judge.")
+    parser.add_argument(
+        "--langfuse",
+        action="store_true",
+        help="Record the run as one Langfuse experiment per dataset (needs the LANGFUSE_* keys).",
+    )
     parser.add_argument(
         "--calibration-out", type=Path, help="Write judged answers for human labelling."
     )
@@ -102,12 +111,17 @@ def _print_summary(report: EvalReport) -> None:
             print(f"  {r.case_id:<6} [{failed}] {r.response.behavior}: {r.response.answer[:90]!r}")
 
 
-async def _judge(report: EvalReport, cases: list[EvalCase]) -> EvalReport:
+async def _judge(
+    report: EvalReport, cases: list[EvalCase], traces: dict[str, str] | None = None
+) -> EvalReport:
+    """``traces``: the Langfuse trace per case id; the judge's calls then join the case's trace."""
     from customer_agent.bootstrap import create_llm_provider
     from customer_agent.config import get_settings
     from customer_agent.evaluation.judge import GroundednessJudge, judgeable
+    from customer_agent.evaluation.langfuse_experiment import case_trace
     from customer_agent.infrastructure.knowledge_files import load_knowledge_directory
     from customer_agent.infrastructure.prompts import load_prompt
+    from customer_agent.observability import langfuse_client
 
     settings = get_settings()
     judge = GroundednessJudge(
@@ -115,10 +129,13 @@ async def _judge(report: EvalReport, cases: list[EvalCase]) -> EvalReport:
         load_prompt("judge", 1),
         load_knowledge_directory(settings.knowledge_dir),
     )
+    client = langfuse_client() if traces else None
     results = []
     for result in report.results:
         if judgeable(result):
-            verdict = await judge.judge(result.response.answer, result.response.sources)
+            trace_id = traces.get(result.case_id) if traces else None
+            with case_trace(client, trace_id, "judge"):
+                verdict = await judge.judge(result.response.answer, result.response.sources)
             result = result.model_copy(update={"grounded": verdict.grounded})
         results.append(result)
     config = {**report.config, "judge_prompt": "judge/v1"}
@@ -133,11 +150,89 @@ async def _judge(report: EvalReport, cases: list[EvalCase]) -> EvalReport:
     return judged.model_copy(update={"usage": report.usage})  # measured before judging
 
 
+def _git_revision() -> str:
+    """The code version of a run: short commit hash, '+dirty' if tracked files changed."""
+    try:
+        sha = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],  # noqa: S607 - git from PATH
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        changes = subprocess.run(
+            ["git", "status", "--porcelain", "--untracked-files=no"],  # noqa: S607
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return "unknown"
+    return f"{sha}+dirty" if changes else sha
+
+
+async def _run_experiments(
+    args: argparse.Namespace,
+    cases: list[EvalCase],
+    agent: CustomerServiceAgent,
+    config: dict[str, str],
+) -> tuple[list[CaseResult], dict[str, str]]:
+    """One Langfuse experiment per dataset file; results keep the order of ``cases``."""
+    from customer_agent.config import get_settings
+    from customer_agent.evaluation.langfuse_experiment import run_experiment, sync_dataset
+    from customer_agent.observability import langfuse_client
+
+    client = langfuse_client()
+    if client is None:
+        raise RuntimeError("Langfuse is not configured")
+    revision = _git_revision()
+    run_name = f"{args.target}-day{args.day}-{revision}-{datetime.now(UTC):%Y%m%dT%H%MZ}"
+    metadata = {
+        **config,
+        "target": args.target,
+        "day": str(args.day),
+        "tag": args.tag or "-",
+        "git": revision,
+        "llm_cache": "on" if get_settings().llm_cache_dir else "off",
+    }
+    selected = {case.id for case in cases}
+    results: dict[str, CaseResult] = {}
+    traces: dict[str, str] = {}
+    for path in args.dataset:
+        name = path.stem
+        file_cases = load_dataset(path)
+        written = await asyncio.to_thread(sync_dataset, client, name, path, file_cases)
+        chosen = [case for case in file_cases if case.id in selected]
+        if not chosen:
+            continue
+        dataset = await asyncio.to_thread(client.get_dataset, name)
+        dataset_results, dataset_traces, url = await run_experiment(
+            client,
+            dataset=name,
+            items=dataset.items,
+            cases=chosen,
+            agent=agent,
+            current_day=args.day,
+            run_name=run_name,
+            metadata=metadata,
+            concurrency=args.concurrency,
+        )
+        results.update({result.case_id: result for result in dataset_results})
+        traces.update(dataset_traces)
+        print(f"Langfuse: dataset {name} ({written} items synced), run {run_name}: {url}")
+    return [results[case.id] for case in cases], traces
+
+
 async def _run(args: argparse.Namespace, cases: list[EvalCase]) -> EvalReport:
     started_at = datetime.now(UTC)
     before = token_totals()
+    traces: dict[str, str] = {}
     async with TARGETS[args.target]() as (agent, config):
-        results = await run_cases(cases, agent, current_day=args.day, concurrency=args.concurrency)
+        if args.langfuse:
+            results, traces = await _run_experiments(args, cases, agent, config)
+        else:
+            results = await run_cases(
+                cases, agent, current_day=args.day, concurrency=args.concurrency
+            )
     after = token_totals()
     report = build_report(
         results,
@@ -154,7 +249,29 @@ async def _run(args: argparse.Namespace, cases: list[EvalCase]) -> EvalReport:
             for kind in ("prompt", "completion")
         }
         report = report.model_copy(update={"usage": usage})
-    return await _judge(report, cases) if args.judge else report
+    if not args.judge:
+        return report
+    report = await _judge(report, cases, traces)
+    if traces:
+        from customer_agent.evaluation.langfuse_experiment import record_groundedness
+        from customer_agent.observability import langfuse_client
+
+        client = langfuse_client()
+        if client is not None:
+            written = await asyncio.to_thread(record_groundedness, client, report.results, traces)
+            print(f"Langfuse: {written} groundedness scores")
+    return report
+
+
+def _start_langfuse() -> bool:
+    from customer_agent import __version__
+    from customer_agent.bootstrap import start_langfuse
+    from customer_agent.config import get_settings
+    from customer_agent.observability import configure_tracing
+
+    settings = get_settings()
+    provider = configure_tracing("customer-agent-eval", __version__, settings.otel_endpoint)
+    return start_langfuse(settings, provider, __version__, environment="eval")
 
 
 def select_cases(datasets: list[Path], tag: str | None) -> list[EvalCase]:
@@ -185,7 +302,20 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     cases = select_cases(args.dataset, args.tag)
-    report = asyncio.run(_run(args, cases))
+    if args.langfuse and not _start_langfuse():
+        print(
+            "--langfuse needs LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY, and CA_APP_ENV other "
+            "than test or ci",
+            file=sys.stderr,
+        )
+        return 2
+    try:
+        report = asyncio.run(_run(args, cases))
+    finally:
+        if args.langfuse:
+            from customer_agent.observability import shutdown_langfuse
+
+            shutdown_langfuse()
 
     out: Path = args.out or Path("eval/results") / (
         f"{datetime.now(UTC):%Y%m%dT%H%M%SZ}-{args.target}.json"
