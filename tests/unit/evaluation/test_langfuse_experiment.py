@@ -237,6 +237,8 @@ def test_human_labels_become_calibration_rows_next_to_the_judges_verdict() -> No
         metadata={"case_id": "N-002"},
     )
 
+    judge = SimpleNamespace(input=None, output=None, metadata=None)  # also a root
+
     def scores(**query: Any) -> SimpleNamespace:
         data = [label] if "queue_id" in query else [SimpleNamespace(value="True")]  # the judge
         return SimpleNamespace(data=data, meta=SimpleNamespace(cursor=None))
@@ -244,7 +246,7 @@ def test_human_labels_become_calibration_rows_next_to_the_judges_verdict() -> No
     langfuse = SimpleNamespace(
         api=SimpleNamespace(
             scores=SimpleNamespace(get_many=scores),
-            observations=SimpleNamespace(get_many=lambda **_: SimpleNamespace(data=[root])),
+            observations=SimpleNamespace(get_many=lambda **_: SimpleNamespace(data=[judge, root])),
         )
     )
 

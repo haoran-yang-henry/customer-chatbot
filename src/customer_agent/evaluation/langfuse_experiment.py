@@ -289,9 +289,11 @@ def labelled_rows(client: Langfuse, queue_id: str) -> list[dict[str, object]]:
         for score in sorted(page.data, key=lambda s: s.timestamp):
             subject = score.subject
             trace_id = getattr(subject, "trace_id", None) or subject.id
-            root = client.api.observations.get_many(
+            roots = client.api.observations.get_many(
                 trace_id=trace_id, is_root_observation=True, fields="core,basic,io,metadata"
-            ).data[0]
+            ).data
+            # The judge's span joins the trace without a parent, so it is a root as well.
+            root = next((o for o in roots if (o.metadata or {}).get("case_id")), roots[0])
             judge = client.api.scores.get_many(
                 trace_id=trace_id, name=JUDGE_SCORE, fields="core", limit=1
             ).data
