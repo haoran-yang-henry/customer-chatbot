@@ -25,7 +25,7 @@ from customer_agent.application.ports import (
     TokenVerifier,
 )
 from customer_agent.application.retrieval import RetrievalService
-from customer_agent.application.routing import IntentRouter
+from customer_agent.application.understanding import UnderstandAgent
 from customer_agent.config import Settings
 from customer_agent.infrastructure.auth import JwtVerifier, jwks_resolver
 from customer_agent.infrastructure.cassette import CassetteEmbeddings, open_cassette
@@ -308,14 +308,13 @@ def build_container(
     tickets: TicketService = PostgresTicketService(db) if side_effects else InMemoryTicketService()
     audit: AuditLog = PostgresAuditLog(db) if side_effects else InMemoryAuditLog()
     agent = ConversationOrchestrator(
-        IntentRouter(llms["router"], router_prompt),
+        UnderstandAgent(llms["router"], router_prompt, classifier=classifier),
         answers,
         orders=PostgresOrderRepository(db),
         tickets=tickets,
         audit=audit,
         clock=clock,
         tenant_id=settings.tenant_id,
-        classifier=classifier,
         max_tickets_per_day=settings.max_tickets_per_day if side_effects else None,
     )
     sessions = PostgresSessionStore(db)

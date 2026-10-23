@@ -8,7 +8,7 @@ from pydantic import SecretStr
 
 from customer_agent.application.answering import AnswerService
 from customer_agent.application.orchestrator import ConversationOrchestrator
-from customer_agent.application.routing import IntentRouter
+from customer_agent.application.understanding import UnderstandAgent
 from customer_agent.domain.conversation import Behavior, Conversation, Message, Role
 from customer_agent.infrastructure.memory import InMemoryAuditLog, InMemoryTicketService
 from customer_agent.infrastructure.models import BreakerChatModel, ProviderChatModel
@@ -39,7 +39,7 @@ async def test_llm_outage_reaches_the_fallback_in_time_and_the_breaker_takes_ove
         inner=provider, breaker=CircuitBreaker("fault-llm", failure_threshold=2, reset_after=60)
     )
     agent = ConversationOrchestrator(
-        IntentRouter(llm, load_prompt("router", 5)),
+        UnderstandAgent(llm, load_prompt("router", 5)),
         AnswerService(
             FakeRetriever([document("policy-returns-v5", 0.7)]),
             llm,

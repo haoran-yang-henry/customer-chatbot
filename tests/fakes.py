@@ -258,7 +258,7 @@ def make_orchestrator(
 ) -> "ConversationOrchestrator":
     from customer_agent.application.answering import AnswerService
     from customer_agent.application.orchestrator import ConversationOrchestrator
-    from customer_agent.application.routing import IntentRouter
+    from customer_agent.application.understanding import UnderstandAgent
     from customer_agent.infrastructure.prompts import load_prompt
 
     answers = AnswerService(
@@ -270,13 +270,12 @@ def make_orchestrator(
         min_similarity=0.35,
     )
     return ConversationOrchestrator(
-        IntentRouter(llm, load_prompt("router", 5)),
+        UnderstandAgent(llm, load_prompt("router", 5), classifier=classifier),
         answers,
         orders=orders or SeedOrderRepository(),
         tickets=tickets or InMemoryTicketService(),
         audit=audit or InMemoryAuditLog(),
         clock=FixedClock(today),
         tenant_id="nordelektro",
-        classifier=classifier,
         max_tickets_per_day=max_tickets_per_day,
     )

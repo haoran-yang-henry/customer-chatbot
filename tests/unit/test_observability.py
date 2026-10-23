@@ -136,8 +136,12 @@ async def test_one_turn_is_one_trace_with_a_span_per_step(spans: InMemorySpanExp
 
     finished = spans.get_finished_spans()
     names = [s.name for s in finished]
-    assert {"agent.input_guardrail", "agent.route", "agent.output_guardrail"} <= set(names)
+    assert {"agent.understand", "agent.route", "agent.output_guardrail"} <= set(names)
     assert len({s.context.trace_id for s in finished}) == 1
+    by_name = {s.name: s for s in finished}  # the router call is a step inside the agent
+    route_parent = by_name["agent.route"].parent
+    assert route_parent is not None
+    assert route_parent.span_id == by_name["agent.understand"].context.span_id
 
 
 def test_request_span_continues_an_incoming_trace_and_logs_carry_it(

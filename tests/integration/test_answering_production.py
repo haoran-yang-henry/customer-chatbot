@@ -10,7 +10,7 @@ from customer_agent.application.answering import AnswerService
 from customer_agent.application.ingestion import IngestionService
 from customer_agent.application.orchestrator import ConversationOrchestrator, TurnResult
 from customer_agent.application.retrieval import RetrievalService
-from customer_agent.application.routing import IntentRouter
+from customer_agent.application.understanding import UnderstandAgent
 from customer_agent.bootstrap import create_chat_model
 from customer_agent.config import Settings
 from customer_agent.domain.conversation import Behavior, Conversation, Message, Role
@@ -47,7 +47,7 @@ async def agent(
         min_similarity=settings.min_answer_similarity,
     )
     return ConversationOrchestrator(
-        IntentRouter(llm, load_prompt("router", settings.router_prompt_version)),
+        UnderstandAgent(llm, load_prompt("router", settings.router_prompt_version)),
         answers,
         orders=SeedOrderRepository(),
         tickets=InMemoryTicketService(),

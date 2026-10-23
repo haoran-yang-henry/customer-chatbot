@@ -1,12 +1,11 @@
 """Conversation orchestrator: the ``CustomerServiceAgent`` behind the API and the evaluation.
 
-One turn: input guardrail → intent router ‖ attack classifier → state machine (``decide``) →
-handler (knowledge answer with output guardrail, order guidance, ticket flow). Guardrails judge;
-this class decides what the customer sees (ADR-0011). Tickets only for confirmed change
-requests, at most one per conversation (ADR-0014).
+One turn: understand agent (input guardrail, rule routing, intent router ‖ attack classifier) →
+state machine (``decide``) → handler (knowledge answer with output guardrail, order guidance,
+ticket flow). Guardrails judge; this class decides what the customer sees (ADR-0011). Tickets
+only for confirmed change requests, at most one per conversation (ADR-0014).
 """
 
-import asyncio
 import re
 from collections.abc import AsyncIterator
 
@@ -32,8 +31,7 @@ from customer_agent.application.fallbacks import (
     ticket_question,
     with_payment_data_notice,
 )
-from customer_agent.application.guardrails import PAYMENT_DATA_REASONS, check_input
-from customer_agent.application.guardrails.classifier import PromptAttackClassifier
+from customer_agent.application.guardrails import PAYMENT_DATA_REASONS
 from customer_agent.application.order_guidance import order_guidance, order_not_found
 from customer_agent.application.ports import (
     AuditEntry,
@@ -44,7 +42,7 @@ from customer_agent.application.ports import (
     ProviderUnavailableError,
     TicketService,
 )
-from customer_agent.application.routing import IntentRouter, route_by_rules
+from customer_agent.application.understanding import UnderstandAgent, Understanding
 from customer_agent.domain.conversation import AgentResponse, Conversation, Message, Role
 from customer_agent.domain.guardrails import GuardrailDecision
 from customer_agent.domain.intents import Intent
@@ -86,7 +84,7 @@ TurnEvent = TextDelta | TurnResult
 class ConversationOrchestrator:
     def __init__(
         self,
-        router: IntentRouter,
+        understand: UnderstandAgent,
         answers: AnswerService,
         *,
         orders: OrderRepository,
@@ -94,17 +92,15 @@ class ConversationOrchestrator:
         audit: AuditLog,
         clock: Clock,
         tenant_id: str,
-        classifier: PromptAttackClassifier | None = None,
         max_tickets_per_day: int | None = 3,  # None: no limit
     ) -> None:
-        self._router = router
+        self._understand = understand
         self._answers = answers
         self._orders = orders
         self._tickets = tickets
         self._audit = audit
         self._clock = clock
         self._tenant_id = tenant_id
-        self._classifier = classifier
         self._max_tickets_per_day = max_tickets_per_day
 
     # --- CustomerServiceAgent (stateless; used by the evaluation) -------------------------
@@ -128,11 +124,12 @@ class ConversationOrchestrator:
     async def handle_stream(
         self, conversation: Conversation, state: SessionState, *, session_id: str
     ) -> AsyncIterator[TurnEvent]:
-        raw = conversation.messages[-1].content
-        with agent_step("input_guardrail"):
-            screen = check_input(raw)
+        recovered = recover_state(conversation, state)
+        with agent_step("understand"):
+            understood = await self._understand.run(conversation, recovered, session_id=session_id)
+        screen = understood.input
         record_guardrail(screen)
-        text = screen.content if screen.content is not None else raw
+        text = understood.text
         if screen.blocked:
             log.info("input blocked reasons=%s", ",".join(screen.reasons))
             yield _counted(
@@ -145,7 +142,7 @@ class ConversationOrchestrator:
             return
         if screen.reasons:
             log.info("input redacted reasons=%s", ",".join(screen.reasons))
-        # From here on only the sanitised message exists: router, answer model, transcript.
+        # From here on only the sanitised message exists: answer model, transcript.
         sanitized = Message(role=Role.USER, content=text)
         conversation = conversation.model_copy(
             update={"messages": [*conversation.messages[:-1], sanitized]}
@@ -153,7 +150,7 @@ class ConversationOrchestrator:
         notice = not PAYMENT_DATA_REASONS.isdisjoint(screen.reasons)
         if notice:
             yield TextDelta(text=f"{PAYMENT_DATA_NOTICE}\n\n")
-        async for event in self._turn(conversation, state, session_id):
+        async for event in self._turn(conversation, recovered, understood, session_id):
             if isinstance(event, TurnResult):
                 if notice:
                     event = event.model_copy(
@@ -163,49 +160,32 @@ class ConversationOrchestrator:
             yield event
 
     async def _turn(
-        self, conversation: Conversation, state: SessionState, session_id: str
+        self,
+        conversation: Conversation,
+        state: SessionState,
+        understood: Understanding,
+        session_id: str,
     ) -> AsyncIterator[TurnEvent]:
         text = conversation.messages[-1].content
-        state = recover_state(conversation, state)
-        try:
-            routing, verdict = await self._route_and_screen(conversation, state, session_id)
-            if verdict is not None:
-                record_guardrail(verdict)
-            if verdict is not None and verdict.blocked:
+        routing, verdict = understood.routing, understood.verdict
+        if routing is None:
+            # Nothing was understood (NFR-11): contact channels at once, never a ticket.
+            yield TurnResult(response=outage_contact_reply(), state=state, user_text=text)
+            return
+        if verdict is not None:
+            record_guardrail(verdict)
+            if verdict.blocked:
                 log.warning("input blocked by classifier reasons=%s", ",".join(verdict.reasons))
                 yield TurnResult(response=_vetoed(verdict, routing), state=state, user_text=text)
                 return
+        try:
             step = decide(state, routing, authenticated=conversation.customer_id is not None)
             log.info("step=%s intent=%s workflow=%s", step.step, step.intent, step.state.workflow)
             async for event in self._execute(conversation, routing, step, session_id):
                 yield event
         except ProviderUnavailableError as exc:
             log.error("provider unavailable: %s", exc)
-            yield TurnResult(
-                # Nothing can be understood (NFR-11): contact channels at once, never a ticket.
-                response=outage_contact_reply(),
-                state=state,
-                user_text=text,
-            )
-
-    async def _route_and_screen(
-        self, conversation: Conversation, state: SessionState, session_id: str
-    ) -> tuple[RoutingResult, GuardrailDecision | None]:
-        """Router and classifier run concurrently: the classifier costs a call, not latency.
-        Rule-routed messages (a greeting, a bare order number) skip the classifier."""
-        if self._classifier is None or route_by_rules(conversation, state) is not None:
-            return await self._router.route(conversation, state, session_id=session_id), None
-        try:
-            async with asyncio.TaskGroup() as group:
-                routed = group.create_task(
-                    self._router.route(conversation, state, session_id=session_id)
-                )
-                screened = group.create_task(
-                    self._classifier.classify(conversation, session_id=session_id)
-                )
-        except ExceptionGroup as errors:  # keep ProviderUnavailableError catchable
-            raise errors.exceptions[0] from None
-        return routed.result(), screened.result()
+            yield TurnResult(response=outage_contact_reply(), state=state, user_text=text)
 
     async def _execute(
         self,

@@ -1,10 +1,11 @@
-"""Intent router: deterministic rules first, then one LLM call for intent + query rewriting."""
+"""Intent routing: deterministic rules first, then one LLM call for intent + query rewriting.
+
+The understand agent (``application.understanding``) runs these steps as middleware."""
 
 import json
 import re
-import time
 
-from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import BaseMessage
 from pydantic import BaseModel, ValidationError, field_validator
 
 from customer_agent.application.answering import format_history, search_query
@@ -14,7 +15,7 @@ from customer_agent.domain.conversation import Conversation
 from customer_agent.domain.intents import Intent, IntentGroup
 from customer_agent.domain.routing import RoutingResult, RoutingSource, extract_order_id
 from customer_agent.domain.session import SessionState, WorkflowState
-from customer_agent.observability import elapsed_ms, get_logger, step
+from customer_agent.observability import get_logger
 
 log = get_logger("router")
 
@@ -160,62 +161,41 @@ def describe_state(state: SessionState) -> str:
     return "New conversation."
 
 
-class IntentRouter:
-    def __init__(self, llm: BaseChatModel, prompt: PromptTemplate) -> None:
-        self._llm = llm
-        self._prompt = prompt
+def router_messages(
+    prompt: PromptTemplate, conversation: Conversation, state: SessionState
+) -> list[BaseMessage]:
+    """The router's request: the state, the earlier turns and the (masked) latest message."""
+    return prompt.render_messages(
+        state=describe_state(state),
+        history=format_history(conversation),
+        message=conversation.messages[-1].content,
+    )
 
-    async def route(
-        self, conversation: Conversation, state: SessionState, *, session_id: str
-    ) -> RoutingResult:
-        with step("route") as span:
-            result = await self._route(conversation, state, session_id=session_id)
-            span.set_attributes({"intent": str(result.intent), "source": result.source})
-            return result
 
-    async def _route(
-        self, conversation: Conversation, state: SessionState, *, session_id: str
-    ) -> RoutingResult:
-        start = time.perf_counter()
-        result = route_by_rules(conversation, state)
-        if result is None:
-            reply = await self._llm.ainvoke(
-                self._prompt.render_messages(
-                    state=describe_state(state),
-                    history=format_history(conversation),
-                    message=conversation.messages[-1].content,
-                ),
-                session_id=session_id,
-                max_tokens=ROUTER_MAX_TOKENS,
-                temperature=0.0,
-            )
-            result = self._vet_clarification(
-                parse_llm_routing(reply.text, conversation), conversation
-            )
-        log.info(
-            "source=%s intent=%s confidence=%.2f order_id=%s specific=%s took=%dms",
-            result.source,
-            result.intent,
-            result.confidence,
-            result.order_id or "-",
-            result.about_specific_order,
-            elapsed_ms(start),
-        )
-        log.debug("standalone_query=%r", result.standalone_query)
+def vet_clarification(
+    result: RoutingResult, conversation: Conversation, prompt: PromptTemplate
+) -> RoutingResult:
+    """The clarification question is LLM output shown verbatim: an injected message could turn
+    it into a channel for the system prompt or a phishing link. Unsafe → default."""
+    question = result.clarification_question
+    if question is None:
         return result
+    decision = check_generated_text(
+        question, prompt=prompt.system, customer=search_query(conversation)
+    )
+    if decision.blocked:
+        log.warning("clarification replaced reasons=%s", ",".join(decision.reasons))
+        return result.model_copy(update={"clarification_question": None})
+    return result
 
-    def _vet_clarification(
-        self, result: RoutingResult, conversation: Conversation
-    ) -> RoutingResult:
-        """The clarification question is LLM output shown verbatim: an injected message could
-        turn it into a channel for the system prompt or a phishing link. Unsafe → default."""
-        question = result.clarification_question
-        if question is None:
-            return result
-        decision = check_generated_text(
-            question, prompt=self._prompt.system, customer=search_query(conversation)
-        )
-        if decision.blocked:
-            log.warning("clarification replaced reasons=%s", ",".join(decision.reasons))
-            return result.model_copy(update={"clarification_question": None})
-        return result
+
+def log_routing(result: RoutingResult) -> None:
+    log.info(
+        "source=%s intent=%s confidence=%.2f order_id=%s specific=%s",
+        result.source,
+        result.intent,
+        result.confidence,
+        result.order_id or "-",
+        result.about_specific_order,
+    )
+    log.debug("standalone_query=%r", result.standalone_query)
