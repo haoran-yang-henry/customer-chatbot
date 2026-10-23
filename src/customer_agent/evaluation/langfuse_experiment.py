@@ -11,6 +11,9 @@ Langfuse runs an experiment on an event loop of its own in a worker thread, whil
 database pool and model clients belong to the evaluation's loop. Each case is therefore sent
 back to that loop, together with the experiment's trace context, so the agent's steps and model
 calls appear under the case's trace.
+
+Judge calibration: judged answers go to an annotation queue, a person labels them in Langfuse,
+and the labels come back as a calibration sheet for ``--check-calibration``.
 """
 
 import asyncio
@@ -20,7 +23,12 @@ from pathlib import Path
 from typing import Any
 
 from langfuse import Langfuse
-from langfuse.api import DatasetItem, DatasetStatus
+from langfuse.api import (
+    AnnotationQueueObjectType,
+    DatasetItem,
+    DatasetStatus,
+    ScoreConfigDataType,
+)
 from langfuse.experiment import Evaluation, ExperimentItem, ExperimentItemResult
 from opentelemetry import context as otel_context
 
@@ -32,6 +40,10 @@ from customer_agent.evaluation.scoring import CaseResult, score_case
 # Langfuse's generated enums type their members as plain str; looked up by value they are typed.
 ACTIVE = DatasetStatus("ACTIVE")
 ARCHIVED = DatasetStatus("ARCHIVED")
+
+JUDGE_SCORE = "grounded"
+HUMAN_SCORE = "grounded_human"
+CALIBRATION_QUEUE = "groundedness-calibration"
 
 
 def item_id(dataset: str, case_id: str) -> str:
@@ -200,10 +212,94 @@ def record_groundedness(
             continue
         client.create_score(
             trace_id=trace_id,
-            name="grounded",
+            name=JUDGE_SCORE,
             value=1.0 if result.grounded else 0.0,
             data_type="BOOLEAN",
             comment="LLM judge judge/v1; uncalibrated until checked against human labels",
         )
         written += 1
     return written
+
+
+def ensure_calibration_queue(client: Langfuse) -> str:
+    """The score config for human groundedness labels and its annotation queue, created once;
+    returns the queue id."""
+    configs = client.api.score_configs.get(limit=100).data
+    config = next((c for c in configs if c.name == HUMAN_SCORE and not c.is_archived), None)
+    if config is None:
+        config = client.api.score_configs.create(
+            name=HUMAN_SCORE,
+            data_type=ScoreConfigDataType("BOOLEAN"),
+            description="Is every factual claim of the answer supported by the documents it "
+            "cites? Human label that calibrates the LLM judge.",
+        )
+    queues = client.api.annotation_queues.list_queues(limit=100).data
+    queue = next((q for q in queues if q.name == CALIBRATION_QUEUE), None)
+    if queue is None:
+        queue = client.api.annotation_queues.create_queue(
+            name=CALIBRATION_QUEUE,
+            score_config_ids=[config.id],
+            description="Answers the LLM judge rated. Label them here, then export with "
+            "customer-agent-eval --export-labels.",
+        )
+    return str(queue.id)
+
+
+def queue_for_labelling(
+    client: Langfuse, queue_id: str, results: Sequence[CaseResult], traces: dict[str, str]
+) -> int:
+    """Every judged case of the run goes to the queue; returns how many were added."""
+    queued = 0
+    for result in results:
+        trace_id = traces.get(result.case_id)
+        if result.grounded is None or trace_id is None:
+            continue
+        client.api.annotation_queues.create_queue_item(
+            queue_id, object_id=trace_id, object_type=AnnotationQueueObjectType("TRACE")
+        )
+        queued += 1
+    return queued
+
+
+def _flag(value: object) -> bool:
+    """Boolean scores come back as bool, 0/1 or 'True'/'False', depending on the endpoint."""
+    return str(value).strip().lower() in ("true", "1", "1.0")
+
+
+def labelled_rows(client: Langfuse, queue_id: str) -> list[dict[str, object]]:
+    """The queue's human labels as calibration rows (the ``--check-calibration`` format), with
+    the judge's verdict on the same trace; the latest label per case wins."""
+    rows: dict[str, dict[str, object]] = {}
+    cursor: str | None = None
+    while True:
+        page = client.api.scores.get_many(
+            queue_id=queue_id, name=HUMAN_SCORE, fields="core,subject", limit=100, cursor=cursor
+        )
+        for score in sorted(page.data, key=lambda s: s.timestamp):
+            subject = score.subject
+            trace_id = getattr(subject, "trace_id", None) or subject.id
+            root = client.api.observations.get_many(
+                trace_id=trace_id,
+                is_root_observation=True,
+                fields="core,basic,io,metadata",
+                parse_io_as_json=True,
+            ).data[0]
+            judge = client.api.scores.get_many(
+                trace_id=trace_id, name=JUDGE_SCORE, fields="core", limit=1
+            ).data
+            case_input: dict[str, Any] = root.input or {}
+            output: dict[str, Any] = root.output or {}
+            case_id = str((root.metadata or {}).get("case_id", trace_id))
+            rows[case_id] = {
+                "case_id": case_id,
+                "question": case_input.get("turns", [{}])[-1].get("content", ""),
+                "answer": output.get("answer", ""),
+                "sources": output.get("sources", []),
+                "judge_grounded": _flag(judge[0].value) if judge else None,
+                "human_grounded": _flag(score.value),
+                "trace_id": trace_id,
+            }
+        cursor = page.meta.cursor
+        if not page.data or not cursor:
+            break
+    return [rows[case_id] for case_id in sorted(rows)]

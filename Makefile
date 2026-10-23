@@ -2,7 +2,7 @@
 # Pinned by digest, like in .github/workflows/ci.yml (keep both in sync).
 GITLEAKS_IMAGE := zricethezav/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
 TRIVY_IMAGE := aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969
-.PHONY: seed token help install lint format typecheck test test-integration test-llm check audit eval eval-smoke eval-smoke-record eval-redteam eval-retrieval ttft load-test load-test-capacity migrate ingest run up up-app up-observability down demo-public demo-public-down demo-frontend
+.PHONY: seed token help install lint format typecheck test test-integration test-llm check audit eval eval-labels eval-smoke eval-smoke-record eval-redteam eval-retrieval ttft load-test load-test-capacity migrate ingest run up up-app up-observability down demo-public demo-public-down demo-frontend
 
 help:  ## Show available targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-18s %s\n", $$1, $$2}'
@@ -44,9 +44,17 @@ audit:  ## Security scans: secrets in git history, Trivy on the tree, pip-audit 
 	uvx --from pip-audit==2.10.1 pip-audit -r .cache/requirements-audit.txt --require-hashes \
 		--disable-pip
 
+# LANGFUSE=1 records eval and eval-redteam as Langfuse experiments and queues judged answers for
+# human labels (needs the LANGFUSE_* keys in .env).
+LANGFUSE_FLAGS := $(if $(LANGFUSE),--langfuse,)
+
 eval:  ## End-to-end evaluation of the real agent + judge (needs make up migrate seed ingest)
 	CA_LLM_CACHE_DIR=.cache/llm uv run customer-agent-eval --dataset eval/datasets/core.jsonl --day 8 \
-		--target agent --judge --calibration-out eval/calibration/groundedness-latest.jsonl
+		--target agent --judge --calibration-out eval/calibration/groundedness-latest.jsonl \
+		$(LANGFUSE_FLAGS) $(if $(LANGFUSE),--annotation-queue,)
+
+eval-labels:  ## Export the human labels from Langfuse's calibration queue and check the judge
+	uv run customer-agent-eval --export-labels eval/calibration/groundedness-langfuse.jsonl
 
 eval-smoke:  ## CI gate locally: smoke cases against recorded model responses (needs make up)
 	eval/smoke.sh
@@ -56,7 +64,7 @@ eval-smoke-record:  ## Re-record the smoke cassette with the real providers (aft
 
 eval-redteam:  ## Red-team set: attack success and false-positive rates (same setup as eval)
 	CA_LLM_CACHE_DIR=.cache/llm uv run customer-agent-eval --dataset eval/datasets/redteam.jsonl \
-		--day 8 --target agent
+		--day 8 --target agent $(LANGFUSE_FLAGS)
 
 eval-retrieval:  ## Recall@5 / MRR for fulltext, vector and hybrid search (needs DB + API key)
 	uv run customer-agent-eval-retrieval --dataset eval/datasets/core.jsonl --out eval/results/day2-retrieval.json

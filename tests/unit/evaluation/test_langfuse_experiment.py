@@ -3,6 +3,7 @@
 import threading
 from collections.abc import Iterator
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -14,13 +15,19 @@ from customer_agent.domain.conversation import AgentResponse, Behavior, Conversa
 from customer_agent.evaluation.langfuse_experiment import (
     ACTIVE,
     ARCHIVED,
+    CALIBRATION_QUEUE,
+    HUMAN_SCORE,
     check_scores,
+    ensure_calibration_queue,
     item_fields,
     item_id,
+    labelled_rows,
+    queue_for_labelling,
     run_experiment,
     sync_dataset,
 )
 from customer_agent.evaluation.schema import load_dataset
+from customer_agent.evaluation.scoring import score_case
 from tests.conftest import CORE_DATASET
 
 CASES = load_dataset(CORE_DATASET)[:3]
@@ -146,3 +153,105 @@ async def test_experiment_runs_the_agent_on_the_evaluation_loop_and_keeps_case_o
     assert set(traces) == {case.id for case in CASES}
     # The agent's pool and clients belong to the evaluation's loop, not Langfuse's thread.
     assert agent.threads == {threading.get_ident()}
+
+
+class FakeQueueApi:
+    """The score-config and annotation-queue endpoints of the Langfuse API."""
+
+    def __init__(self, configs: list[SimpleNamespace], queues: list[SimpleNamespace]) -> None:
+        self.created: list[str] = []
+        self.queued: list[tuple[str, str]] = []
+        self.score_configs = SimpleNamespace(
+            get=lambda **_: SimpleNamespace(data=configs), create=self._create_config
+        )
+        self.annotation_queues = SimpleNamespace(
+            list_queues=lambda **_: SimpleNamespace(data=queues),
+            create_queue=self._create_queue,
+            create_queue_item=self._queue,
+        )
+
+    def _create_config(self, **fields: Any) -> SimpleNamespace:
+        self.created.append(f"config:{fields['name']}")
+        return SimpleNamespace(id="config-1", name=fields["name"], is_archived=False)
+
+    def _create_queue(self, **fields: Any) -> SimpleNamespace:
+        self.created.append(f"queue:{fields['name']}:{','.join(fields['score_config_ids'])}")
+        return SimpleNamespace(id="queue-1", name=fields["name"])
+
+    def _queue(self, queue_id: str, **fields: Any) -> None:
+        self.queued.append((queue_id, fields["object_id"]))
+
+
+def test_the_calibration_queue_is_created_once_and_then_reused() -> None:
+    fresh = SimpleNamespace(api=FakeQueueApi([], []))
+    existing = SimpleNamespace(
+        api=FakeQueueApi(
+            [SimpleNamespace(id="config-9", name=HUMAN_SCORE, is_archived=False)],
+            [SimpleNamespace(id="queue-9", name=CALIBRATION_QUEUE)],
+        )
+    )
+
+    assert ensure_calibration_queue(fresh) == "queue-1"  # type: ignore[arg-type]
+    assert fresh.api.created == [
+        f"config:{HUMAN_SCORE}",
+        f"queue:{CALIBRATION_QUEUE}:config-1",
+    ]
+    assert ensure_calibration_queue(existing) == "queue-9"  # type: ignore[arg-type]
+    assert existing.api.created == []
+
+
+def test_only_judged_cases_with_a_trace_are_queued() -> None:
+    response = AgentResponse(answer="Nein.", behavior=Behavior.ANSWER)
+    judged, unjudged, untraced = (score_case(case, response) for case in CASES)
+    results = [
+        judged.model_copy(update={"grounded": True}),
+        unjudged,
+        untraced.model_copy(update={"grounded": False}),
+    ]
+    langfuse = SimpleNamespace(api=FakeQueueApi([], []))
+
+    queued = queue_for_labelling(
+        langfuse,  # type: ignore[arg-type]
+        "queue-1",
+        results,
+        {judged.case_id: "trace-1", unjudged.case_id: "trace-2"},
+    )
+
+    assert queued == 1
+    assert langfuse.api.queued == [("queue-1", "trace-1")]
+
+
+def test_human_labels_become_calibration_rows_next_to_the_judges_verdict() -> None:
+    label = SimpleNamespace(
+        subject=SimpleNamespace(kind="trace", id="trace-1"),
+        value=0.0,
+        timestamp=datetime(2026, 10, 23, tzinfo=UTC),
+    )
+    root = SimpleNamespace(
+        input={"turns": [{"role": "user", "content": "Kostet die Rücksendung etwas?"}]},
+        output={"answer": "Nein, die Rücksendung ist kostenlos.", "sources": ["policy-returns-v5"]},
+        metadata={"case_id": "N-002"},
+    )
+
+    def scores(**query: Any) -> SimpleNamespace:
+        data = [label] if "queue_id" in query else [SimpleNamespace(value="True")]  # the judge
+        return SimpleNamespace(data=data, meta=SimpleNamespace(cursor=None))
+
+    langfuse = SimpleNamespace(
+        api=SimpleNamespace(
+            scores=SimpleNamespace(get_many=scores),
+            observations=SimpleNamespace(get_many=lambda **_: SimpleNamespace(data=[root])),
+        )
+    )
+
+    assert labelled_rows(langfuse, "queue-1") == [  # type: ignore[arg-type]
+        {
+            "case_id": "N-002",
+            "question": "Kostet die Rücksendung etwas?",
+            "answer": "Nein, die Rücksendung ist kostenlos.",
+            "sources": ["policy-returns-v5"],
+            "judge_grounded": True,
+            "human_grounded": False,
+            "trace_id": "trace-1",
+        }
+    ]

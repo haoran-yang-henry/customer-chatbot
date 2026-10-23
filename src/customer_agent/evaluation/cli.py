@@ -24,10 +24,10 @@ from customer_agent.observability.metrics import token_totals
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run an evaluation dataset against an agent.")
-    parser.add_argument("--dataset", type=Path, action="append", required=True)
+    parser.add_argument("--dataset", type=Path, action="append")
     parser.add_argument("--tag", help="Only cases with this tag (e.g. smoke).")
     parser.add_argument("--target", choices=sorted(TARGETS), default="placeholder")
-    parser.add_argument("--day", type=int, required=True, help="Current project day (1-8).")
+    parser.add_argument("--day", type=int, help="Current project day (1-8).")
     parser.add_argument("--out", type=Path, help="Result file (default: eval/results/<ts>.json).")
     parser.add_argument("--concurrency", type=int, default=4)
     parser.add_argument("--judge", action="store_true", help="Run the groundedness LLM judge.")
@@ -37,10 +37,23 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         help="Record the run as one Langfuse experiment per dataset (needs the LANGFUSE_* keys).",
     )
     parser.add_argument(
+        "--run-name", help="Langfuse experiment run name (default: target, day, commit, time)."
+    )
+    parser.add_argument(
+        "--annotation-queue",
+        action="store_true",
+        help="With --langfuse and --judge: queue the judged answers for human labels in Langfuse.",
+    )
+    parser.add_argument(
         "--calibration-out", type=Path, help="Write judged answers for human labelling."
     )
     parser.add_argument(
         "--check-calibration", type=Path, help="Report judge/human agreement for a labelled file."
+    )
+    parser.add_argument(
+        "--export-labels",
+        type=Path,
+        help="Write the human labels of the Langfuse calibration queue as a calibration sheet.",
     )
     parser.add_argument(
         "--min-pass-rate",
@@ -48,7 +61,13 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         help="Exit with status 1 if the gated pass rate is below this value (0-1).",
     )
     parser.add_argument("--log-level", default="WARNING")
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    standalone = args.check_calibration or args.export_labels
+    if not standalone and (not args.dataset or args.day is None):
+        parser.error("--dataset and --day are required for an evaluation run")
+    if args.annotation_queue and not (args.langfuse and args.judge):
+        parser.error("--annotation-queue needs --langfuse and --judge")
+    return args
 
 
 def _print_summary(report: EvalReport) -> None:
@@ -185,7 +204,9 @@ async def _run_experiments(
     if client is None:
         raise RuntimeError("Langfuse is not configured")
     revision = _git_revision()
-    run_name = f"{args.target}-day{args.day}-{revision}-{datetime.now(UTC):%Y%m%dT%H%MZ}"
+    run_name = (
+        args.run_name or f"{args.target}-day{args.day}-{revision}-{datetime.now(UTC):%Y%m%dT%H%MZ}"
+    )
     metadata = {
         **config,
         "target": args.target,
@@ -253,14 +274,30 @@ async def _run(args: argparse.Namespace, cases: list[EvalCase]) -> EvalReport:
         return report
     report = await _judge(report, cases, traces)
     if traces:
-        from customer_agent.evaluation.langfuse_experiment import record_groundedness
+        from customer_agent.evaluation.langfuse_experiment import (
+            ensure_calibration_queue,
+            queue_for_labelling,
+            record_groundedness,
+        )
         from customer_agent.observability import langfuse_client
 
         client = langfuse_client()
         if client is not None:
             written = await asyncio.to_thread(record_groundedness, client, report.results, traces)
             print(f"Langfuse: {written} groundedness scores")
+            if args.annotation_queue:
+                queue_id = await asyncio.to_thread(ensure_calibration_queue, client)
+                queued = await asyncio.to_thread(
+                    queue_for_labelling, client, queue_id, report.results, traces
+                )
+                print(f"Langfuse: {queued} answers queued for human labels")
     return report
+
+
+_LANGFUSE_MISSING = (
+    "Langfuse needs LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY, and CA_APP_ENV other than "
+    "test or ci"
+)
 
 
 def _start_langfuse() -> bool:
@@ -272,6 +309,33 @@ def _start_langfuse() -> bool:
     settings = get_settings()
     provider = configure_tracing("customer-agent-eval", __version__, settings.otel_endpoint)
     return start_langfuse(settings, provider, __version__, environment="eval")
+
+
+def _export_labels(path: Path) -> int:
+    from customer_agent.evaluation.judge import agreement
+    from customer_agent.evaluation.langfuse_experiment import (
+        ensure_calibration_queue,
+        labelled_rows,
+    )
+    from customer_agent.observability import langfuse_client, shutdown_langfuse
+
+    if not _start_langfuse():
+        print(_LANGFUSE_MISSING, file=sys.stderr)
+        return 2
+    try:
+        client = langfuse_client()
+        if client is None:
+            raise RuntimeError("Langfuse is not configured")
+        rows = labelled_rows(client, ensure_calibration_queue(client))
+    finally:
+        shutdown_langfuse()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), "utf-8")
+    agreeing, labelled = agreement(path)
+    rate = agreeing / labelled if labelled else 0.0
+    print(f"{labelled} human labels written to {path}")
+    print(f"Judge agrees with human labels on {agreeing}/{labelled} ({rate:.0%}); target ≥ 90 %")
+    return 0
 
 
 def select_cases(datasets: list[Path], tag: str | None) -> list[EvalCase]:
@@ -300,14 +364,12 @@ def main(argv: list[str] | None = None) -> int:
             f"Judge agrees with human labels on {agreeing}/{labelled} ({rate:.0%}); target ≥ 90 %"
         )
         return 0
+    if args.export_labels:
+        return _export_labels(args.export_labels)
 
     cases = select_cases(args.dataset, args.tag)
     if args.langfuse and not _start_langfuse():
-        print(
-            "--langfuse needs LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY, and CA_APP_ENV other "
-            "than test or ci",
-            file=sys.stderr,
-        )
+        print(_LANGFUSE_MISSING, file=sys.stderr)
         return 2
     try:
         report = asyncio.run(_run(args, cases))
