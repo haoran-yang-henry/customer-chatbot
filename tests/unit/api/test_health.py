@@ -46,3 +46,16 @@ def test_readiness_fails_on_the_database_but_not_on_an_open_breaker() -> None:
 
     assert degraded.status_code == 200 and degraded.json()["checks"]["llm"] == "open"
     assert unavailable.status_code == 503 and unavailable.json()["status"] == "unavailable"
+
+
+def test_readiness_waits_for_the_checkpoint_tables() -> None:
+    app = create_app(Settings(app_env="test"), chat=object())  # type: ignore[arg-type]
+    with TestClient(app) as client:
+
+        async def tables_pending() -> dict[str, str]:
+            return {"database": "ok", "checkpoints": "pending"}
+
+        app.state.readiness = tables_pending
+        response = client.get("/health/ready")
+
+    assert response.status_code == 503 and response.json()["checks"]["checkpoints"] == "pending"

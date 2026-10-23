@@ -25,7 +25,8 @@ ROUTING = (
 @pytest.fixture
 async def checkpointer(database_url: str) -> AsyncIterator[PostgresCheckpointer]:
     checkpointer = PostgresCheckpointer(database_url, CHECKPOINT_TYPES)
-    await checkpointer.start()  # creates the checkpoint tables on first use
+    await checkpointer.start()
+    await checkpointer.wait_ready()  # the checkpoint tables exist
     yield checkpointer
     await checkpointer.aclose()
 

@@ -258,6 +258,7 @@ class Container:
         keeps the instance ready: it still answers with the outage fallback (NFR-11), and
         taking every instance out of the load balancer would turn an outage into downtime."""
         checks: dict[str, str] = {name: breaker.state for name, breaker in self.breakers.items()}
+        checks["checkpoints"] = "ok" if self.checkpointer.ready else "pending"
         try:
             async with asyncio.timeout(2.0), self.engine.connect() as connection:
                 await connection.execute(text("SELECT 1"))
@@ -269,7 +270,8 @@ class Container:
         return checks
 
     async def start(self) -> None:
-        """Before serving sessions: connect the checkpointer, create its tables if missing."""
+        """Before serving sessions: connect the checkpointer and create its tables if missing,
+        in the background (readiness waits for them)."""
         await self.checkpointer.start()
 
     async def aclose(self) -> None:
