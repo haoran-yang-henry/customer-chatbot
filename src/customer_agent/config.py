@@ -16,6 +16,19 @@ class Settings(BaseSettings):
     log_format: Literal["console", "json"] = "console"  # json in containers (Day 7)
     # OTLP/HTTP receiver for traces, e.g. http://localhost:4318 (Jaeger); unset = not exported.
     otel_endpoint: str | None = None
+    # Langfuse (rebuild plan phase 1): model calls and turns as traces, evaluations as experiments.
+    # The SDK's own variable names are accepted, so one .env serves the app and Langfuse's tools.
+    langfuse_public_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("CA_LANGFUSE_PUBLIC_KEY", "LANGFUSE_PUBLIC_KEY"),
+    )
+    langfuse_secret_key: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices("CA_LANGFUSE_SECRET_KEY", "LANGFUSE_SECRET_KEY"),
+    )
+    langfuse_base_url: str | None = Field(  # unset = Langfuse Cloud EU
+        default=None, validation_alias=AliasChoices("CA_LANGFUSE_BASE_URL", "LANGFUSE_BASE_URL")
+    )
     database_url: str = "postgresql+psycopg://agent:agent@localhost:5432/customer_agent"
     sql_echo: bool = False  # log every SQL statement (debugging only)
     # Connection pool per process. One turn can hold three connections at once (session, the two
@@ -105,6 +118,9 @@ class Settings(BaseSettings):
         "auth_issuer",
         "auth_jwks_url",
         "otel_endpoint",
+        "langfuse_public_key",
+        "langfuse_secret_key",
+        "langfuse_base_url",
         "llm_reasoning_effort",
         "router_llm_model",
         "router_reasoning_effort",
@@ -122,6 +138,15 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             return [origin.strip().rstrip("/") for origin in value.split(",") if origin.strip()]
         return value
+
+    @property
+    def langfuse_enabled(self) -> bool:
+        """Both keys set, and never in tests or CI: a developer's .env must not send test runs."""
+        return (
+            self.langfuse_public_key is not None
+            and self.langfuse_secret_key is not None
+            and self.app_env not in ("test", "ci")
+        )
 
     @model_validator(mode="after")
     def _no_evaluation_shortcuts_in_prod(self) -> "Settings":
