@@ -8,7 +8,9 @@ only for confirmed change requests, at most one per conversation (ADR-0014).
 
 import re
 from collections.abc import AsyncIterator
+from typing import cast
 
+from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, ConfigDict
 
 from customer_agent.application.answering import (
@@ -34,13 +36,17 @@ from customer_agent.application.fallbacks import (
 from customer_agent.application.guardrails import PAYMENT_DATA_REASONS
 from customer_agent.application.order_guidance import order_guidance, order_not_found
 from customer_agent.application.ports import (
-    AuditEntry,
     AuditLog,
     Clock,
-    NewTicket,
     OrderRepository,
     ProviderUnavailableError,
     TicketService,
+)
+from customer_agent.application.tools import (
+    CreateTicket,
+    GetOrderStatus,
+    TicketOutcome,
+    tool_config,
 )
 from customer_agent.application.understanding import UnderstandAgent, Understanding
 from customer_agent.domain.conversation import AgentResponse, Conversation, Message, Role
@@ -55,7 +61,7 @@ from customer_agent.domain.session import (
     WorkflowState,
     decide,
 )
-from customer_agent.observability import get_logger, record_guardrail, request_id_var
+from customer_agent.observability import get_logger, record_guardrail
 from customer_agent.observability import step as agent_step  # `step` is a Decision here
 from customer_agent.observability.metrics import AGENT_REPLIES
 
@@ -96,12 +102,12 @@ class ConversationOrchestrator:
     ) -> None:
         self._understand = understand
         self._answers = answers
-        self._orders = orders
-        self._tickets = tickets
-        self._audit = audit
+        self._order_tool = GetOrderStatus(orders=orders, audit_log=audit)
+        self._ticket_tool = CreateTicket(
+            tickets=tickets, audit_log=audit, max_per_day=max_tickets_per_day
+        )
         self._clock = clock
         self._tenant_id = tenant_id
-        self._max_tickets_per_day = max_tickets_per_day
 
     # --- CustomerServiceAgent (stateless; used by the evaluation) -------------------------
 
@@ -249,25 +255,15 @@ class ConversationOrchestrator:
     async def _lookup(
         self, conversation: Conversation, order_id: str, session_id: str
     ) -> Order | None:
-        """Read-only, scoped to the authenticated customer in SQL; every lookup is audited."""
-        customer_id = conversation.customer_id
-        if customer_id is None:  # decide() never routes anonymous users here
-            raise RuntimeError("order lookups require an authenticated customer")
-        with agent_step("tool.get_order_status"):
-            order = await self._orders.get_for_customer(
-                order_id, customer_id=customer_id, tenant_id=self._tenant_id
-            )
-        await self._audit.record(
-            AuditEntry(
-                tool="get_order_status",
-                customer_id=customer_id,
-                session_id=session_id,
-                request_id=request_id_var.get(),
-                arguments={"order_id": order_id},
-                outcome="found" if order else "not_found",
-            )
+        order = await self._order_tool.ainvoke(
+            {"order_id": order_id}, config=self._tool_config(conversation, session_id)
         )
-        return order
+        return cast(Order | None, order)
+
+    def _tool_config(self, conversation: Conversation, session_id: str) -> RunnableConfig:
+        return tool_config(
+            customer_id=conversation.customer_id, tenant_id=self._tenant_id, session_id=session_id
+        )
 
     async def _order_guidance(
         self,
@@ -324,67 +320,23 @@ class ConversationOrchestrator:
         self, conversation: Conversation, step: Decision, session_id: str
     ) -> tuple[AgentResponse, SessionState]:
         state = step.state
-        ticket_id, created = await self._open_ticket(
-            conversation,
-            session_id,
-            intent=step.intent,
-            order_id=state.slots.get("order_id"),
-            request=state.slots.get("request"),
+        arguments = {
+            "intent": step.intent,
+            "order_id": state.slots.get("order_id"),
+            # The confirmed request, not the confirmation itself ("Ja, bitte").
+            "request": state.slots.get("request") or conversation.messages[-1].content,
+        }
+        outcome = cast(
+            TicketOutcome,
+            await self._ticket_tool.ainvoke(
+                arguments, config=self._tool_config(conversation, session_id)
+            ),
         )
         slots = {k: v for k, v in state.slots.items() if k != "request"}
-        done = state.model_copy(update={"slots": {**slots, "ticket_id": ticket_id}})
-        if not created:
-            return ticket_exists_reply(ticket_id, intent=step.intent), done
-        return ticket_created_reply(ticket_id, intent=step.intent), done
-
-    async def _open_ticket(
-        self,
-        conversation: Conversation,
-        session_id: str,
-        *,
-        intent: Intent | None,
-        order_id: str | None,
-        request: str | None,
-    ) -> tuple[str, bool]:
-        """``(ticket number, created)``; at the limit the newest open ticket, not a new one."""
-        customer_id = conversation.customer_id
-        arguments = {"order_id": order_id or "-", "intent": str(intent)}
-
-        async def audit(outcome: str) -> None:
-            await self._audit.record(
-                AuditEntry(
-                    tool="create_ticket",
-                    customer_id=customer_id,
-                    session_id=session_id,
-                    request_id=request_id_var.get(),
-                    arguments=arguments,
-                    outcome=outcome,
-                )
-            )
-
-        if customer_id is not None and self._max_tickets_per_day is not None:
-            recent = await self._tickets.recent(customer_id=customer_id, tenant_id=self._tenant_id)
-            if len(recent) >= self._max_tickets_per_day:
-                # Rate limit on the only state-changing tool (T12): point to the open ticket.
-                await audit(f"rate_limited:{recent[0]}")
-                log.warning("ticket limit reached recent=%d", len(recent))
-                return recent[0], False
-        # The confirmed request, not the confirmation itself ("Ja, bitte").
-        summary = request or conversation.messages[-1].content
-        with agent_step("tool.create_ticket"):
-            ticket_id = await self._tickets.create(
-                NewTicket(
-                    tenant_id=self._tenant_id,
-                    customer_id=customer_id,
-                    session_id=session_id,
-                    intent=intent.value if intent else None,
-                    order_id=order_id,
-                    summary=f"{intent or 'UNKNOWN'}: {summary[:500]}",
-                )
-            )
-        await audit(ticket_id)
-        log.info("ticket=%s intent=%s order_id=%s", ticket_id, intent, order_id)
-        return ticket_id, True
+        done = state.model_copy(update={"slots": {**slots, "ticket_id": outcome.ticket_id}})
+        if not outcome.created:  # the daily limit: the newest open ticket, not a new one
+            return ticket_exists_reply(outcome.ticket_id, intent=step.intent), done
+        return ticket_created_reply(outcome.ticket_id, intent=step.intent), done
 
 
 def recover_state(conversation: Conversation, state: SessionState) -> SessionState:
