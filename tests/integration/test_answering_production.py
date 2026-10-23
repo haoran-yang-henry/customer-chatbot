@@ -4,11 +4,11 @@ Run with ``make test-llm``; needs CA_OPENAI_API_KEY and CA_LLM_API_KEY.
 """
 
 import pytest
+from langchain_core.embeddings import Embeddings
 
 from customer_agent.application.answering import AnswerService
 from customer_agent.application.ingestion import IngestionService
 from customer_agent.application.orchestrator import ConversationOrchestrator, TurnResult
-from customer_agent.application.ports import EmbeddingProvider
 from customer_agent.application.retrieval import RetrievalService
 from customer_agent.application.routing import IntentRouter
 from customer_agent.bootstrap import create_llm_provider
@@ -29,12 +29,14 @@ pytestmark = pytest.mark.llm
 
 @pytest.fixture
 async def agent(
-    repository: PostgresKnowledgeRepository, embeddings: EmbeddingProvider
+    repository: PostgresKnowledgeRepository, embeddings: Embeddings
 ) -> ConversationOrchestrator:
     settings = Settings()
     if settings.llm_api_key is None:
         pytest.skip("CA_LLM_API_KEY is not set")
-    await IngestionService(repository, embeddings).run(load_knowledge_directory(KNOWLEDGE_DIR))
+    await IngestionService(repository, embeddings, embedding_model="test-embeddings").run(
+        load_knowledge_directory(KNOWLEDGE_DIR)
+    )
     llm = create_llm_provider(settings)
     answers = AnswerService(
         RetrievalService(repository, embeddings),

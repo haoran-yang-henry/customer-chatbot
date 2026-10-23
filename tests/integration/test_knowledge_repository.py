@@ -7,9 +7,9 @@ Embedder-agnostic: passes with the hashing embedder (default) and with the real 
 from datetime import date
 
 import pytest
+from langchain_core.embeddings import Embeddings
 
 from customer_agent.application.ingestion import IngestionService
-from customer_agent.application.ports import EmbeddingProvider
 from customer_agent.application.retrieval import RetrievalService
 from customer_agent.domain.retrieval import SearchMode, SearchScope
 from customer_agent.infrastructure.db.knowledge_repository import PostgresKnowledgeRepository
@@ -27,16 +27,18 @@ NEVER_RETRIEVABLE = {
 
 @pytest.fixture
 async def ingested(
-    repository: PostgresKnowledgeRepository, embeddings: EmbeddingProvider
+    repository: PostgresKnowledgeRepository, embeddings: Embeddings
 ) -> RetrievalService:
-    await IngestionService(repository, embeddings).run(load_knowledge_directory(KNOWLEDGE_DIR))
+    await IngestionService(repository, embeddings, embedding_model="test-embeddings").run(
+        load_knowledge_directory(KNOWLEDGE_DIR)
+    )
     return RetrievalService(repository, embeddings)
 
 
 async def test_ingestion_is_idempotent(
-    repository: PostgresKnowledgeRepository, embeddings: EmbeddingProvider
+    repository: PostgresKnowledgeRepository, embeddings: Embeddings
 ) -> None:
-    service = IngestionService(repository, embeddings)
+    service = IngestionService(repository, embeddings, embedding_model="test-embeddings")
     documents = load_knowledge_directory(KNOWLEDGE_DIR)
 
     first = await service.run(documents)

@@ -8,23 +8,24 @@ a held-out check that retrieval quality is not tuned to the evaluation set.
 
 import asyncio
 import shutil
-from collections.abc import Sequence
 from datetime import date
 from pathlib import Path
 
 import httpx2
 import openai
 import pytest
+from langchain_core.embeddings import Embeddings
+from pydantic import SecretStr
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from customer_agent.application.ingestion import IngestionService
-from customer_agent.application.ports import EmbeddingProvider, ProviderUnavailableError
+from customer_agent.application.ports import ProviderUnavailableError
 from customer_agent.application.retrieval import RetrievalService
 from customer_agent.config import Settings
 from customer_agent.domain.retrieval import SearchMode, SearchScope
 from customer_agent.infrastructure.db.knowledge_repository import PostgresKnowledgeRepository
-from customer_agent.infrastructure.embeddings import OpenAIEmbeddingProvider
+from customer_agent.infrastructure.embeddings import ProviderEmbeddings
 from customer_agent.infrastructure.knowledge_files import load_knowledge_directory
 from tests.conftest import KNOWLEDGE_DIR, REFERENCE_DATE, TENANT_ID
 
@@ -33,41 +34,41 @@ pytestmark = pytest.mark.llm
 SCOPE = SearchScope(today=REFERENCE_DATE, tenant_id=TENANT_ID)
 
 
-class CountingEmbeddings:
+class CountingEmbeddings(Embeddings):
     """Wraps the real provider to count API usage; optionally fails on the n-th batch."""
 
-    def __init__(self, inner: EmbeddingProvider, fail_on_batch: int | None = None) -> None:
+    def __init__(self, inner: Embeddings, fail_on_batch: int | None = None) -> None:
         self._inner = inner
         self._fail_on_batch = fail_on_batch
         self.batches = 0
         self.texts = 0
 
-    @property
-    def model_name(self) -> str:
-        return self._inner.model_name
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        raise NotImplementedError("async only")
 
-    @property
-    def dimensions(self) -> int:
-        return self._inner.dimensions
+    def embed_query(self, text: str) -> list[float]:
+        raise NotImplementedError("async only")
 
-    async def embed_documents(self, texts: Sequence[str]) -> list[list[float]]:
+    async def aembed_documents(self, texts: list[str]) -> list[list[float]]:
         self.batches += 1
         if self.batches == self._fail_on_batch:
             raise openai.APIConnectionError(
                 request=httpx2.Request("POST", "https://provider/embeddings")
             )
         self.texts += len(texts)
-        return await self._inner.embed_documents(texts)
+        return await self._inner.aembed_documents(texts)
 
-    async def embed_query(self, text: str) -> list[float]:
-        return await self._inner.embed_query(text)
+    async def aembed_query(self, text: str) -> list[float]:
+        return await self._inner.aembed_query(text)
 
 
 @pytest.fixture
 async def service(
-    repository: PostgresKnowledgeRepository, embeddings: EmbeddingProvider
+    repository: PostgresKnowledgeRepository, embeddings: Embeddings
 ) -> RetrievalService:
-    await IngestionService(repository, embeddings).run(load_knowledge_directory(KNOWLEDGE_DIR))
+    await IngestionService(repository, embeddings, embedding_model="test-embeddings").run(
+        load_knowledge_directory(KNOWLEDGE_DIR)
+    )
     return RetrievalService(repository, embeddings)
 
 
@@ -202,7 +203,7 @@ def knowledge_copy(tmp_path: Path) -> Path:
 
 
 async def test_scheduled_policy_version_switches_on_its_valid_from_date(
-    repository: PostgresKnowledgeRepository, embeddings: EmbeddingProvider, knowledge_copy: Path
+    repository: PostgresKnowledgeRepository, embeddings: Embeddings, knowledge_copy: Path
 ) -> None:
     _set_front_matter(
         knowledge_copy / "policy-returns-v6.md",
@@ -211,7 +212,9 @@ async def test_scheduled_policy_version_switches_on_its_valid_from_date(
         trust_level="official",
     )
     _set_front_matter(knowledge_copy / "policy-returns-v5.md", valid_until="2026-12-31")
-    await IngestionService(repository, embeddings).run(load_knowledge_directory(knowledge_copy))
+    await IngestionService(repository, embeddings, embedding_model="test-embeddings").run(
+        load_knowledge_directory(knowledge_copy)
+    )
     service = RetrievalService(repository, embeddings)
     query = "Wie lange habe ich Zeit für eine Rückgabe?"
 
@@ -227,10 +230,10 @@ async def test_scheduled_policy_version_switches_on_its_valid_from_date(
 
 
 async def test_editing_one_document_re_embeds_only_that_document(
-    repository: PostgresKnowledgeRepository, embeddings: EmbeddingProvider, knowledge_copy: Path
+    repository: PostgresKnowledgeRepository, embeddings: Embeddings, knowledge_copy: Path
 ) -> None:
     counting = CountingEmbeddings(embeddings)
-    service = IngestionService(repository, counting)
+    service = IngestionService(repository, counting, embedding_model="test-embeddings")
     await service.run(load_knowledge_directory(knowledge_copy))
     texts_after_first_run = counting.texts
 
@@ -243,9 +246,9 @@ async def test_editing_one_document_re_embeds_only_that_document(
 
 
 async def test_archiving_removes_the_document_from_the_index(
-    repository: PostgresKnowledgeRepository, embeddings: EmbeddingProvider, knowledge_copy: Path
+    repository: PostgresKnowledgeRepository, embeddings: Embeddings, knowledge_copy: Path
 ) -> None:
-    service = IngestionService(repository, embeddings)
+    service = IngestionService(repository, embeddings, embedding_model="test-embeddings")
     await service.run(load_knowledge_directory(knowledge_copy))
 
     _set_front_matter(knowledge_copy / "faq-invoice.md", status="archived")
@@ -259,27 +262,33 @@ async def test_archiving_removes_the_document_from_the_index(
 
 
 async def test_provider_failure_mid_ingestion_leaves_index_untouched(
-    repository: PostgresKnowledgeRepository, embeddings: EmbeddingProvider
+    repository: PostgresKnowledgeRepository, embeddings: Embeddings
 ) -> None:
     failing = CountingEmbeddings(embeddings, fail_on_batch=5)
 
     with pytest.raises(openai.APIConnectionError):
-        await IngestionService(repository, failing).run(load_knowledge_directory(KNOWLEDGE_DIR))
+        await IngestionService(repository, failing, embedding_model="test-embeddings").run(
+            load_knowledge_directory(KNOWLEDGE_DIR)
+        )
 
     assert await repository.fingerprints() == {}
 
 
 async def test_invalid_api_key_raises_a_provider_error() -> None:
     settings = Settings()
-    client = openai.AsyncOpenAI(
-        api_key="sk-invalid", base_url=settings.openai_base_url, max_retries=0
-    )
-    provider = OpenAIEmbeddingProvider(
-        client, settings.embedding_model, settings.embedding_dimensions
+    provider = ProviderEmbeddings(
+        openai_api_key=SecretStr("sk-invalid"),
+        openai_api_base=settings.openai_base_url,
+        max_retries=0,
+        model=settings.embedding_model,
+        dimensions=settings.embedding_dimensions,
     )
 
-    with pytest.raises(ProviderUnavailableError):
-        await provider.embed_query("Versand")
+    try:
+        with pytest.raises(ProviderUnavailableError):
+            await provider.aembed_query("Versand")
+    finally:
+        await provider.aclose()
 
 
 @pytest.mark.parametrize(

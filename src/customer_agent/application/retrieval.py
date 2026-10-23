@@ -4,7 +4,9 @@ import asyncio
 from collections import defaultdict
 from collections.abc import Sequence
 
-from customer_agent.application.ports import EmbeddingProvider, KnowledgeSearch
+from langchain_core.embeddings import Embeddings
+
+from customer_agent.application.ports import KnowledgeSearch
 from customer_agent.domain.retrieval import ChunkHit, RetrievedDocument, SearchMode, SearchScope
 from customer_agent.observability import step
 
@@ -78,7 +80,7 @@ class RetrievalService:
     def __init__(
         self,
         search: KnowledgeSearch,
-        embeddings: EmbeddingProvider,
+        embeddings: Embeddings,
         *,
         fulltext_weight: float = 1.0,
     ) -> None:
@@ -87,7 +89,7 @@ class RetrievalService:
         self._fulltext_weight = fulltext_weight
 
     async def _semantic(self, query: str, scope: SearchScope) -> list[ChunkHit]:
-        vector = await self._embeddings.embed_query(query)
+        vector = await self._embeddings.aembed_query(query)
         return await self._search.search_vector(vector, scope, CANDIDATES_PER_LIST)
 
     async def retrieve(

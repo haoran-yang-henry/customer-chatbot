@@ -14,17 +14,19 @@ chunking or retrieval needs a new recording and must never fall back to a degrad
 import gzip
 import hashlib
 import json
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import Sequence
 from functools import cache
 from pathlib import Path
 from typing import Any
 
-from customer_agent.application.ports import ChatMessage, EmbeddingProvider, LLMProvider, LLMResult
-from customer_agent.observability import get_logger, record_tokens
+from langchain_core.embeddings import Embeddings
+
+from customer_agent.application.ports import ChatMessage, LLMResult
+from customer_agent.observability import get_logger
 
 log = get_logger("cassette")
 
-_RERECORD = "the request changed (prompt, evidence or chunking); run `make eval-smoke-record`"
+RERECORD = "the request changed (prompt, evidence or chunking); run `make eval-smoke-record`"
 
 
 class ReplayMissError(RuntimeError):
@@ -50,7 +52,7 @@ class Cassette:
         if path.exists():
             self._load()
         elif not record:
-            raise FileNotFoundError(f"cassette {path} not found; {_RERECORD}")
+            raise FileNotFoundError(f"cassette {path} not found; {RERECORD}")
 
     def _load(self) -> None:
         with gzip.open(self.path, "rt", encoding="utf-8") as file:
@@ -108,70 +110,22 @@ def open_cassette(path: Path, record: bool) -> Cassette:
     return Cassette(path, record=record)
 
 
-class CassetteLLM:
-    """``LLMProvider``: answers from the cassette; in record mode, asks ``inner`` for misses."""
-
-    def __init__(self, cassette: Cassette, inner: LLMProvider | None, model: str) -> None:
-        self._cassette = cassette
-        self._inner = inner
-        self._model = model
-
-    @property
-    def model_name(self) -> str:
-        return self._model
-
-    async def aclose(self) -> None:
-        self._cassette.save()
-        close = getattr(self._inner, "aclose", None)
-        if close is not None:
-            await close()
-
-    async def complete(
-        self,
-        messages: Sequence[ChatMessage],
-        *,
-        max_tokens: int,
-        temperature: float,
-        session_id: str | None = None,
-    ) -> LLMResult:
-        key = chat_key(messages, max_tokens, temperature)
-        recorded = self._cassette.chat(key)
-        if recorded is not None:
-            record_tokens(self._model, recorded.prompt_tokens, recorded.completion_tokens)
-            return recorded
-        if not self._cassette.record or self._inner is None:
-            raise ReplayMissError(f"no recorded chat response {key[:12]}: {_RERECORD}")
-        result = await self._inner.complete(
-            messages, max_tokens=max_tokens, temperature=temperature, session_id=session_id
-        )
-        if result.text.strip():  # an empty generation is a failure, not a recording
-            self._cassette.put_chat(key, result)
-        return result
-
-    async def stream(
-        self,
-        messages: Sequence[ChatMessage],
-        *,
-        max_tokens: int,
-        temperature: float,
-        session_id: str | None = None,
-    ) -> AsyncIterator[str]:
-        result = await self.complete(
-            messages, max_tokens=max_tokens, temperature=temperature, session_id=session_id
-        )
-        yield result.text
-
-
-class CassetteEmbeddings:
-    """``EmbeddingProvider``: one recording per text, independent of how texts are batched."""
+class CassetteEmbeddings(Embeddings):
+    """``Embeddings``: one recording per text, independent of how texts are batched."""
 
     def __init__(
-        self, cassette: Cassette, inner: EmbeddingProvider | None, model: str, dimensions: int
+        self, cassette: Cassette, inner: Embeddings | None, model: str, dimensions: int
     ) -> None:
         self._cassette = cassette
         self._inner = inner
         self._model = model
         self._dimensions = dimensions
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        raise NotImplementedError("Use aembed_documents")
+
+    def embed_query(self, text: str) -> list[float]:
+        raise NotImplementedError("Use aembed_query")
 
     @property
     def model_name(self) -> str:
@@ -187,17 +141,25 @@ class CassetteEmbeddings:
         if close is not None:
             await close()
 
-    async def embed_documents(self, texts: Sequence[str]) -> list[list[float]]:
+    async def aembed_documents(self, texts: Sequence[str]) -> list[list[float]]:
         keys = [embedding_key(text, self._dimensions) for text in texts]
         missing = [i for i, key in enumerate(keys) if self._cassette.embedding(key) is None]
         if missing:
             if not self._cassette.record or self._inner is None:
-                raise ReplayMissError(f"{len(missing)} embedding(s) not recorded: {_RERECORD}")
-            vectors = await self._inner.embed_documents([texts[i] for i in missing])
+                raise ReplayMissError(f"{len(missing)} embedding(s) not recorded: {RERECORD}")
+            vectors = await self._inner.aembed_documents([texts[i] for i in missing])
             for i, vector in zip(missing, vectors, strict=True):
                 self._cassette.put_embedding(keys[i], vector)
         recorded = [self._cassette.embedding(key) for key in keys]
         return [v for v in recorded if v is not None]  # all present after recording misses
 
-    async def embed_query(self, text: str) -> list[float]:
-        return (await self.embed_documents([text]))[0]
+    async def aembed_query(self, text: str) -> list[float]:
+        key = embedding_key(text, self._dimensions)
+        recorded = self._cassette.embedding(key)
+        if recorded is not None:
+            return recorded
+        if not self._cassette.record or self._inner is None:
+            raise ReplayMissError(f"1 embedding(s) not recorded: {RERECORD}")
+        vector = await self._inner.aembed_query(text)
+        self._cassette.put_embedding(key, vector)
+        return vector

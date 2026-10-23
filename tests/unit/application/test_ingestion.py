@@ -2,7 +2,7 @@ from collections.abc import Sequence
 
 from customer_agent.application.ingestion import IngestionService, fingerprint
 from customer_agent.application.ports import IndexedDocument
-from customer_agent.infrastructure.embeddings import HashingEmbeddingProvider
+from customer_agent.infrastructure.embeddings import HashingEmbeddings
 from tests.factories import make_document
 
 
@@ -24,14 +24,14 @@ class InMemoryIndex:
             self.documents[doc.meta.id] = doc
 
 
-class CountingEmbeddings(HashingEmbeddingProvider):
+class CountingEmbeddings(HashingEmbeddings):
     def __init__(self, model_name: str = "fake-v1") -> None:
         super().__init__(dimensions=8, model_name=model_name)
         self.texts_embedded = 0
 
-    async def embed_documents(self, texts: Sequence[str]) -> list[list[float]]:
+    async def aembed_documents(self, texts: Sequence[str]) -> list[list[float]]:
         self.texts_embedded += len(texts)
-        return await super().embed_documents(texts)
+        return await super().aembed_documents(texts)
 
 
 DOCS = [
@@ -44,7 +44,9 @@ DOCS = [
 async def test_first_run_indexes_only_approved_documents() -> None:
     index = InMemoryIndex()
 
-    report = await IngestionService(index, CountingEmbeddings()).run(DOCS)
+    report = await IngestionService(index, CountingEmbeddings(), embedding_model="fake-v1").run(
+        DOCS
+    )
 
     assert report.added == ["faq-a", "faq-b"]
     assert report.skipped_not_approved == ["faq-draft"]
@@ -53,7 +55,7 @@ async def test_first_run_indexes_only_approved_documents() -> None:
 
 async def test_second_run_is_a_no_op() -> None:
     index, embeddings = InMemoryIndex(), CountingEmbeddings()
-    service = IngestionService(index, embeddings)
+    service = IngestionService(index, embeddings, embedding_model=embeddings.model_name)
     await service.run(DOCS)
     embedded_before = embeddings.texts_embedded
 
@@ -66,7 +68,7 @@ async def test_second_run_is_a_no_op() -> None:
 
 async def test_changed_body_is_reindexed_and_missing_document_removed() -> None:
     index = InMemoryIndex()
-    service = IngestionService(index, CountingEmbeddings())
+    service = IngestionService(index, CountingEmbeddings(), embedding_model="fake-v1")
     await service.run(DOCS)
 
     report = await service.run([make_document(id="faq-a", body="Neuer Inhalt.")])
@@ -78,9 +80,13 @@ async def test_changed_body_is_reindexed_and_missing_document_removed() -> None:
 
 async def test_new_embedding_model_reindexes_everything() -> None:
     index = InMemoryIndex()
-    await IngestionService(index, CountingEmbeddings("model-1")).run(DOCS)
+    await IngestionService(index, CountingEmbeddings("model-1"), embedding_model="model-1").run(
+        DOCS
+    )
 
-    report = await IngestionService(index, CountingEmbeddings("model-2")).run(DOCS)
+    report = await IngestionService(
+        index, CountingEmbeddings("model-2"), embedding_model="model-2"
+    ).run(DOCS)
 
     assert report.updated == ["faq-a", "faq-b"]
 

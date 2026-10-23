@@ -3,25 +3,25 @@
 import json
 
 import httpx2
-from openai import AsyncOpenAI
+from pydantic import SecretStr
 
 from customer_agent.application.ports import ChatMessage
-from customer_agent.infrastructure.embeddings import OpenAIEmbeddingProvider
-from customer_agent.infrastructure.llm import OpenAICompatibleLLM
+from customer_agent.infrastructure.embeddings import ProviderEmbeddings
+from customer_agent.infrastructure.models import ChatModelLLM, ProviderChatModel
 from customer_agent.infrastructure.prompts import load_prompt
 from tests.load.mock_llm import app
 
 
-def client() -> AsyncOpenAI:
-    return AsyncOpenAI(
-        api_key="mock",
-        base_url="http://mock/v1",
-        http_client=httpx2.AsyncClient(transport=httpx2.ASGITransport(app=app)),
-    )
-
-
 async def test_router_prompt_gets_a_routing_and_answers_cite_the_evidence() -> None:
-    llm = OpenAICompatibleLLM(client(), "mock-model")
+    llm = ChatModelLLM(
+        ProviderChatModel(
+            model_name="mock-model",
+            openai_api_key=SecretStr("mock"),
+            openai_api_base="http://mock/v1",
+            http_async_client=httpx2.AsyncClient(transport=httpx2.ASGITransport(app=app)),
+            stream_usage=True,
+        )
+    )
     router = load_prompt("router", 5)
 
     routing = await llm.complete(
@@ -51,8 +51,15 @@ async def test_router_prompt_gets_a_routing_and_answers_cite_the_evidence() -> N
 
 
 async def test_embeddings_have_the_configured_dimensions() -> None:
-    embeddings = OpenAIEmbeddingProvider(client(), "mock-embed", dimensions=1536)
+    embeddings = ProviderEmbeddings(
+        model="mock-embed",
+        dimensions=1536,
+        openai_api_key=SecretStr("mock"),
+        openai_api_base="http://mock/v1",
+        http_async_client=httpx2.AsyncClient(transport=httpx2.ASGITransport(app=app)),
+    )
 
-    vectors = await embeddings.embed_documents(["Rücksendung", "Versand"])
+    vectors = await embeddings.aembed_documents(["Rücksendung", "Versand"])
+    await embeddings.aclose()
 
     assert [len(v) for v in vectors] == [1536, 1536] and vectors[0] != vectors[1]

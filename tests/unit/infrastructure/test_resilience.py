@@ -1,18 +1,19 @@
 """Circuit breaker and provider failure handling (Day 7, NFR-11)."""
 
+import asyncio
 import time
 from collections.abc import AsyncGenerator
 from typing import cast
 
 import httpx2
 import pytest
-from openai import AsyncOpenAI
 from prometheus_client import REGISTRY
+from pydantic import SecretStr
 
 from customer_agent.application.ports import ChatMessage, ProviderUnavailableError
-from customer_agent.infrastructure.llm import OpenAICompatibleLLM
-from customer_agent.infrastructure.resilience import BreakerLLM, CircuitBreaker, CircuitState
-from tests.fakes import FakeLLM
+from customer_agent.infrastructure.models import BreakerChatModel, ChatModelLLM, ProviderChatModel
+from customer_agent.infrastructure.resilience import CircuitBreaker, CircuitState
+from tests.fakes import FakeChatModel
 
 MESSAGES = [ChatMessage(role="user", content="Hallo")]
 
@@ -93,8 +94,8 @@ def test_an_abandoned_trial_does_not_block_the_breaker_forever() -> None:
 
 
 async def test_open_breaker_skips_the_provider() -> None:
-    inner = FakeLLM(fail=True)
-    llm = BreakerLLM(inner, breaker(Clock(), "skip-llm"))
+    inner = FakeChatModel(fail=True)
+    llm = ChatModelLLM(BreakerChatModel(inner=inner, breaker=breaker(Clock(), "skip-llm")))
     for _ in range(3):
         with pytest.raises(ProviderUnavailableError):
             await llm.complete(MESSAGES, max_tokens=5, temperature=0)
@@ -110,11 +111,16 @@ async def test_stream_closed_early_frees_a_half_open_trial() -> None:
     for _ in range(3):
         cb.record_failure()
     clock.now += 30
-    llm = BreakerLLM(FakeLLM("Eine lange Antwort", piece=3), cb)
+    llm = ChatModelLLM(
+        BreakerChatModel(inner=FakeChatModel(reply="Eine lange Antwort", piece=3), breaker=cb)
+    )
 
     stream = cast(AsyncGenerator[str], llm.stream(MESSAGES, max_tokens=5, temperature=0))
     await anext(stream)
     await stream.aclose()
+    # LangChain's astream does not close the stream it reads; the event loop's async-generator
+    # finalizer does, on its next turn.
+    await asyncio.sleep(0)
 
     assert cb.state is CircuitState.HALF_OPEN
     cb.before_call()
@@ -123,15 +129,17 @@ async def test_stream_closed_early_frees_a_half_open_trial() -> None:
 # --- the real SDK: timeouts and server errors become ProviderUnavailableError ----------------
 
 
-def sdk_llm(handler: httpx2.MockTransport, timeout: float = 0.2) -> OpenAICompatibleLLM:
-    client = AsyncOpenAI(
-        api_key="test",
-        base_url="https://llm.test/v1",
-        http_client=httpx2.AsyncClient(transport=handler),
-        timeout=timeout,
-        max_retries=1,
+def sdk_llm(handler: httpx2.MockTransport, timeout: float = 0.2) -> ChatModelLLM:
+    return ChatModelLLM(
+        ProviderChatModel(
+            model_name="model-z",
+            openai_api_key=SecretStr("test"),
+            openai_api_base="https://llm.test/v1",
+            http_async_client=httpx2.AsyncClient(transport=handler),
+            request_timeout=timeout,
+            max_retries=1,
+        )
     )
-    return OpenAICompatibleLLM(client, "model-z")
 
 
 async def test_server_errors_are_retried_once_then_reported() -> None:

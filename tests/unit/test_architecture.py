@@ -8,11 +8,23 @@ import pytest
 PACKAGE = Path(__file__).resolve().parents[2] / "src" / "customer_agent"
 
 FORBIDDEN = {
-    "domain": ("customer_agent.application", "customer_agent.infrastructure", "customer_agent.api"),
+    "domain": (
+        "customer_agent.application",
+        "customer_agent.infrastructure",
+        "customer_agent.api",
+        "langchain",
+        "langgraph",
+        "langfuse",
+    ),
     "application": (
         "customer_agent.infrastructure",
         "customer_agent.api",
         "customer_agent.bootstrap",
+        "langchain_openai",
+        "langfuse",
+        "openai",
+        "psycopg",
+        "sqlalchemy",
     ),
 }
 

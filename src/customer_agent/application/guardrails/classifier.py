@@ -16,7 +16,7 @@ import re
 from pydantic import BaseModel, ValidationError, field_validator
 
 from customer_agent.application.answering import format_history
-from customer_agent.application.ports import ChatMessage, LLMProvider, ProviderUnavailableError
+from customer_agent.application.ports import LLMProvider, ProviderUnavailableError
 from customer_agent.application.prompts import PromptTemplate
 from customer_agent.domain.conversation import Conversation
 from customer_agent.domain.guardrails import GuardrailAction, GuardrailDecision
@@ -73,16 +73,13 @@ class PromptAttackClassifier:
             return decision
 
     async def _classify(self, conversation: Conversation, *, session_id: str) -> GuardrailDecision:
-        user = self._prompt.render_user(
+        messages = self._prompt.render_messages(
             history=format_history(conversation),
             message=fence(conversation.messages[-1].content),
         )
         try:
             reply = await self._llm.complete(
-                [
-                    ChatMessage(role="system", content=self._prompt.system),
-                    ChatMessage(role="user", content=user),
-                ],
+                messages,
                 max_tokens=CLASSIFIER_MAX_TOKENS,
                 temperature=0.0,
                 session_id=session_id,

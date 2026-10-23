@@ -13,7 +13,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
 
-from customer_agent.application.ports import ChatMessage, LLMProvider
+from customer_agent.application.ports import LLMProvider
 from customer_agent.application.prompts import PromptTemplate
 from customer_agent.domain.knowledge import KnowledgeDocument
 from customer_agent.evaluation.scoring import CaseResult
@@ -54,12 +54,7 @@ class GroundednessJudge:
         cited = [self._documents[s] for s in sources if s in self._documents]
         text = "\n\n".join(f'<document id="{d.meta.id}">\n{d.body}\n</document>' for d in cited)
         result = await self._llm.complete(
-            [
-                ChatMessage(role="system", content=self._prompt.system),
-                ChatMessage(
-                    role="user", content=self._prompt.render_user(sources=text, answer=answer)
-                ),
-            ],
+            self._prompt.render_messages(sources=text, answer=answer),
             max_tokens=600,
             temperature=0.0,
             session_id="judge-" + hashlib.sha256(answer.encode()).hexdigest()[:24],

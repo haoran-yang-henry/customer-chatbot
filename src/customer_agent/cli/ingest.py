@@ -33,7 +33,11 @@ async def _run() -> IngestionReport:
     embeddings = None
     try:
         embeddings = create_embedding_provider(settings)
-        service = IngestionService(create_knowledge_repository(engine), embeddings)
+        service = IngestionService(
+            create_knowledge_repository(engine),
+            embeddings,
+            embedding_model=settings.embedding_model,
+        )
         return await service.run(documents)
     finally:
         await aclose_all(embeddings)

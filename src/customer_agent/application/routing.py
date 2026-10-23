@@ -8,7 +8,7 @@ from pydantic import BaseModel, ValidationError, field_validator
 
 from customer_agent.application.answering import format_history, search_query
 from customer_agent.application.guardrails import check_generated_text
-from customer_agent.application.ports import ChatMessage, LLMProvider
+from customer_agent.application.ports import LLMProvider
 from customer_agent.application.prompts import PromptTemplate
 from customer_agent.domain.conversation import Conversation
 from customer_agent.domain.intents import Intent, IntentGroup
@@ -180,17 +180,11 @@ class IntentRouter:
         result = route_by_rules(conversation, state)
         if result is None:
             reply = await self._llm.complete(
-                [
-                    ChatMessage(role="system", content=self._prompt.system),
-                    ChatMessage(
-                        role="user",
-                        content=self._prompt.render_user(
-                            state=describe_state(state),
-                            history=format_history(conversation),
-                            message=conversation.messages[-1].content,
-                        ),
-                    ),
-                ],
+                self._prompt.render_messages(
+                    state=describe_state(state),
+                    history=format_history(conversation),
+                    message=conversation.messages[-1].content,
+                ),
                 max_tokens=ROUTER_MAX_TOKENS,
                 temperature=0.0,
                 session_id=session_id,

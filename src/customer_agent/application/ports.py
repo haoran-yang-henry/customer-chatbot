@@ -42,18 +42,6 @@ class CustomerServiceAgent(Protocol):
     async def respond(self, conversation: Conversation) -> AgentResponse: ...
 
 
-class EmbeddingProvider(Protocol):
-    @property
-    def model_name(self) -> str: ...
-
-    @property
-    def dimensions(self) -> int: ...
-
-    async def embed_documents(self, texts: Sequence[str]) -> list[list[float]]: ...
-
-    async def embed_query(self, text: str) -> list[float]: ...
-
-
 class IndexedDocument(BaseModel):
     """A document ready to be written to the index: metadata, chunks and one embedding per chunk."""
 

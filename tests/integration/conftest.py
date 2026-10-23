@@ -9,16 +9,16 @@ from collections.abc import AsyncIterator, Iterator
 import pytest
 from alembic import command
 from alembic.config import Config
+from langchain_core.embeddings import Embeddings
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from testcontainers.community.postgres import PostgresContainer
 
-from customer_agent.application.ports import EmbeddingProvider
 from customer_agent.bootstrap import create_embedding_provider, create_knowledge_repository
 from customer_agent.config import Settings
 from customer_agent.infrastructure.db.knowledge_repository import PostgresKnowledgeRepository
 from customer_agent.infrastructure.db.models import EMBEDDING_DIMENSIONS
-from customer_agent.infrastructure.embeddings import HashingEmbeddingProvider
+from customer_agent.infrastructure.embeddings import HashingEmbeddings
 from tests.conftest import PROJECT_ROOT
 
 POSTGRES_IMAGE = "pgvector/pgvector:pg16"  # same image as docker-compose.yml
@@ -54,8 +54,8 @@ def repository(engine: AsyncEngine) -> PostgresKnowledgeRepository:
 
 
 @pytest.fixture
-def embeddings(request: pytest.FixtureRequest) -> EmbeddingProvider:
+def embeddings(request: pytest.FixtureRequest) -> Embeddings:
     """Function-scoped: the OpenAI client's connection pool is bound to the test's event loop."""
     if request.config.getoption("--embeddings") == "openai":
         return create_embedding_provider(Settings())
-    return HashingEmbeddingProvider(dimensions=EMBEDDING_DIMENSIONS)
+    return HashingEmbeddings(dimensions=EMBEDDING_DIMENSIONS)

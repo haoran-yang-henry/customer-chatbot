@@ -2,7 +2,13 @@
 
 from collections.abc import AsyncIterator, Sequence
 from datetime import date
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
+from langchain_core.callbacks import AsyncCallbackManagerForLLMRun, CallbackManagerForLLMRun
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, UsageMetadata
+from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
+from pydantic import Field
 
 from customer_agent.application.ports import (
     ChatMessage,
@@ -64,6 +70,67 @@ class FakeRetriever:
     ) -> list[RetrievedDocument]:
         self.queries.append((query, scope))
         return self.documents[:top_k]
+
+
+class FakeChatModel(BaseChatModel):
+    """Chat-model double: a scripted reply, streamed in small pieces; records every call's
+    messages and keyword arguments (``max_tokens``, ``temperature``, ``extra_headers``)."""
+
+    reply: str = ""
+    fail: bool = False
+    piece: int = 7
+    usage: tuple[int, int] | None = None
+    calls: list[tuple[list[BaseMessage], dict[str, Any]]] = Field(default_factory=list)
+
+    @property
+    def _llm_type(self) -> str:
+        return "fake-chat"
+
+    def _usage(self) -> UsageMetadata | None:
+        if self.usage is None:
+            return None
+        prompt, completion = self.usage
+        return UsageMetadata(
+            input_tokens=prompt, output_tokens=completion, total_tokens=prompt + completion
+        )
+
+    def _record(self, messages: list[BaseMessage], kwargs: dict[str, Any]) -> None:
+        self.calls.append((list(messages), kwargs))
+        if self.fail:
+            raise ProviderUnavailableError("fake outage")
+
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        self._record(messages, kwargs)
+        message = AIMessage(content=self.reply, usage_metadata=self._usage())
+        return ChatResult(generations=[ChatGeneration(message=message)])
+
+    async def _agenerate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: AsyncCallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        return self._generate(messages, stop, **kwargs)
+
+    async def _astream(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: AsyncCallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[ChatGenerationChunk]:
+        self._record(messages, kwargs)
+        for i in range(0, len(self.reply), self.piece):
+            yield ChatGenerationChunk(
+                message=AIMessageChunk(content=self.reply[i : i + self.piece])
+            )
 
 
 class FakeLLM:

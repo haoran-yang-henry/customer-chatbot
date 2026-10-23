@@ -14,7 +14,7 @@ from customer_agent.application.retrieval import (
 )
 from customer_agent.domain.knowledge import SourceType, TrustLevel
 from customer_agent.domain.retrieval import ChunkHit, SearchMode, SearchScope
-from customer_agent.infrastructure.embeddings import HashingEmbeddingProvider
+from customer_agent.infrastructure.embeddings import HashingEmbeddings
 
 SCOPE = SearchScope(today=date(2026, 10, 5), tenant_id="nordelektro")
 
@@ -125,7 +125,7 @@ class RecordingSearch:
 async def test_service_uses_the_lists_of_the_selected_mode(
     mode: SearchMode, expected_documents: set[str]
 ) -> None:
-    service = RetrievalService(RecordingSearch(), HashingEmbeddingProvider(dimensions=8))
+    service = RetrievalService(RecordingSearch(), HashingEmbeddings(dimensions=8))
 
     documents = await service.retrieve("Versand", SCOPE, mode=mode)
 
@@ -134,7 +134,7 @@ async def test_service_uses_the_lists_of_the_selected_mode(
 
 async def test_lexical_query_includes_umlaut_variant() -> None:
     search = RecordingSearch()
-    service = RetrievalService(search, HashingEmbeddingProvider(dimensions=8))
+    service = RetrievalService(search, HashingEmbeddings(dimensions=8))
 
     await service.retrieve("zurueck", SCOPE, mode=SearchMode.FULLTEXT)
 
@@ -143,7 +143,7 @@ async def test_lexical_query_includes_umlaut_variant() -> None:
 
 async def test_blank_query_returns_nothing_without_searching() -> None:
     search = RecordingSearch()
-    service = RetrievalService(search, HashingEmbeddingProvider(dimensions=8))
+    service = RetrievalService(search, HashingEmbeddings(dimensions=8))
 
     assert await service.retrieve("   ", SCOPE) == []
     assert search.fulltext_queries == [] and search.vector_calls == 0
@@ -151,15 +151,15 @@ async def test_blank_query_returns_nothing_without_searching() -> None:
 
 async def test_long_query_is_truncated() -> None:
     search = RecordingSearch()
-    service = RetrievalService(search, HashingEmbeddingProvider(dimensions=8))
+    service = RetrievalService(search, HashingEmbeddings(dimensions=8))
 
     await service.retrieve("Versand " * 1000, SCOPE, mode=SearchMode.FULLTEXT)
 
     assert len(search.fulltext_queries[0]) <= MAX_QUERY_CHARS
 
 
-class DownEmbeddings(HashingEmbeddingProvider):
-    async def embed_query(self, text: str) -> list[float]:
+class DownEmbeddings(HashingEmbeddings):
+    async def aembed_query(self, text: str) -> list[float]:
         raise ProviderUnavailableError("embedding outage")
 
 

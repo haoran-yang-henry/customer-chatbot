@@ -151,7 +151,7 @@ class AnswerService:
             return fallback(["low_similarity"])
 
         question = conversation.messages[-1].content
-        user = self._prompt.render_user(
+        messages = self._prompt.render_messages(
             evidence=format_evidence(documents),
             history=format_history(conversation),
             question=question,
@@ -159,10 +159,7 @@ class AnswerService:
         return _Prepared(
             documents=documents,
             evidence=answer_evidence(documents, conversation),
-            messages=[
-                ChatMessage(role="system", content=self._prompt.system),
-                ChatMessage(role="user", content=user),
-            ],
+            messages=messages,
             session_id=session or stateless_session_id(conversation),
         )
 

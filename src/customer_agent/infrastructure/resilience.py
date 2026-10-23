@@ -8,16 +8,12 @@ by all roles that use it (router, classifier, answer).
 """
 
 import time
-from collections.abc import AsyncIterator, Callable, Sequence
+from collections.abc import Callable
 from enum import StrEnum
 
-from customer_agent.application.ports import (
-    ChatMessage,
-    EmbeddingProvider,
-    LLMProvider,
-    LLMResult,
-    ProviderUnavailableError,
-)
+from langchain_core.embeddings import Embeddings
+
+from customer_agent.application.ports import ProviderUnavailableError
 from customer_agent.observability import get_logger
 from customer_agent.observability.metrics import CIRCUIT_OPEN, PROVIDER_FAILURES
 
@@ -89,94 +85,28 @@ class CircuitBreaker:
             )
 
 
-class BreakerLLM:
-    """``LLMProvider`` decorator: every call passes the breaker of its endpoint."""
+class BreakerEmbeddings(Embeddings):
+    """``Embeddings`` decorator with its own breaker (a different endpoint)."""
 
-    def __init__(self, inner: LLMProvider, breaker: CircuitBreaker) -> None:
+    def __init__(self, inner: Embeddings, breaker: CircuitBreaker) -> None:
         self._inner = inner
         self._breaker = breaker
 
-    @property
-    def model_name(self) -> str:
-        return self._inner.model_name
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        raise NotImplementedError("Use aembed_documents")
+
+    def embed_query(self, text: str) -> list[float]:
+        raise NotImplementedError("Use aembed_query")
 
     async def aclose(self) -> None:
         close = getattr(self._inner, "aclose", None)
         if close is not None:
             await close()
 
-    async def complete(
-        self,
-        messages: Sequence[ChatMessage],
-        *,
-        max_tokens: int,
-        temperature: float,
-        session_id: str | None = None,
-    ) -> LLMResult:
+    async def aembed_documents(self, texts: list[str]) -> list[list[float]]:
         self._breaker.before_call()
         try:
-            result = await self._inner.complete(
-                messages, max_tokens=max_tokens, temperature=temperature, session_id=session_id
-            )
-        except ProviderUnavailableError:
-            self._breaker.record_failure()
-            raise
-        except BaseException:
-            self._breaker.abandon()
-            raise
-        self._breaker.record_success()
-        return result
-
-    async def stream(
-        self,
-        messages: Sequence[ChatMessage],
-        *,
-        max_tokens: int,
-        temperature: float,
-        session_id: str | None = None,
-    ) -> AsyncIterator[str]:
-        self._breaker.before_call()
-        finished = False
-        try:
-            async for delta in self._inner.stream(
-                messages, max_tokens=max_tokens, temperature=temperature, session_id=session_id
-            ):
-                yield delta
-            finished = True
-        except ProviderUnavailableError:
-            self._breaker.record_failure()
-            raise
-        finally:
-            if finished:
-                self._breaker.record_success()
-            else:
-                self._breaker.abandon()  # no-op after record_failure
-
-
-class BreakerEmbeddings:
-    """``EmbeddingProvider`` decorator with its own breaker (a different endpoint)."""
-
-    def __init__(self, inner: EmbeddingProvider, breaker: CircuitBreaker) -> None:
-        self._inner = inner
-        self._breaker = breaker
-
-    @property
-    def model_name(self) -> str:
-        return self._inner.model_name
-
-    @property
-    def dimensions(self) -> int:
-        return self._inner.dimensions
-
-    async def aclose(self) -> None:
-        close = getattr(self._inner, "aclose", None)
-        if close is not None:
-            await close()
-
-    async def embed_documents(self, texts: Sequence[str]) -> list[list[float]]:
-        self._breaker.before_call()
-        try:
-            vectors = await self._inner.embed_documents(texts)
+            vectors = await self._inner.aembed_documents(texts)
         except ProviderUnavailableError:
             self._breaker.record_failure()
             raise
@@ -186,5 +116,15 @@ class BreakerEmbeddings:
         self._breaker.record_success()
         return vectors
 
-    async def embed_query(self, text: str) -> list[float]:
-        return (await self.embed_documents([text]))[0]
+    async def aembed_query(self, text: str) -> list[float]:
+        self._breaker.before_call()
+        try:
+            vector = await self._inner.aembed_query(text)
+        except ProviderUnavailableError:
+            self._breaker.record_failure()
+            raise
+        except BaseException:
+            self._breaker.abandon()
+            raise
+        self._breaker.record_success()
+        return vector

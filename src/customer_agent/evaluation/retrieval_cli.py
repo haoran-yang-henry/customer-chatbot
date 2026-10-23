@@ -59,7 +59,7 @@ async def _run(args: argparse.Namespace) -> list[RetrievalReport]:
         )
         return [
             await run_retrieval_evaluation(
-                cases, service, scope, mode=m, embedding_model=embeddings.model_name, k=args.k
+                cases, service, scope, mode=m, embedding_model=settings.embedding_model, k=args.k
             )
             for m in modes
         ]
