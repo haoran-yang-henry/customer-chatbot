@@ -25,10 +25,12 @@ from customer_agent.application.ports import (
     TokenVerifier,
 )
 from customer_agent.application.retrieval import HybridRetriever
+from customer_agent.application.turn_graph import CHECKPOINT_TYPES
 from customer_agent.application.understanding import UnderstandAgent
 from customer_agent.config import Settings
 from customer_agent.infrastructure.auth import JwtVerifier, jwks_resolver
 from customer_agent.infrastructure.cassette import CassetteEmbeddings, open_cassette
+from customer_agent.infrastructure.checkpointer import PostgresCheckpointer
 from customer_agent.infrastructure.clock import SystemClock
 from customer_agent.infrastructure.db.knowledge_repository import PostgresKnowledgeRepository
 from customer_agent.infrastructure.db.models import EMBEDDING_DIMENSIONS
@@ -233,6 +235,7 @@ class Container:
     """Long-lived objects of one process; ``aclose`` releases connections."""
 
     engine: AsyncEngine
+    checkpointer: PostgresCheckpointer
     agent: ConversationOrchestrator
     chat: ChatService
     llms: dict[str, BaseChatModel]
@@ -260,10 +263,15 @@ class Container:
             checks["database"] = "unavailable"
         return checks
 
+    async def start(self) -> None:
+        """Before serving sessions: connect the checkpointer, create its tables if missing."""
+        await self.checkpointer.start()
+
     async def aclose(self) -> None:
         """Graceful shutdown: let in-flight turns finish, then release connections."""
         await self.chat.drain()
         await aclose_all(*self.llms.values(), self.embeddings)
+        await self.checkpointer.aclose()
         await self.engine.dispose()
 
 
@@ -307,6 +315,7 @@ def build_container(
     db = async_sessionmaker(engine, expire_on_commit=False)
     tickets: TicketService = PostgresTicketService(db) if side_effects else InMemoryTicketService()
     audit: AuditLog = PostgresAuditLog(db) if side_effects else InMemoryAuditLog()
+    checkpointer = PostgresCheckpointer(settings.database_url, CHECKPOINT_TYPES)
     agent = ConversationOrchestrator(
         UnderstandAgent(llms["router"], router_prompt, classifier=classifier),
         answers,
@@ -315,6 +324,7 @@ def build_container(
         audit=audit,
         clock=clock,
         tenant_id=settings.tenant_id,
+        checkpointer=checkpointer.saver,
         max_tickets_per_day=settings.max_tickets_per_day if side_effects else None,
     )
     sessions = PostgresSessionStore(db)
@@ -323,6 +333,7 @@ def build_container(
         prompts["guard"] = classifier.prompt_ref
     return Container(
         engine=engine,
+        checkpointer=checkpointer,
         agent=agent,
         chat=ChatService(agent, sessions, tenant_id=settings.tenant_id),
         llms=llms,

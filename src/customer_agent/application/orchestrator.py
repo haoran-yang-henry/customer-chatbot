@@ -1,15 +1,21 @@
 """Conversation orchestrator: the ``CustomerServiceAgent`` behind the API and the evaluation.
 
 One turn in two stages (rebuild plan §4.2): the understand agent checks the message and routes
-it (input guardrail, rule routing, intent router ‖ attack classifier); a blocked message ends
-the turn there. Otherwise the turn graph decides and acts on the masked message (``decide``,
-order guidance, tickets, the grounded answer) and streams the answer's tokens.
+it (input guardrail, rule routing, intent router ‖ attack classifier); the turn graph then
+decides and acts on the masked message (``decide``, order guidance, tickets, the grounded
+answer) and streams the answer's tokens.
+
+Served sessions keep their transcript and state in the graph's checkpoint (thread = session
+id); stateless callers (the evaluation) bring the transcript and get a state rebuilt from it.
 """
 
 import re
 from collections.abc import AsyncIterator
 from typing import Any, cast
 
+from langchain_core.runnables import RunnableConfig
+from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel, ConfigDict
 
 from customer_agent.application.answering import (
@@ -17,42 +23,33 @@ from customer_agent.application.answering import (
     TextDelta,
     stateless_session_id,
 )
-from customer_agent.application.fallbacks import (
-    PAYMENT_DATA_NOTICE,
-    TICKET_QUESTION,
-    fallback,
-    intent_of_question,
-    outage_contact_reply,
-    with_payment_data_notice,
-)
-from customer_agent.application.guardrails import PAYMENT_DATA_REASONS
-from customer_agent.application.ports import (
-    AuditLog,
-    Clock,
-    OrderRepository,
-    ProviderUnavailableError,
-    TicketService,
-)
+from customer_agent.application.fallbacks import TICKET_QUESTION, intent_of_question
+from customer_agent.application.ports import AuditLog, Clock, OrderRepository, TicketService
 from customer_agent.application.tools import CreateTicket, GetOrderStatus
-from customer_agent.application.turn_graph import TurnContext, TurnGraph, TurnState
-from customer_agent.application.understanding import UnderstandAgent, Understanding
+from customer_agent.application.turn_graph import (
+    MAX_CONTEXT_MESSAGES,
+    TurnContext,
+    TurnGraph,
+    TurnState,
+    turn_input,
+)
+from customer_agent.application.understanding import UnderstandAgent
 from customer_agent.domain.conversation import AgentResponse, Conversation, Message, Role
-from customer_agent.domain.guardrails import GuardrailDecision
-from customer_agent.domain.intents import Intent
 from customer_agent.domain.routing import extract_order_id
 from customer_agent.domain.session import SessionState, WorkflowState
 from customer_agent.observability import get_logger, record_guardrail
 from customer_agent.observability import step as agent_step
-from customer_agent.observability.metrics import AGENT_REPLIES
 
 log = get_logger("chat")
 
 _TICKET_NUMBER = re.compile(r"Ticketnummer (?:lautet )?(T-\d{6})")
 
+Graph = CompiledStateGraph[TurnState, TurnContext, TurnState, TurnState]
+
 
 class TurnResult(BaseModel):
-    """The agent's reply plus what to persist for the next turn: the session state and the
-    customer message as the guardrail left it (personal data masked, never the raw text)."""
+    """The agent's reply, the session state after the turn and the customer message as the
+    guardrail left it (personal data masked, never the raw text)."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -75,26 +72,27 @@ class ConversationOrchestrator:
         audit: AuditLog,
         clock: Clock,
         tenant_id: str,
+        checkpointer: BaseCheckpointSaver[Any],
         max_tickets_per_day: int | None = 3,  # None: no limit
     ) -> None:
         self._understand = understand
-        self._graph = TurnGraph(
+        turn = TurnGraph(
             answers,
             GetOrderStatus(orders=orders, audit_log=audit),
             CreateTicket(tickets=tickets, audit_log=audit, max_per_day=max_tickets_per_day),
             clock,
-        ).graph
+        )
+        self._stateless = turn.compile()
+        self._sessions = turn.compile(checkpointer)
         self._tenant_id = tenant_id
 
-    # --- CustomerServiceAgent (stateless; used by the evaluation) -------------------------
+    # --- stateless turns (the evaluation, tests) --------------------------------------------
 
     async def respond(self, conversation: Conversation) -> AgentResponse:
         turn = await self.handle(
             conversation, SessionState(), session_id=stateless_session_id(conversation)
         )
         return turn.response
-
-    # --- stateful turns (used by ChatService) -----------------------------------------------
 
     async def handle(
         self, conversation: Conversation, state: SessionState, *, session_id: str
@@ -107,70 +105,79 @@ class ConversationOrchestrator:
     async def handle_stream(
         self, conversation: Conversation, state: SessionState, *, session_id: str
     ) -> AsyncIterator[TurnEvent]:
+        """The caller brings the transcript; what a session would hold is rebuilt from it."""
         recovered = recover_state(conversation, state)
-        with agent_step("understand"):
-            understood = await self._understand.run(conversation, recovered, session_id=session_id)
-        screen = understood.input
-        record_guardrail(screen)
-        text = understood.text
-        if screen.blocked:
-            log.info("input blocked reasons=%s", ",".join(screen.reasons))
-            yield _counted(
-                TurnResult(
-                    response=_blocked_input_reply(screen),
-                    state=state,
-                    user_text=text or "[leere Nachricht]",
-                )
-            )
-            return
-        if screen.reasons:
-            log.info("input redacted reasons=%s", ",".join(screen.reasons))
-        # From here on only the sanitised message exists: answer model, transcript.
-        sanitized = Message(role=Role.USER, content=text)
-        conversation = conversation.model_copy(
-            update={"messages": [*conversation.messages[:-1], sanitized]}
-        )
-        notice = not PAYMENT_DATA_REASONS.isdisjoint(screen.reasons)
-        if notice:
-            yield TextDelta(text=f"{PAYMENT_DATA_NOTICE}\n\n")
-        async for event in self._turn(conversation, recovered, understood, session_id):
-            if isinstance(event, TurnResult):
-                if notice:
-                    event = event.model_copy(
-                        update={"response": with_payment_data_notice(event.response)}
-                    )
-                event = _counted(event)
+        async for event in self._turn(
+            self._stateless, conversation, recovered, session_id, earlier=conversation.messages[:-1]
+        ):
             yield event
+
+    # --- served sessions (ChatService) ------------------------------------------------------
+
+    async def session_stream(
+        self, session_id: str, customer_id: str | None, text: str
+    ) -> AsyncIterator[TurnEvent]:
+        """One turn of a served session; the caller holds the session's lease."""
+        config: RunnableConfig = {"configurable": {"thread_id": session_id}}
+        messages, state = await self.transcript(session_id)
+        history = messages[-(MAX_CONTEXT_MESSAGES - 1) :]
+        conversation = Conversation(
+            messages=[*history, Message(role=Role.USER, content=text)], customer_id=customer_id
+        )
+        async for event in self._turn(
+            self._sessions, conversation, state, session_id, earlier=[], config=config
+        ):
+            yield event
+
+    async def transcript(self, session_id: str) -> tuple[list[Message], SessionState]:
+        """The masked transcript and the state of a served session, from its checkpoint."""
+        snapshot = await self._sessions.aget_state({"configurable": {"thread_id": session_id}})
+        values = cast(dict[str, Any], snapshot.values)
+        return list(values.get("messages", [])), values.get("session", SessionState())
 
     async def _turn(
         self,
+        graph: Graph,
         conversation: Conversation,
         state: SessionState,
-        understood: Understanding,
         session_id: str,
+        *,
+        earlier: list[Message],
+        config: RunnableConfig | None = None,
     ) -> AsyncIterator[TurnEvent]:
-        """Stage 2: the turn graph. A provider outage in any step ends the turn with the contact
-        channels and the previous state (NFR-11)."""
-        text = conversation.messages[-1].content
-        final: TurnState = {
-            "conversation": conversation,
-            "session": state,
-            "routing": understood.routing,
-            "verdict": understood.verdict,
-        }
-        context = TurnContext(session_id=session_id, tenant_id=self._tenant_id)
-        parts = self._graph.astream(final, context=context, stream_mode=["custom", "values"])
-        try:
-            async for mode, data in cast(AsyncIterator[tuple[str, Any]], parts):
-                if mode == "custom":
-                    yield cast(TextDelta, data)
-                else:
-                    final = cast(TurnState, data)
-        except ProviderUnavailableError as exc:
-            log.error("provider unavailable: %s", exc)
-            yield TurnResult(response=outage_contact_reply(), state=state, user_text=text)
-            return
-        yield TurnResult(response=final["response"], state=final["session"], user_text=text)
+        """Stage 1, then stage 2 with only the masked message; ``earlier``: what the graph's
+        transcript lacks before it (empty when the checkpoint has it)."""
+        with agent_step("understand"):
+            understood = await self._understand.run(conversation, state, session_id=session_id)
+        record_guardrail(understood.input)
+        text = understood.text or "[leere Nachricht]"
+        final = turn_input(
+            [*earlier, Message(role=Role.USER, content=text)],
+            state,
+            screen=understood.input,
+            routing=understood.routing,
+            verdict=understood.verdict,
+        )
+        context = TurnContext(
+            session_id=session_id, tenant_id=self._tenant_id, customer_id=conversation.customer_id
+        )
+        parts = graph.astream(
+            final,
+            config,
+            context=context,
+            stream_mode=["custom", "values"],
+            # One checkpoint per turn (rebuild plan §9, phase 0); stateless runs keep none.
+            durability="exit" if config is not None else None,
+        )
+        async for mode, data in cast(AsyncIterator[tuple[str, Any]], parts):
+            if mode == "custom":
+                yield cast(TextDelta, data)
+            else:
+                final = cast(TurnState, data)
+        response = final["response"]
+        if response is None:  # pragma: no cover - the graph always ends with a response
+            raise RuntimeError("turn ended without a response")
+        yield TurnResult(response=response, state=final["session"], user_text=text)
 
 
 def recover_state(conversation: Conversation, state: SessionState) -> SessionState:
@@ -202,17 +209,3 @@ def recover_state(conversation: Conversation, state: SessionState) -> SessionSta
         workflow=WorkflowState.AWAITING_TICKET_CONFIRMATION,
         slots=slots,
     )
-
-
-def _blocked_input_reply(screen: GuardrailDecision) -> AgentResponse:
-    response = fallback(screen.reasons)
-    if "prompt_injection" in screen.reasons:
-        # Taxonomy: attempts to change the assistant's instructions are OUT_OF_SCOPE.
-        return response.model_copy(update={"intent": Intent.OUT_OF_SCOPE})
-    return response
-
-
-def _counted(turn: TurnResult) -> TurnResult:
-    response = turn.response
-    AGENT_REPLIES.labels(behavior=response.behavior, intent=str(response.intent)).inc()
-    return turn

@@ -1,10 +1,11 @@
-"""Chat use case: load the session, run one orchestrated turn, persist transcript and state.
+"""Chat use case: check the session's owner, take its lease, run one turn.
 
 The client sends only the new message and a ``session_id``; the server owns the transcript and
-the explicit state (ADR-0005).
+the explicit state (ADR-0005), both in the turn graph's checkpoint. The session's lease admits
+one turn at a time: a concurrent one is rejected before it starts (409).
 
 Each turn runs in its own task, decoupled from the HTTP response: if the client disconnects
-while an answer streams, the turn still completes and is saved, so the next turn sees a
+while an answer streams, the turn still completes and is checkpointed, so the next turn sees a
 consistent transcript and state.
 """
 
@@ -15,14 +16,11 @@ from pydantic import BaseModel, ConfigDict
 
 from customer_agent.application.answering import TextDelta
 from customer_agent.application.orchestrator import ConversationOrchestrator, TurnResult
-from customer_agent.application.ports import SessionStore, StoredSession
-from customer_agent.domain.conversation import AgentResponse, Conversation, Message, Role
+from customer_agent.application.ports import ConcurrentTurnError, SessionStore, StoredSession
+from customer_agent.domain.conversation import AgentResponse
 from customer_agent.observability import get_logger, session_id_var, step, trace_turn
 
 log = get_logger("session")
-
-# Transcript passed to the router and the answer prompt; older turns are kept in the database.
-MAX_CONTEXT_MESSAGES = 20
 
 
 class SessionNotFoundError(LookupError):
@@ -77,33 +75,25 @@ class ChatService:
         """Producer: runs to completion even when nobody reads ``out`` any more."""
         # The task has its own copy of the context: every log line of the turn gets the session.
         session_id_var.set(session.session_id)
+        released = False
         try:
-            history = session.messages[-(MAX_CONTEXT_MESSAGES - 1) :]
-            conversation = Conversation(
-                messages=[*history, Message(role=Role.USER, content=text)],
-                customer_id=customer_id,
-            )
             with trace_turn(session_id=session.session_id, customer_id=customer_id) as turn:
-                async for event in self._orchestrator.handle_stream(
-                    conversation, session.state, session_id=session.session_id
+                async for event in self._orchestrator.session_stream(
+                    session.session_id, customer_id, text
                 ):
                     if isinstance(event, TurnResult):
-                        with step("session.save"):
-                            await self._sessions.save_turn(
-                                session.session_id,
-                                expected_version=session.version,
-                                state=event.state,
-                                user=event.user_text,  # masked by the input guardrail, never raw
-                                reply=event.response,
-                            )
                         turn.record(
-                            user_text=event.user_text,
+                            user_text=event.user_text,  # masked by the input guardrail
                             answer=event.response.answer,
                             metadata={
                                 "behavior": event.response.behavior.value,
                                 "intent": str(event.response.intent),
                             },
                         )
+                        # The checkpoint is written: the client may send the next message as
+                        # soon as it has this reply.
+                        await self._release(session.session_id)
+                        released = True
                         out.put_nowait(
                             ChatTurn(session_id=session.session_id, response=event.response)
                         )
@@ -113,11 +103,22 @@ class ChatService:
         except Exception as exc:  # handed to the consumer, re-raised there
             log.warning("turn failed: %s", type(exc).__name__)
             out.put_nowait(exc)
+        finally:
+            if not released:
+                await self._release(session.session_id)
+
+    async def _release(self, session_id: str) -> None:
+        with step("session.release"):
+            await self._sessions.release(session_id)
 
     async def chat_stream(
         self, session_id: str | None, customer_id: str | None, text: str
     ) -> AsyncGenerator[ChatEvent, None]:
         session = await self._open(session_id, customer_id)  # errors surface before streaming
+        with step("session.lease"):
+            leased = await self._sessions.acquire(session.session_id)
+        if not leased:
+            raise ConcurrentTurnError(session.session_id)
         out: asyncio.Queue[_Item] = asyncio.Queue()
         task = asyncio.create_task(self._run_turn(session, customer_id, text, out))
         self._running.add(task)

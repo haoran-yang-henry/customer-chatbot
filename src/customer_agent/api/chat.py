@@ -82,9 +82,12 @@ async def chat_stream(
         body.session_id, principal.customer_id if principal else None, body.message
     )
     try:
-        first = await anext(events)  # resolve the session before the 200 response starts
+        # Resolve the session and take its lease before the 200 response starts.
+        first = await anext(events)
     except SessionNotFoundError:
         raise _NOT_FOUND from None
+    except ConcurrentTurnError:
+        raise HTTPException(status_code=409, detail=_CONFLICT_DETAIL) from None
 
     async def body_events() -> AsyncIterator[str]:
         event: TextDelta | ChatTurn | None = first
@@ -93,11 +96,6 @@ async def chat_stream(
                 yield _sse("delta", {"text": event.text})
             else:
                 yield _sse("final", _response(event, request_id).model_dump(mode="json"))
-            try:
-                event = await anext(events, None)
-            except ConcurrentTurnError:
-                # The 200 status is already sent; report the conflict as a stream event.
-                yield _sse("error", {"status": 409, "detail": _CONFLICT_DETAIL})
-                return
+            event = await anext(events, None)
 
     return StreamingResponse(body_events(), media_type="text/event-stream")

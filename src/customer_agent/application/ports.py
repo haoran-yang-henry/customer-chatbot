@@ -6,14 +6,13 @@ from typing import Protocol, Self
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
-from customer_agent.domain.conversation import AgentResponse, Conversation, Message
+from customer_agent.domain.conversation import AgentResponse, Conversation
 from customer_agent.domain.knowledge import KnowledgeChunk, KnowledgeDocumentMeta
 from customer_agent.domain.orders import Order
 from customer_agent.domain.retrieval import (
     ChunkHit,
     SearchScope,
 )
-from customer_agent.domain.session import SessionState
 
 
 class Principal(BaseModel):
@@ -93,18 +92,17 @@ class Clock(Protocol):
 
 
 class StoredSession(BaseModel):
+    """Whose session it is. Its transcript and state are the turn graph's checkpoint."""
+
     model_config = ConfigDict(frozen=True)
 
     session_id: str
     tenant_id: str
     customer_id: str | None
-    state: SessionState
-    messages: list[Message]
-    version: int = 0  # optimistic concurrency token, incremented by every saved turn
 
 
 class ConcurrentTurnError(RuntimeError):
-    """Another turn of the same session was saved since this one loaded it (lost update)."""
+    """Another turn of the same session is still running (it holds the session's lease)."""
 
 
 class SessionStore(Protocol):
@@ -112,20 +110,12 @@ class SessionStore(Protocol):
 
     async def load(self, session_id: str) -> StoredSession | None: ...
 
-    async def save_turn(
-        self,
-        session_id: str,
-        *,
-        expected_version: int,
-        state: SessionState,
-        user: str,
-        reply: AgentResponse,
-    ) -> None:
-        """Append the user message and the reply and store the new state, atomically.
-
-        Raises ``ConcurrentTurnError`` if the stored version differs from ``expected_version``.
-        """
+    async def acquire(self, session_id: str) -> bool:
+        """Take the session's turn lease; ``False`` while another turn holds it. A lease older
+        than a turn can take counts as abandoned (a crashed process)."""
         ...
+
+    async def release(self, session_id: str) -> None: ...
 
 
 class OrderRepository(Protocol):

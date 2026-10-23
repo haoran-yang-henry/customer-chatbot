@@ -116,6 +116,14 @@ def test_concurrent_turn_is_409() -> None:
     assert response.status_code == 409
 
 
+def test_concurrent_turn_on_the_stream_is_409_before_any_event() -> None:
+    with client(FakeChat()) as c:
+        response = c.post("/v1/chat/stream", json={"session_id": "busy", "message": "Hallo"})
+
+    assert response.status_code == 409
+    assert "event:" not in response.text
+
+
 def test_errors_are_rfc9457_problem_details() -> None:
     with client(FakeChat()) as c:
         response = c.post(

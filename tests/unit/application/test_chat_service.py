@@ -1,10 +1,12 @@
-from typing import Any
+import asyncio
 
 import pytest
 
 from customer_agent.application.chat import ChatService, SessionNotFoundError
+from customer_agent.application.orchestrator import ConversationOrchestrator
 from customer_agent.application.ports import ConcurrentTurnError
-from customer_agent.domain.session import WorkflowState
+from customer_agent.domain.conversation import Role
+from customer_agent.domain.session import SessionState, WorkflowState
 from tests.fakes import (
     FakeRetriever,
     InMemorySessionStore,
@@ -19,62 +21,62 @@ ROUTING = (
 )
 
 
-def service(store: InMemorySessionStore) -> ChatService:
+def service(store: InMemorySessionStore) -> tuple[ChatService, ConversationOrchestrator]:
     llm = ScriptedRouterLLM(ROUTING)
-    agent = make_orchestrator(
-        llm, FakeRetriever(documents=[document("policy-order-cancellation", 0.7)])
-    )
-    return ChatService(agent, store, tenant_id="nordelektro")
+    retriever = FakeRetriever(documents=[document("policy-order-cancellation", 0.7)])
+    agent = make_orchestrator(llm, retriever)
+    return ChatService(agent, store, tenant_id="nordelektro"), agent
 
 
-async def test_new_session_is_created_and_turn_persisted() -> None:
+async def test_new_session_is_created_and_turn_checkpointed() -> None:
     store = InMemorySessionStore()
+    chat, agent = service(store)
 
-    turn = await service(store).chat(None, "C-1001", "Wo ist meine Bestellung?")
+    turn = await chat.chat(None, "C-1001", "Wo ist meine Bestellung?")
 
-    saved = store.sessions[turn.session_id]
-    assert [m.content for m in saved.messages] == ["Wo ist meine Bestellung?", turn.response.answer]
-    assert saved.state.workflow is WorkflowState.AWAITING_ORDER_ID
+    messages, state = await agent.transcript(turn.session_id)
+    assert [m.content for m in messages] == ["Wo ist meine Bestellung?", turn.response.answer]
+    assert [m.role for m in messages] == [Role.USER, Role.ASSISTANT]
+    assert state.workflow is WorkflowState.AWAITING_ORDER_ID
+    assert store.leased == set()  # released after the turn
 
 
-async def test_second_turn_continues_from_stored_state() -> None:
+async def test_second_turn_continues_from_the_checkpointed_state() -> None:
     store = InMemorySessionStore()
-    chat = service(store)
+    chat, agent = service(store)
     first = await chat.chat(None, "C-1002", "Wo ist meine Bestellung?")
 
     await chat.chat(first.session_id, "C-1002", "NE-100250")
 
-    state = store.sessions[first.session_id].state
-    assert (
-        state.slots == {"order_id": "NE-100250"}
-        and len(store.sessions[first.session_id].messages) == 4
-    )
+    messages, state = await agent.transcript(first.session_id)
+    assert state.slots == {"order_id": "NE-100250"} and len(messages) == 4
 
 
 async def test_an_order_that_was_not_found_is_not_remembered() -> None:
     # NE-100250 belongs to C-1002: it must not reach a later ticket of C-1001.
     store = InMemorySessionStore()
-    chat = service(store)
+    chat, agent = service(store)
     first = await chat.chat(None, "C-1001", "Wo ist meine Bestellung?")
 
     await chat.chat(first.session_id, "C-1001", "NE-100250")
 
-    assert "order_id" not in store.sessions[first.session_id].state.slots
+    _, state = await agent.transcript(first.session_id)
+    assert "order_id" not in state.slots
 
 
 @pytest.mark.parametrize("session_id", ["does-not-exist", "s1"])
 async def test_unknown_or_foreign_session_is_not_found(session_id: str) -> None:
     store = InMemorySessionStore()
-    chat = service(store)
+    chat, _ = service(store)
     await chat.chat(None, "C-1001", "Hallo")  # creates s1 for C-1001
 
     with pytest.raises(SessionNotFoundError):
         await chat.chat(session_id, "C-2002", "Zeig mir den Verlauf")
 
 
-async def test_turn_is_saved_even_if_the_client_disconnects_mid_stream() -> None:
+async def test_turn_is_checkpointed_even_if_the_client_disconnects_mid_stream() -> None:
     store = InMemorySessionStore()
-    chat = service(store)
+    chat, agent = service(store)
     first = await chat.chat(None, "C-1001", "Wo ist meine Bestellung?")  # asks for order no.
 
     stream = chat.chat_stream(first.session_id, "C-1001", "Wie lange habe ich Zeit?")
@@ -82,27 +84,38 @@ async def test_turn_is_saved_even_if_the_client_disconnects_mid_stream() -> None
     await stream.aclose()  # … and disconnects
     await chat.drain()
 
-    assert len(store.sessions[first.session_id].messages) == 4  # second turn was persisted
+    messages, _ = await agent.transcript(first.session_id)
+    assert len(messages) == 4  # the second turn was checkpointed
+    assert store.leased == set()
 
 
-class RacingStore(InMemorySessionStore):
-    """Another turn commits between this turn's load and its save."""
-
-    async def save_turn(self, session_id: str, **kwargs: Any) -> None:
-        current = self.sessions[session_id]
-        self.sessions[session_id] = current.model_copy(update={"version": current.version + 1})
-        await super().save_turn(session_id, **kwargs)
-
-
-async def test_concurrent_turn_on_the_same_session_is_rejected() -> None:
-    store = RacingStore()
-    chat = service(store)
+async def test_a_turn_while_another_runs_is_rejected_before_it_starts() -> None:
+    store = InMemorySessionStore()
+    chat, agent = service(store)
     created = await store.create(tenant_id="nordelektro", customer_id="C-1001")
+    await store.acquire(created.session_id)  # another turn is running
 
     with pytest.raises(ConcurrentTurnError):
         await chat.chat(created.session_id, "C-1001", "Wo ist meine Bestellung?")
 
-    assert store.sessions[created.session_id].messages == []  # nothing half-written
+    assert await agent.transcript(created.session_id) == ([], SessionState())
+    assert store.leased == {created.session_id}  # the running turn keeps its lease
+
+
+async def test_concurrent_turns_one_runs_the_other_is_rejected() -> None:
+    store = InMemorySessionStore()
+    chat, agent = service(store)
+    created = await store.create(tenant_id="nordelektro", customer_id="C-1001")
+
+    outcomes = await asyncio.gather(
+        *(chat.chat(created.session_id, "C-1001", f"Frage {i}?") for i in range(3)),
+        return_exceptions=True,
+    )
+
+    assert sum(not isinstance(o, BaseException) for o in outcomes) == 1
+    assert all(isinstance(o, ConcurrentTurnError) for o in outcomes if isinstance(o, Exception))
+    messages, _ = await agent.transcript(created.session_id)
+    assert len(messages) == 2
 
 
 async def test_session_of_another_tenant_is_not_found() -> None:
@@ -110,15 +123,14 @@ async def test_session_of_another_tenant_is_not_found() -> None:
     foreign = await store.create(tenant_id="other-shop", customer_id="C-1001")
 
     with pytest.raises(SessionNotFoundError):
-        await service(store).chat(foreign.session_id, "C-1001", "Hallo")
+        await service(store)[0].chat(foreign.session_id, "C-1001", "Hallo")
 
 
 async def test_transcript_stores_the_masked_message_never_the_raw_one() -> None:
     store = InMemorySessionStore()
+    chat, agent = service(store)
 
-    turn = await service(store).chat(
-        None, "C-1001", "Wo ist meine Bestellung? Rückruf unter 0171 2345678"
-    )
+    turn = await chat.chat(None, "C-1001", "Wo ist meine Bestellung? Rückruf unter 0171 2345678")
 
-    saved = store.sessions[turn.session_id].messages[0].content
-    assert saved == "Wo ist meine Bestellung? Rückruf unter [Telefonnummer entfernt]"
+    messages, _ = await agent.transcript(turn.session_id)
+    assert messages[0].content == "Wo ist meine Bestellung? Rückruf unter [Telefonnummer entfernt]"

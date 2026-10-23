@@ -1,23 +1,19 @@
-"""PostgreSQL implementation of the ``SessionStore`` port."""
+"""PostgreSQL implementation of the ``SessionStore`` port: ownership and the turn lease.
+
+The transcript and the state are the turn graph's checkpoint (``infrastructure/checkpointer``).
+"""
 
 import uuid
+from datetime import timedelta
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from customer_agent.application.ports import ConcurrentTurnError, StoredSession
-from customer_agent.domain.conversation import AgentResponse, Message, Role
-from customer_agent.domain.intents import Intent
-from customer_agent.domain.session import SessionState, WorkflowState
-from customer_agent.infrastructure.db.models import ChatMessageRow, ChatSessionRow
+from customer_agent.application.ports import StoredSession
+from customer_agent.infrastructure.db.models import ChatSessionRow
 
-
-def _state(row: ChatSessionRow) -> SessionState:
-    return SessionState(
-        active_intent=Intent(row.active_intent) if row.active_intent else None,
-        workflow=WorkflowState(row.workflow_state),
-        slots=dict(row.slots),
-    )
+# Longer than any turn (model timeouts included): an older lease belongs to a crashed process.
+LEASE_TIMEOUT = timedelta(minutes=2)
 
 
 class PostgresSessionStore:
@@ -25,96 +21,43 @@ class PostgresSessionStore:
         self._sessions = sessions
 
     async def create(self, *, tenant_id: str, customer_id: str | None) -> StoredSession:
-        row = ChatSessionRow(
-            id=uuid.uuid4().hex,
-            tenant_id=tenant_id,
-            customer_id=customer_id,
-            active_intent=None,
-            workflow_state=WorkflowState.IDLE.value,
-            slots={},
-            version=0,
-        )
+        row = ChatSessionRow(id=uuid.uuid4().hex, tenant_id=tenant_id, customer_id=customer_id)
         async with self._sessions.begin() as session:
             session.add(row)
-        return StoredSession(
-            session_id=row.id,
-            tenant_id=tenant_id,
-            customer_id=customer_id,
-            state=SessionState(),
-            messages=[],
-        )
+        return StoredSession(session_id=row.id, tenant_id=tenant_id, customer_id=customer_id)
 
     async def load(self, session_id: str) -> StoredSession | None:
         async with self._sessions() as session:
             row = await session.get(ChatSessionRow, session_id)
             if row is None:
                 return None
-            messages = await session.scalars(
-                select(ChatMessageRow)
-                .where(ChatMessageRow.session_id == session_id)
-                .order_by(ChatMessageRow.position)
-            )
             return StoredSession(
-                session_id=row.id,
-                tenant_id=row.tenant_id,
-                customer_id=row.customer_id,
-                state=_state(row),
-                messages=[Message(role=Role(m.role), content=m.content) for m in messages],
-                version=row.version,
+                session_id=row.id, tenant_id=row.tenant_id, customer_id=row.customer_id
             )
 
-    async def save_turn(
-        self,
-        session_id: str,
-        *,
-        expected_version: int,
-        state: SessionState,
-        user: str,
-        reply: AgentResponse,
-    ) -> None:
+    async def acquire(self, session_id: str) -> bool:
+        # One conditional UPDATE: of several concurrent turns exactly one matches; the others
+        # wait for its row lock, then see the lease and match no row. No connection is held
+        # while the turn runs.
         async with self._sessions.begin() as session:
-            # Optimistic concurrency: the UPDATE only matches the version this turn started from.
-            # A concurrent turn blocks on the row lock, then sees the new version and matches 0
-            # rows, so neither the state nor the transcript can be overwritten silently.
-            updated = await session.execute(
+            leased = await session.execute(
                 update(ChatSessionRow)
                 .where(ChatSessionRow.id == session_id)
-                .where(ChatSessionRow.version == expected_version)
-                .values(
-                    active_intent=state.active_intent.value if state.active_intent else None,
-                    workflow_state=state.workflow.value,
-                    slots=state.slots,
-                    version=ChatSessionRow.version + 1,
-                    updated_at=func.now(),
+                .where(
+                    or_(
+                        ChatSessionRow.turn_started_at.is_(None),
+                        ChatSessionRow.turn_started_at < func.now() - LEASE_TIMEOUT,
+                    )
                 )
+                .values(turn_started_at=func.now())
                 .returning(ChatSessionRow.id)
             )
-            if updated.first() is None:
-                if await session.get(ChatSessionRow, session_id) is None:
-                    raise LookupError(session_id)
-                raise ConcurrentTurnError(session_id)
-            last = await session.scalar(
-                select(func.max(ChatMessageRow.position)).where(
-                    ChatMessageRow.session_id == session_id
-                )
-            )
-            position = -1 if last is None else last
-            session.add_all(
-                [
-                    ChatMessageRow(
-                        session_id=session_id,
-                        position=position + 1,
-                        role=Role.USER.value,
-                        content=user,
-                    ),
-                    ChatMessageRow(
-                        session_id=session_id,
-                        position=position + 2,
-                        role=Role.ASSISTANT.value,
-                        content=reply.answer,
-                        intent=reply.intent.value if reply.intent else None,
-                        behavior=reply.behavior.value,
-                        sources=list(reply.sources),
-                    ),
-                ]
+            return leased.first() is not None
+
+    async def release(self, session_id: str) -> None:
+        async with self._sessions.begin() as session:
+            await session.execute(
+                update(ChatSessionRow)
+                .where(ChatSessionRow.id == session_id)
+                .values(turn_started_at=None, updated_at=func.now())
             )

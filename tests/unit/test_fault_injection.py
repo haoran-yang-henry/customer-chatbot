@@ -15,7 +15,13 @@ from customer_agent.infrastructure.memory import InMemoryAuditLog, InMemoryTicke
 from customer_agent.infrastructure.models import BreakerChatModel, ProviderChatModel
 from customer_agent.infrastructure.prompts import load_prompt
 from customer_agent.infrastructure.resilience import CircuitBreaker
-from tests.fakes import FakeRetriever, FixedClock, SeedOrderRepository, document
+from tests.fakes import (
+    FakeRetriever,
+    FixedClock,
+    SeedOrderRepository,
+    document,
+    memory_checkpointer,
+)
 
 TODAY = date(2026, 10, 5)
 
@@ -53,6 +59,7 @@ async def test_llm_outage_reaches_the_fallback_in_time_and_the_breaker_takes_ove
         audit=InMemoryAuditLog(),
         clock=FixedClock(TODAY),
         tenant_id="nordelektro",
+        checkpointer=memory_checkpointer(),
     )
 
     durations, behaviors = [], []
