@@ -11,7 +11,7 @@ from customer_agent.application.orchestrator import ConversationOrchestrator
 from customer_agent.application.routing import IntentRouter
 from customer_agent.domain.conversation import Behavior, Conversation, Message, Role
 from customer_agent.infrastructure.memory import InMemoryAuditLog, InMemoryTicketService
-from customer_agent.infrastructure.models import BreakerChatModel, ChatModelLLM, ProviderChatModel
+from customer_agent.infrastructure.models import BreakerChatModel, ProviderChatModel
 from customer_agent.infrastructure.prompts import load_prompt
 from customer_agent.infrastructure.resilience import CircuitBreaker
 from tests.fakes import FakeRetriever, FixedClock, SeedOrderRepository, document
@@ -35,11 +35,8 @@ async def test_llm_outage_reaches_the_fallback_in_time_and_the_breaker_takes_ove
         request_timeout=0.5,
         max_retries=1,
     )
-    llm = ChatModelLLM(
-        BreakerChatModel(
-            inner=provider,
-            breaker=CircuitBreaker("fault-llm", failure_threshold=2, reset_after=60),
-        )
+    llm = BreakerChatModel(
+        inner=provider, breaker=CircuitBreaker("fault-llm", failure_threshold=2, reset_after=60)
     )
     agent = ConversationOrchestrator(
         IntentRouter(llm, load_prompt("router", 5)),

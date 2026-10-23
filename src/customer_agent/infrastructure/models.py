@@ -4,9 +4,9 @@ the project's resilience, evaluation cache and CI replay as ``BaseChatModel`` wr
     ReplayChatModel (CI)  →  CachedChatModel (evaluation)  →  BreakerChatModel  →  ProviderChatModel
 
 Each wrapper calls the next one's ``_agenerate`` / ``_astream`` directly, so LangChain's callbacks
-see one model run per call, not one per layer. Request parameters (``max_tokens``,
-``temperature``, the session header in ``extra_headers``) travel as call keyword arguments, the
-way ``model.ainvoke(messages, max_tokens=…)`` passes them.
+see one model run per call, not one per layer. Callers pass ``max_tokens``, ``temperature`` and
+the conversation's ``session_id`` as call keyword arguments; only ``ProviderChatModel`` knows that
+the provider wants the session as a header.
 """
 
 import asyncio
@@ -25,7 +25,6 @@ from langchain_core.messages import (
     AIMessage,
     AIMessageChunk,
     BaseMessage,
-    BaseMessageChunk,
     HumanMessage,
     SystemMessage,
     UsageMetadata,
@@ -35,8 +34,15 @@ from langchain_openai import ChatOpenAI
 from opentelemetry import trace
 from pydantic import ConfigDict
 
-from customer_agent.application.ports import ChatMessage, LLMResult, ProviderUnavailableError
-from customer_agent.infrastructure.cassette import RERECORD, Cassette, ReplayMissError, chat_key
+from customer_agent.application.ports import ProviderUnavailableError
+from customer_agent.infrastructure.cassette import (
+    RERECORD,
+    Cassette,
+    ChatMessage,
+    LLMResult,
+    ReplayMissError,
+    chat_key,
+)
 from customer_agent.infrastructure.lifecycle import aclose_all
 from customer_agent.infrastructure.resilience import CircuitBreaker
 from customer_agent.observability import elapsed_ms, get_logger, record_tokens, step, tracer
@@ -53,11 +59,6 @@ _ROLES = {SystemMessage: "system", HumanMessage: "user", AIMessage: "assistant"}
 def as_chat_messages(messages: Sequence[BaseMessage]) -> list[ChatMessage]:
     """The project's message shape: keys of the cassette and the cache are built from it."""
     return [ChatMessage(role=_ROLES[type(m)], content=m.text) for m in messages]  # type: ignore[arg-type]
-
-
-def as_langchain(messages: Sequence[ChatMessage]) -> list[BaseMessage]:
-    kinds = {role: kind for kind, role in _ROLES.items()}
-    return [kinds[m.role](content=m.content) for m in messages]
 
 
 def model_label(model: BaseChatModel) -> str:
@@ -103,6 +104,21 @@ class ProviderChatModel(ChatOpenAI):
       chunk and again on a usage-only chunk, and LangChain adds chunks up.
     """
 
+    session_header: str | None = None
+    """Per-conversation header (``x-opencode-session``, ADR-0008); OpenCode Go answers 400
+    without it."""
+
+    def _with_session(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+        """Callers pass the conversation's id as the provider-neutral ``session_id`` keyword
+        (LangChain's ``astream`` gives ``_astream`` no run manager, so run metadata cannot carry
+        it); the endpoint wants it as a header, never in the request body."""
+        kwargs = dict(kwargs)
+        session = kwargs.pop("session_id", None)
+        if self.session_header and session:
+            headers = kwargs.get("extra_headers", {})
+            kwargs["extra_headers"] = {**headers, self.session_header: str(session)}
+        return kwargs
+
     def _get_request_payload(
         self, input_: Any, *, stop: list[str] | None = None, **kwargs: Any
     ) -> dict[str, Any]:
@@ -129,7 +145,9 @@ class ProviderChatModel(ChatOpenAI):
         start = time.perf_counter()
         with step("llm", model=self.model_name) as span:
             try:
-                result = await super()._agenerate(messages, stop, run_manager, **kwargs)
+                result = await super()._agenerate(
+                    messages, stop, run_manager, **self._with_session(kwargs)
+                )
             except openai.OpenAIError as exc:
                 log.warning(
                     "model=%s error=%s took=%dms",
@@ -175,6 +193,7 @@ class ProviderChatModel(ChatOpenAI):
         # attached here would be detached elsewhere (see observability.step).
         span = tracer.start_span("agent.llm.stream", attributes={"model": self.model_name})
         try:
+            kwargs = self._with_session(kwargs)
             stream = cast(Stream, super()._astream(messages, stop, run_manager, **kwargs))
             async with aclosing(stream) as chunks:  # an early close releases the connection
                 async for chunk in chunks:
@@ -423,67 +442,3 @@ class ReplayChatModel(_AsyncOnly):
                 usage_metadata=message.usage_metadata if isinstance(message, AIMessage) else None,
             )
         )
-
-
-class ChatModelLLM:
-    """``LLMProvider`` over a chat model: the bridge while the application still calls the
-    port. Removed in rebuild phase 2 once router, classifier, answer and judge use chat models.
-    """
-
-    def __init__(self, model: BaseChatModel, *, session_header: str | None = None) -> None:
-        self._model = model
-        self._session_header = session_header
-
-    @property
-    def model_name(self) -> str:
-        return model_label(self._model)
-
-    @property
-    def chat_model(self) -> BaseChatModel:
-        return self._model
-
-    async def aclose(self) -> None:
-        await aclose_all(self._model)
-
-    def _kwargs(
-        self, max_tokens: int, temperature: float, session_id: str | None
-    ) -> dict[str, Any]:
-        kwargs: dict[str, Any] = {"max_tokens": max_tokens, "temperature": temperature}
-        if self._session_header and session_id:
-            kwargs["extra_headers"] = {self._session_header: session_id}
-        return kwargs
-
-    async def complete(
-        self,
-        messages: Sequence[ChatMessage],
-        *,
-        max_tokens: int,
-        temperature: float,
-        session_id: str | None = None,
-    ) -> LLMResult:
-        reply = await self._model.ainvoke(
-            as_langchain(messages), **self._kwargs(max_tokens, temperature, session_id)
-        )
-        usage = reply.usage_metadata if isinstance(reply, AIMessage) else None
-        return LLMResult(
-            text=reply.text,
-            model=self.model_name,
-            prompt_tokens=usage["input_tokens"] if usage else None,
-            completion_tokens=usage["output_tokens"] if usage else None,
-        )
-
-    async def stream(
-        self,
-        messages: Sequence[ChatMessage],
-        *,
-        max_tokens: int,
-        temperature: float,
-        session_id: str | None = None,
-    ) -> AsyncIterator[str]:
-        stream = self._model.astream(
-            as_langchain(messages), **self._kwargs(max_tokens, temperature, session_id)
-        )
-        async with aclosing(cast(AsyncGenerator[BaseMessageChunk, None], stream)) as chunks:
-            async for chunk in chunks:
-                if chunk.text:
-                    yield chunk.text

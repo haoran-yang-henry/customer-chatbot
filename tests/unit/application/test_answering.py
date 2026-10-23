@@ -61,7 +61,7 @@ async def test_prompt_contains_evidence_question_and_trust_level() -> None:
     await answers.answer(conversation("Kostet die Rücksendung etwas?"))
 
     system, user = llm.calls[0]
-    assert system.role == "system" and "German" in system.content
+    assert system.type == "system" and "German" in system.text
     assert '<document id="policy-returns-v5" trust="official">' in user.content
     assert "Kostet die Rücksendung etwas?" in user.content
 

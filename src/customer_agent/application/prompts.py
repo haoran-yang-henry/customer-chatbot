@@ -3,11 +3,9 @@
 from functools import cached_property
 from string import Template
 
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import BaseMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, ConfigDict
-
-from customer_agent.application.ports import ChatMessage
 
 
 def _chat_template(text: str) -> str:
@@ -47,13 +45,7 @@ class PromptTemplate(BaseModel):
             metadata={"prompt": self.ref},
         )
 
-    def render_messages(self, **values: str) -> list[ChatMessage]:
-        """Bridge to the application port until the agents consume ChatPromptValue directly."""
-        system, user = self.chat_prompt.format_messages(**values)
-        return [
-            ChatMessage(role="system", content=system.text),
-            ChatMessage(role="user", content=user.text),
-        ]
-
-    def render_user(self, **values: str) -> str:
-        return self.render_messages(**values)[1].content
+    def render_messages(self, **values: str) -> list[BaseMessage]:
+        """The system message and the user message with every placeholder filled; a missing
+        value raises ``KeyError``."""
+        return self.chat_prompt.format_messages(**values)

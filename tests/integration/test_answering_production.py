@@ -11,7 +11,7 @@ from customer_agent.application.ingestion import IngestionService
 from customer_agent.application.orchestrator import ConversationOrchestrator, TurnResult
 from customer_agent.application.retrieval import RetrievalService
 from customer_agent.application.routing import IntentRouter
-from customer_agent.bootstrap import create_llm_provider
+from customer_agent.bootstrap import create_chat_model
 from customer_agent.config import Settings
 from customer_agent.domain.conversation import Behavior, Conversation, Message, Role
 from customer_agent.domain.intents import Intent
@@ -37,7 +37,7 @@ async def agent(
     await IngestionService(repository, embeddings, embedding_model="test-embeddings").run(
         load_knowledge_directory(KNOWLEDGE_DIR)
     )
-    llm = create_llm_provider(settings)
+    llm = create_chat_model(settings)
     answers = AnswerService(
         RetrievalService(repository, embeddings),
         llm,

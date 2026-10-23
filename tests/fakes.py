@@ -1,6 +1,6 @@
 """Test doubles for the application ports."""
 
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator
 from datetime import date
 from typing import TYPE_CHECKING, Any
 
@@ -11,9 +11,7 @@ from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResu
 from pydantic import Field
 
 from customer_agent.application.ports import (
-    ChatMessage,
     ConcurrentTurnError,
-    LLMResult,
     ProviderUnavailableError,
     StoredSession,
 )
@@ -72,19 +70,39 @@ class FakeRetriever:
         return self.documents[:top_k]
 
 
-class FakeChatModel(BaseChatModel):
-    """Chat-model double: a scripted reply, streamed in small pieces; records every call's
-    messages and keyword arguments (``max_tokens``, ``temperature``, ``extra_headers``)."""
+class FakeLLM(BaseChatModel):
+    """Chat-model double: a scripted reply, streamed in small pieces to exercise the stream
+    filter. Records every call's messages, keyword arguments (``max_tokens``, ``temperature``)
+    and the ``session_id`` keyword the caller passed."""
 
     reply: str = ""
     fail: bool = False
     piece: int = 7
     usage: tuple[int, int] | None = None
-    calls: list[tuple[list[BaseMessage], dict[str, Any]]] = Field(default_factory=list)
+    calls: list[list[BaseMessage]] = Field(default_factory=list)
+    kwargs: list[dict[str, Any]] = Field(default_factory=list)
+    session_ids: list[str | None] = Field(default_factory=list)
+
+    def __init__(self, reply: str = "", **fields: Any) -> None:
+        super().__init__(**{"reply": reply, **fields})
 
     @property
     def _llm_type(self) -> str:
-        return "fake-chat"
+        return "fake-llm"
+
+    def _record(
+        self,
+        messages: list[BaseMessage],
+        kwargs: dict[str, Any],
+        run_manager: AsyncCallbackManagerForLLMRun | CallbackManagerForLLMRun | None,
+    ) -> str:
+        """The reply for this call; raises like a provider outage when ``fail`` is set."""
+        self.calls.append(list(messages))
+        self.kwargs.append(kwargs)
+        self.session_ids.append(kwargs.get("session_id"))
+        if self.fail:
+            raise ProviderUnavailableError("fake outage")
+        return self.reply
 
     def _usage(self) -> UsageMetadata | None:
         if self.usage is None:
@@ -94,11 +112,6 @@ class FakeChatModel(BaseChatModel):
             input_tokens=prompt, output_tokens=completion, total_tokens=prompt + completion
         )
 
-    def _record(self, messages: list[BaseMessage], kwargs: dict[str, Any]) -> None:
-        self.calls.append((list(messages), kwargs))
-        if self.fail:
-            raise ProviderUnavailableError("fake outage")
-
     def _generate(
         self,
         messages: list[BaseMessage],
@@ -106,8 +119,8 @@ class FakeChatModel(BaseChatModel):
         run_manager: CallbackManagerForLLMRun | None = None,
         **kwargs: Any,
     ) -> ChatResult:
-        self._record(messages, kwargs)
-        message = AIMessage(content=self.reply, usage_metadata=self._usage())
+        text = self._record(messages, kwargs, run_manager)
+        message = AIMessage(content=text, usage_metadata=self._usage())
         return ChatResult(generations=[ChatGeneration(message=message)])
 
     async def _agenerate(
@@ -117,7 +130,9 @@ class FakeChatModel(BaseChatModel):
         run_manager: AsyncCallbackManagerForLLMRun | None = None,
         **kwargs: Any,
     ) -> ChatResult:
-        return self._generate(messages, stop, **kwargs)
+        text = self._record(messages, kwargs, run_manager)
+        message = AIMessage(content=text, usage_metadata=self._usage())
+        return ChatResult(generations=[ChatGeneration(message=message)])
 
     async def _astream(
         self,
@@ -126,54 +141,9 @@ class FakeChatModel(BaseChatModel):
         run_manager: AsyncCallbackManagerForLLMRun | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[ChatGenerationChunk]:
-        self._record(messages, kwargs)
-        for i in range(0, len(self.reply), self.piece):
-            yield ChatGenerationChunk(
-                message=AIMessageChunk(content=self.reply[i : i + self.piece])
-            )
-
-
-class FakeLLM:
-    """Returns a scripted reply; streams it in small pieces to exercise the stream filter."""
-
-    def __init__(self, reply: str = "", *, fail: bool = False, piece: int = 7) -> None:
-        self.reply = reply
-        self.fail = fail
-        self.piece = piece
-        self.calls: list[list[ChatMessage]] = []
-        self.session_ids: list[str | None] = []
-
-    @property
-    def model_name(self) -> str:
-        return "fake-llm"
-
-    async def complete(
-        self,
-        messages: Sequence[ChatMessage],
-        *,
-        max_tokens: int,
-        temperature: float,
-        session_id: str | None = None,
-    ) -> LLMResult:
-        self.calls.append(list(messages))
-        self.session_ids.append(session_id)
-        if self.fail:
-            raise ProviderUnavailableError("fake outage")
-        return LLMResult(text=self.reply, model="fake-llm")
-
-    async def stream(
-        self,
-        messages: Sequence[ChatMessage],
-        *,
-        max_tokens: int,
-        temperature: float,
-        session_id: str | None = None,
-    ) -> AsyncIterator[str]:
-        result = await self.complete(
-            messages, max_tokens=max_tokens, temperature=temperature, session_id=session_id
-        )
-        for i in range(0, len(result.text), self.piece):
-            yield result.text[i : i + self.piece]
+        text = self._record(messages, kwargs, run_manager)
+        for i in range(0, len(text), self.piece):
+            yield ChatGenerationChunk(message=AIMessageChunk(content=text[i : i + self.piece]))
 
 
 class FixedClock:
@@ -187,31 +157,30 @@ class FixedClock:
 class ScriptedRouterLLM(FakeLLM):
     """Answers router prompts with a JSON routing and answer prompts with ``answer``."""
 
-    def __init__(self, routing: str, answer: str = "Ok. [policy-returns-v5]") -> None:
-        super().__init__(answer)
-        self.routing = routing
-        self.router_calls = 0
-        self.router_prompts: list[list[ChatMessage]] = []
-        self.router_session_ids: list[str | None] = []
+    routing: str
+    router_calls: int = 0
+    router_prompts: list[list[BaseMessage]] = Field(default_factory=list)
+    router_session_ids: list[str | None] = Field(default_factory=list)
 
-    async def complete(
+    def __init__(
+        self, routing: str, answer: str = "Ok. [policy-returns-v5]", **fields: Any
+    ) -> None:
+        super().__init__(answer, routing=routing, **fields)
+
+    def _record(
         self,
-        messages: Sequence[ChatMessage],
-        *,
-        max_tokens: int,
-        temperature: float,
-        session_id: str | None = None,
-    ) -> LLMResult:
-        if "You classify customer messages" in messages[0].content:
-            self.router_calls += 1
-            self.router_prompts.append(list(messages))
-            self.router_session_ids.append(session_id)
-            if self.fail:
-                raise ProviderUnavailableError("fake outage")
-            return LLMResult(text=self.routing, model="fake-llm")
-        return await super().complete(
-            messages, max_tokens=max_tokens, temperature=temperature, session_id=session_id
-        )
+        messages: list[BaseMessage],
+        kwargs: dict[str, Any],
+        run_manager: AsyncCallbackManagerForLLMRun | CallbackManagerForLLMRun | None,
+    ) -> str:
+        if "You classify customer messages" not in messages[0].text:
+            return super()._record(messages, kwargs, run_manager)
+        self.router_calls += 1
+        self.router_prompts.append(list(messages))
+        self.router_session_ids.append(kwargs.get("session_id"))
+        if self.fail:
+            raise ProviderUnavailableError("fake outage")
+        return self.routing
 
 
 class InMemorySessionStore:

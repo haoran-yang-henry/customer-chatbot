@@ -7,15 +7,16 @@ from typing import cast
 
 import httpx2
 import pytest
+from langchain_core.messages import BaseMessageChunk, HumanMessage
 from prometheus_client import REGISTRY
 from pydantic import SecretStr
 
-from customer_agent.application.ports import ChatMessage, ProviderUnavailableError
-from customer_agent.infrastructure.models import BreakerChatModel, ChatModelLLM, ProviderChatModel
+from customer_agent.application.ports import ProviderUnavailableError
+from customer_agent.infrastructure.models import BreakerChatModel, ProviderChatModel
 from customer_agent.infrastructure.resilience import CircuitBreaker, CircuitState
-from tests.fakes import FakeChatModel
+from tests.fakes import FakeLLM
 
-MESSAGES = [ChatMessage(role="user", content="Hallo")]
+MESSAGES = [HumanMessage("Hallo")]
 
 
 class Clock:
@@ -94,14 +95,14 @@ def test_an_abandoned_trial_does_not_block_the_breaker_forever() -> None:
 
 
 async def test_open_breaker_skips_the_provider() -> None:
-    inner = FakeChatModel(fail=True)
-    llm = ChatModelLLM(BreakerChatModel(inner=inner, breaker=breaker(Clock(), "skip-llm")))
+    inner = FakeLLM(fail=True)
+    llm = BreakerChatModel(inner=inner, breaker=breaker(Clock(), "skip-llm"))
     for _ in range(3):
         with pytest.raises(ProviderUnavailableError):
-            await llm.complete(MESSAGES, max_tokens=5, temperature=0)
+            await llm.ainvoke(MESSAGES, max_tokens=5, temperature=0)
 
     with pytest.raises(ProviderUnavailableError, match="circuit open"):
-        await llm.complete(MESSAGES, max_tokens=5, temperature=0)
+        await llm.ainvoke(MESSAGES, max_tokens=5, temperature=0)
     assert len(inner.calls) == 3  # the fourth call never reached the provider
 
 
@@ -111,11 +112,11 @@ async def test_stream_closed_early_frees_a_half_open_trial() -> None:
     for _ in range(3):
         cb.record_failure()
     clock.now += 30
-    llm = ChatModelLLM(
-        BreakerChatModel(inner=FakeChatModel(reply="Eine lange Antwort", piece=3), breaker=cb)
-    )
+    llm = BreakerChatModel(inner=FakeLLM("Eine lange Antwort", piece=3), breaker=cb)
 
-    stream = cast(AsyncGenerator[str], llm.stream(MESSAGES, max_tokens=5, temperature=0))
+    stream = cast(
+        AsyncGenerator[BaseMessageChunk], llm.astream(MESSAGES, max_tokens=5, temperature=0)
+    )
     await anext(stream)
     await stream.aclose()
     # LangChain's astream does not close the stream it reads; the event loop's async-generator
@@ -129,16 +130,14 @@ async def test_stream_closed_early_frees_a_half_open_trial() -> None:
 # --- the real SDK: timeouts and server errors become ProviderUnavailableError ----------------
 
 
-def sdk_llm(handler: httpx2.MockTransport, timeout: float = 0.2) -> ChatModelLLM:
-    return ChatModelLLM(
-        ProviderChatModel(
-            model_name="model-z",
-            openai_api_key=SecretStr("test"),
-            openai_api_base="https://llm.test/v1",
-            http_async_client=httpx2.AsyncClient(transport=handler),
-            request_timeout=timeout,
-            max_retries=1,
-        )
+def sdk_llm(handler: httpx2.MockTransport, timeout: float = 0.2) -> ProviderChatModel:
+    return ProviderChatModel(
+        model_name="model-z",
+        openai_api_key=SecretStr("test"),
+        openai_api_base="https://llm.test/v1",
+        http_async_client=httpx2.AsyncClient(transport=handler),
+        request_timeout=timeout,
+        max_retries=1,
     )
 
 
@@ -150,7 +149,7 @@ async def test_server_errors_are_retried_once_then_reported() -> None:
         return httpx2.Response(503, json={"error": {"message": "overloaded"}})
 
     with pytest.raises(ProviderUnavailableError):
-        await sdk_llm(httpx2.MockTransport(handler)).complete(MESSAGES, max_tokens=5, temperature=0)
+        await sdk_llm(httpx2.MockTransport(handler)).ainvoke(MESSAGES, max_tokens=5, temperature=0)
     assert len(calls) == 2  # one retry with backoff, then the fallback takes over
 
 
@@ -160,5 +159,5 @@ async def test_a_hanging_provider_fails_within_the_timeout_budget() -> None:
 
     start = time.perf_counter()
     with pytest.raises(ProviderUnavailableError):
-        await sdk_llm(httpx2.MockTransport(handler)).complete(MESSAGES, max_tokens=5, temperature=0)
+        await sdk_llm(httpx2.MockTransport(handler)).ainvoke(MESSAGES, max_tokens=5, temperature=0)
     assert time.perf_counter() - start < 5.0  # retry backoff included

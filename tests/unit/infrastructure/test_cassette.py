@@ -4,19 +4,24 @@ from pathlib import Path
 
 import pytest
 from langchain_core.embeddings import Embeddings
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
-from customer_agent.application.ports import ChatMessage, ProviderUnavailableError
+from customer_agent.application.ports import ProviderUnavailableError
 from customer_agent.infrastructure.cassette import (
     Cassette,
     CassetteEmbeddings,
+    ChatMessage,
     ReplayMissError,
     chat_key,
 )
-from customer_agent.infrastructure.models import ChatModelLLM, ReplayChatModel
-from tests.fakes import FakeChatModel
+from customer_agent.infrastructure.models import ReplayChatModel
+from tests.fakes import FakeLLM
 
-MESSAGES = [ChatMessage(role="system", content="Regeln"), ChatMessage(role="user", content="Hallo")]
+MESSAGES: list[BaseMessage] = [SystemMessage("Regeln"), HumanMessage("Hallo")]
+KEY_MESSAGES = [
+    ChatMessage(role="system", content="Regeln"),
+    ChatMessage(role="user", content="Hallo"),
+]
 
 
 class CountingEmbeddings(Embeddings):
@@ -37,15 +42,19 @@ class CountingEmbeddings(Embeddings):
         return (await self.aembed_documents([text]))[0]
 
 
-def replay_llm(cassette: Cassette, inner: FakeChatModel | None = None) -> ChatModelLLM:
-    return ChatModelLLM(ReplayChatModel(cassette=cassette, inner=inner, label="answer-model"))
+def replay_model(cassette: Cassette, inner: FakeLLM | None = None) -> ReplayChatModel:
+    return ReplayChatModel(cassette=cassette, inner=inner, label="answer-model")
 
 
-async def record_chat(path: Path, reply: str = "Guten Tag") -> FakeChatModel:
-    inner = FakeChatModel(reply=reply)
-    llm = replay_llm(Cassette(path, record=True), inner)
-    await llm.complete(MESSAGES, max_tokens=100, temperature=0.0)
-    await llm.aclose()
+async def ask(model: ReplayChatModel, messages: list[BaseMessage] = MESSAGES) -> BaseMessage:
+    return await model.ainvoke(messages, max_tokens=100, temperature=0.0)
+
+
+async def record_chat(path: Path, reply: str = "Guten Tag") -> FakeLLM:
+    inner = FakeLLM(reply)
+    model = replay_model(Cassette(path, record=True), inner)
+    await ask(model)
+    await model.aclose()
     return inner
 
 
@@ -53,9 +62,13 @@ async def test_replays_a_recorded_completion_without_a_provider(tmp_path: Path) 
     path = tmp_path / "smoke.json.gz"
     inner = await record_chat(path)
 
-    replay = replay_llm(Cassette(path, record=False), None)
-    result = await replay.complete(MESSAGES, max_tokens=100, temperature=0.0)
-    streamed = [piece async for piece in replay.stream(MESSAGES, max_tokens=100, temperature=0.0)]
+    replay = replay_model(Cassette(path, record=False))
+    result = await ask(replay)
+    streamed = [
+        chunk.text
+        async for chunk in replay.astream(MESSAGES, max_tokens=100, temperature=0.0)
+        if chunk.text
+    ]
 
     assert result.text == "Guten Tag"
     assert streamed == ["Guten Tag"]
@@ -65,22 +78,22 @@ async def test_replays_a_recorded_completion_without_a_provider(tmp_path: Path) 
 async def test_a_changed_request_is_a_miss_not_a_degraded_answer(tmp_path: Path) -> None:
     path = tmp_path / "smoke.json.gz"
     await record_chat(path)
-    replay = replay_llm(Cassette(path, record=False), None)
-    changed = [*MESSAGES[:1], ChatMessage(role="user", content="Hallo!")]
+    replay = replay_model(Cassette(path, record=False))
+    changed = [MESSAGES[0], HumanMessage("Hallo!")]
 
     with pytest.raises(ReplayMissError, match="eval-smoke-record") as error:
-        await replay.complete(changed, max_tokens=100, temperature=0.0)
+        await ask(replay, changed)
     # the orchestrator turns provider outages into a handoff; a miss must fail the run instead
     assert not isinstance(error.value, ProviderUnavailableError)
 
 
 def test_keys_depend_on_every_request_parameter() -> None:
-    base = chat_key(MESSAGES, 100, 0.0)
+    base = chat_key(KEY_MESSAGES, 100, 0.0)
 
-    assert chat_key(MESSAGES, 100, 0.0) == base
-    assert chat_key(MESSAGES, 200, 0.0) != base
-    assert chat_key(MESSAGES, 100, 0.2) != base
-    assert chat_key(MESSAGES[1:], 100, 0.0) != base
+    assert chat_key(KEY_MESSAGES, 100, 0.0) == base
+    assert chat_key(KEY_MESSAGES, 200, 0.0) != base
+    assert chat_key(KEY_MESSAGES, 100, 0.2) != base
+    assert chat_key(KEY_MESSAGES[1:], 100, 0.0) != base
 
 
 def test_replay_requires_the_cassette(tmp_path: Path) -> None:
@@ -124,8 +137,7 @@ async def test_recordings_of_separate_processes_are_merged(tmp_path: Path) -> No
     replay = CassetteEmbeddings(cassette, None, "fake", 2)
 
     assert await replay.aembed_query("Rückgabe innerhalb von 30 Tagen")
-    llm = replay_llm(cassette, None)
-    assert await llm.complete(MESSAGES, max_tokens=100, temperature=0.0)
+    assert (await ask(replay_model(cassette))).text
 
 
 async def test_unchanged_recordings_keep_the_same_bytes(tmp_path: Path) -> None:
@@ -138,19 +150,12 @@ async def test_unchanged_recordings_keep_the_same_bytes(tmp_path: Path) -> None:
 
 async def test_langchain_replay_stream_preserves_usage(tmp_path: Path) -> None:
     path = tmp_path / "usage.json.gz"
-    recorder = replay_llm(
-        Cassette(path, record=True), FakeChatModel(reply="Antwort", usage=(12, 3))
-    )
-    await recorder.complete(MESSAGES, max_tokens=100, temperature=0.0)
+    recorder = replay_model(Cassette(path, record=True), FakeLLM("Antwort", usage=(12, 3)))
+    await ask(recorder)
     await recorder.aclose()
     model = ReplayChatModel(cassette=Cassette(path, record=False), label="answer-model")
 
-    chunks = [
-        chunk
-        async for chunk in model.astream(
-            [SystemMessage("Regeln"), HumanMessage("Hallo")], max_tokens=100, temperature=0.0
-        )
-    ]
+    chunks = [chunk async for chunk in model.astream(MESSAGES, max_tokens=100, temperature=0.0)]
 
     assert "".join(chunk.text for chunk in chunks) == "Antwort"
     usages = [chunk.usage_metadata for chunk in chunks if chunk.usage_metadata]

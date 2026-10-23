@@ -4,11 +4,11 @@ import json
 import re
 import time
 
+from langchain_core.language_models.chat_models import BaseChatModel
 from pydantic import BaseModel, ValidationError, field_validator
 
 from customer_agent.application.answering import format_history, search_query
 from customer_agent.application.guardrails import check_generated_text
-from customer_agent.application.ports import LLMProvider
 from customer_agent.application.prompts import PromptTemplate
 from customer_agent.domain.conversation import Conversation
 from customer_agent.domain.intents import Intent, IntentGroup
@@ -161,7 +161,7 @@ def describe_state(state: SessionState) -> str:
 
 
 class IntentRouter:
-    def __init__(self, llm: LLMProvider, prompt: PromptTemplate) -> None:
+    def __init__(self, llm: BaseChatModel, prompt: PromptTemplate) -> None:
         self._llm = llm
         self._prompt = prompt
 
@@ -179,15 +179,15 @@ class IntentRouter:
         start = time.perf_counter()
         result = route_by_rules(conversation, state)
         if result is None:
-            reply = await self._llm.complete(
+            reply = await self._llm.ainvoke(
                 self._prompt.render_messages(
                     state=describe_state(state),
                     history=format_history(conversation),
                     message=conversation.messages[-1].content,
                 ),
+                session_id=session_id,
                 max_tokens=ROUTER_MAX_TOKENS,
                 temperature=0.0,
-                session_id=session_id,
             )
             result = self._vet_clarification(
                 parse_llm_routing(reply.text, conversation), conversation

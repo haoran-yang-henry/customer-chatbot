@@ -21,7 +21,6 @@ from customer_agent.application.orchestrator import ConversationOrchestrator
 from customer_agent.application.ports import (
     AuditLog,
     Clock,
-    LLMProvider,
     TicketService,
     TokenVerifier,
 )
@@ -45,9 +44,9 @@ from customer_agent.infrastructure.memory import InMemoryAuditLog, InMemoryTicke
 from customer_agent.infrastructure.models import (
     BreakerChatModel,
     CachedChatModel,
-    ChatModelLLM,
     ProviderChatModel,
     ReplayChatModel,
+    model_label,
 )
 from customer_agent.infrastructure.prompts import load_prompt
 from customer_agent.infrastructure.resilience import BreakerEmbeddings, CircuitBreaker
@@ -176,6 +175,7 @@ def _chat_models(
                 max_retries=settings.llm_max_retries,
                 reasoning_effort=effort,
                 default_headers={"User-Agent": settings.llm_user_agent},
+                session_header=settings.llm_session_header,
                 stream_usage=True,
             ),
             breaker=breaker,
@@ -189,21 +189,9 @@ def _chat_models(
     return models
 
 
-def create_llm_providers(
-    settings: Settings, breaker: CircuitBreaker | None = None
-) -> dict[str, LLMProvider]:
-    """The chat models behind the ``LLMProvider`` port, until the application calls them
-    directly (rebuild phase 2)."""
-    return {
-        role: ChatModelLLM(model, session_header=settings.llm_session_header)
-        for role, model in create_chat_models(settings, breaker).items()
-    }
-
-
-def create_llm_provider(settings: Settings) -> LLMProvider:
-    """The answer-role provider (also used by the evaluation judge)."""
-    model = create_chat_models(settings, roles=("answer",))["answer"]
-    return ChatModelLLM(model, session_header=settings.llm_session_header)
+def create_chat_model(settings: Settings) -> BaseChatModel:
+    """The answer-role model (also used by the evaluation judge)."""
+    return create_chat_models(settings, roles=("answer",))["answer"]
 
 
 def start_langfuse(
@@ -247,7 +235,7 @@ class Container:
     engine: AsyncEngine
     agent: ConversationOrchestrator
     chat: ChatService
-    llms: dict[str, LLMProvider]
+    llms: dict[str, BaseChatModel]
     embeddings: Embeddings
     verifier: TokenVerifier | None
     prompts: dict[str, str]
@@ -255,7 +243,7 @@ class Container:
 
     @property
     def models(self) -> dict[str, str]:
-        return {role: llm.model_name for role, llm in self.llms.items()}
+        return {role: model_label(llm) for role, llm in self.llms.items()}
 
     async def readiness(self) -> dict[str, str]:
         """The database decides readiness. Breaker states are reported, but an open breaker
@@ -289,7 +277,7 @@ def build_container(
     clock = clock or SystemClock()
     breakers = {name: create_breaker(settings, name) for name in ("llm", "embeddings")}
     embeddings = create_embedding_provider(settings, breakers["embeddings"])
-    llms = create_llm_providers(settings, breakers["llm"])
+    llms = create_chat_models(settings, breakers["llm"])
     answer_prompt = load_prompt("answer", settings.answer_prompt_version)
     router_prompt = load_prompt("router", settings.router_prompt_version)
     retrieval = RetrievalService(

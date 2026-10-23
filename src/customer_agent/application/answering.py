@@ -10,6 +10,8 @@ import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import BaseMessage
 from pydantic import BaseModel, ConfigDict
 
 from customer_agent.application.citations import (
@@ -20,7 +22,7 @@ from customer_agent.application.citations import (
 from customer_agent.application.fallbacks import fallback
 from customer_agent.application.guardrails import Evidence, check_output
 from customer_agent.application.guardrails.evidence import quote_untrusted
-from customer_agent.application.ports import ChatMessage, Clock, LLMProvider, Retriever
+from customer_agent.application.ports import Clock, Retriever
 from customer_agent.application.prompts import PromptTemplate
 from customer_agent.domain.conversation import AgentResponse, Behavior, Conversation, Role
 from customer_agent.domain.guardrails import GuardrailAction
@@ -105,7 +107,7 @@ def format_history(conversation: Conversation) -> str:
 class _Prepared:
     documents: list[RetrievedDocument]
     evidence: Evidence
-    messages: list[ChatMessage]
+    messages: list[BaseMessage]
     session_id: str
 
 
@@ -113,7 +115,7 @@ class AnswerService:
     def __init__(
         self,
         retriever: Retriever,
-        llm: LLMProvider,
+        llm: BaseChatModel,
         prompt: PromptTemplate,
         clock: Clock,
         *,
@@ -197,13 +199,13 @@ class AnswerService:
         prepared = await self._prepare(conversation, query, session_id)
         if isinstance(prepared, AgentResponse):
             return prepared
-        result = await self._llm.complete(
+        reply = await self._llm.ainvoke(
             prepared.messages,
+            session_id=prepared.session_id,
             max_tokens=self._max_tokens,
             temperature=TEMPERATURE,
-            session_id=prepared.session_id,
         )
-        return self._finish(result.text, prepared)
+        return self._finish(reply.text, prepared)
 
     async def answer_stream(
         self,
@@ -217,13 +219,13 @@ class AnswerService:
             yield FinalAnswer(response=prepared)
             return
         stream_filter = StreamingCitationFilter()
-        async for delta in self._llm.stream(
+        async for chunk in self._llm.astream(
             prepared.messages,
+            session_id=prepared.session_id,
             max_tokens=self._max_tokens,
             temperature=TEMPERATURE,
-            session_id=prepared.session_id,
         ):
-            if text := stream_filter.feed(delta):
+            if text := stream_filter.feed(chunk.text):
                 yield TextDelta(text=text)
         if text := stream_filter.flush():
             yield TextDelta(text=text)

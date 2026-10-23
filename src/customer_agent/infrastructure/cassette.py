@@ -17,16 +17,36 @@ import json
 from collections.abc import Sequence
 from functools import cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from langchain_core.embeddings import Embeddings
+from pydantic import BaseModel, ConfigDict
 
-from customer_agent.application.ports import ChatMessage, LLMResult
 from customer_agent.observability import get_logger
 
 log = get_logger("cassette")
 
 RERECORD = "the request changed (prompt, evidence or chunking); run `make eval-smoke-record`"
+
+
+class ChatMessage(BaseModel):
+    """A request message as recordings and the evaluation cache key it (Day 3 shape)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    role: Literal["system", "user", "assistant"]
+    content: str
+
+
+class LLMResult(BaseModel):
+    """A recorded model answer: the stored shape of the cassette and the evaluation cache."""
+
+    model_config = ConfigDict(frozen=True)
+
+    text: str
+    model: str
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
 
 
 class ReplayMissError(RuntimeError):

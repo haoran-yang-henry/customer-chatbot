@@ -3,43 +3,35 @@
 import json
 
 import httpx2
+from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import SecretStr
 
-from customer_agent.application.ports import ChatMessage
 from customer_agent.infrastructure.embeddings import ProviderEmbeddings
-from customer_agent.infrastructure.models import ChatModelLLM, ProviderChatModel
+from customer_agent.infrastructure.models import ProviderChatModel
 from customer_agent.infrastructure.prompts import load_prompt
 from tests.load.mock_llm import app
 
 
 async def test_router_prompt_gets_a_routing_and_answers_cite_the_evidence() -> None:
-    llm = ChatModelLLM(
-        ProviderChatModel(
-            model_name="mock-model",
-            openai_api_key=SecretStr("mock"),
-            openai_api_base="http://mock/v1",
-            http_async_client=httpx2.AsyncClient(transport=httpx2.ASGITransport(app=app)),
-            stream_usage=True,
-        )
+    llm = ProviderChatModel(
+        model_name="mock-model",
+        openai_api_key=SecretStr("mock"),
+        openai_api_base="http://mock/v1",
+        http_async_client=httpx2.AsyncClient(transport=httpx2.ASGITransport(app=app)),
+        stream_usage=True,
     )
     router = load_prompt("router", 5)
 
-    routing = await llm.complete(
-        [
-            ChatMessage(role="system", content=router.system),
-            ChatMessage(role="user", content="LATEST CUSTOMER MESSAGE:\nKosten?"),
-        ],
+    routing = await llm.ainvoke(
+        [SystemMessage(router.system), HumanMessage("LATEST CUSTOMER MESSAGE:\nKosten?")],
         max_tokens=50,
         temperature=0,
     )
     answer = "".join(
         [
-            d
-            async for d in llm.stream(
-                [
-                    ChatMessage(role="system", content="You answer."),
-                    ChatMessage(role="user", content='<document id="faq-x">…</document>'),
-                ],
+            chunk.text
+            async for chunk in llm.astream(
+                [SystemMessage("You answer."), HumanMessage('<document id="faq-x">…</document>')],
                 max_tokens=50,
                 temperature=0,
             )

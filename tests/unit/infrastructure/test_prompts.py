@@ -22,8 +22,7 @@ def test_langchain_renders_every_prompt_byte_for_byte(path: Path) -> None:
     messages = prompt.chat_prompt.format_messages(**values)
 
     assert messages == [SystemMessage(prompt.system), HumanMessage(expected)]
-    assert prompt.render_messages(**values)[1].content == expected
-    assert prompt.render_user(**values) == expected
+    assert prompt.render_messages(**values)[1].text == expected
     assert prompt.chat_prompt.metadata == {"prompt": prompt.ref}
 
 
@@ -39,7 +38,7 @@ def test_dollars_and_json_remain_literal(user: str) -> None:
     prompt = PromptTemplate(name="test", version=1, description="", system="$literal {}", user=user)
     values = {"value": "{user} $not_a_variable", "left": "ä", "right": "€"}
 
-    assert prompt.render_user(**values) == Template(user).substitute(values)
+    assert prompt.render_messages(**values)[1].text == Template(user).substitute(values)
     assert prompt.render_messages(**values)[0].content == "$literal {}"
 
 

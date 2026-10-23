@@ -8,15 +8,14 @@ from pydantic import ValidationError
 from customer_agent.bootstrap import (
     ConfigurationError,
     check_embedding_dimensions,
+    create_chat_models,
     create_embedding_provider,
-    create_llm_providers,
 )
 from customer_agent.config import Settings
 from customer_agent.infrastructure.cassette import CassetteEmbeddings
 from customer_agent.infrastructure.lifecycle import aclose_all
 from customer_agent.infrastructure.models import (
     BreakerChatModel,
-    ChatModelLLM,
     ProviderChatModel,
     ReplayChatModel,
 )
@@ -54,12 +53,9 @@ def test_replaying_a_cassette_needs_no_api_key(tmp_path: Path) -> None:
         json.dump({"chat": {}, "embeddings": {}}, file)
     settings = Settings(_env_file=None, eval_cassette=cassette)
 
-    providers = create_llm_providers(settings)
+    models = create_chat_models(settings)
 
-    assert all(
-        isinstance(llm, ChatModelLLM) and isinstance(llm.chat_model, ReplayChatModel)
-        for llm in providers.values()
-    )
+    assert all(isinstance(model, ReplayChatModel) for model in models.values())
     assert isinstance(create_embedding_provider(settings), CassetteEmbeddings)
 
 
@@ -93,17 +89,16 @@ async def test_router_timeout_and_retries_stay_below_the_fallback_deadline(
     monkeypatch.setenv("CA_LLM_API_KEY", "sk-test")
     settings = Settings(_env_file=None)
 
-    providers = create_llm_providers(settings)
-    router = providers["router"]
-    assert isinstance(router, ChatModelLLM)
-    assert isinstance(router.chat_model, BreakerChatModel)
-    model = router.chat_model.inner
+    models = create_chat_models(settings)
+    router = models["router"]
+    assert isinstance(router, BreakerChatModel)
+    model = router.inner
     assert isinstance(model, ProviderChatModel)
 
     attempts = settings.llm_max_retries + 1
     assert isinstance(model.request_timeout, float)
     assert model.request_timeout * attempts + 1.0 < 10.0
-    await aclose_all(*providers.values())
+    await aclose_all(*models.values())
 
 
 @pytest.mark.parametrize(
