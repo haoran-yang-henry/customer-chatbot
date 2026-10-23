@@ -17,7 +17,7 @@ from customer_agent.application.answering import TextDelta
 from customer_agent.application.orchestrator import ConversationOrchestrator, TurnResult
 from customer_agent.application.ports import SessionStore, StoredSession
 from customer_agent.domain.conversation import AgentResponse, Conversation, Message, Role
-from customer_agent.observability import get_logger, session_id_var, step
+from customer_agent.observability import get_logger, session_id_var, step, trace_turn
 
 log = get_logger("session")
 
@@ -83,21 +83,32 @@ class ChatService:
                 messages=[*history, Message(role=Role.USER, content=text)],
                 customer_id=customer_id,
             )
-            async for event in self._orchestrator.handle_stream(
-                conversation, session.state, session_id=session.session_id
-            ):
-                if isinstance(event, TurnResult):
-                    with step("session.save"):
-                        await self._sessions.save_turn(
-                            session.session_id,
-                            expected_version=session.version,
-                            state=event.state,
-                            user=event.user_text,  # masked by the input guardrail, never raw
-                            reply=event.response,
+            with trace_turn(session_id=session.session_id, customer_id=customer_id) as turn:
+                async for event in self._orchestrator.handle_stream(
+                    conversation, session.state, session_id=session.session_id
+                ):
+                    if isinstance(event, TurnResult):
+                        with step("session.save"):
+                            await self._sessions.save_turn(
+                                session.session_id,
+                                expected_version=session.version,
+                                state=event.state,
+                                user=event.user_text,  # masked by the input guardrail, never raw
+                                reply=event.response,
+                            )
+                        turn.record(
+                            user_text=event.user_text,
+                            answer=event.response.answer,
+                            metadata={
+                                "behavior": event.response.behavior.value,
+                                "intent": str(event.response.intent),
+                            },
                         )
-                    out.put_nowait(ChatTurn(session_id=session.session_id, response=event.response))
-                else:
-                    out.put_nowait(event)
+                        out.put_nowait(
+                            ChatTurn(session_id=session.session_id, response=event.response)
+                        )
+                    else:
+                        out.put_nowait(event)
             out.put_nowait(None)
         except Exception as exc:  # handed to the consumer, re-raised there
             log.warning("turn failed: %s", type(exc).__name__)

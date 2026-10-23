@@ -15,7 +15,12 @@ from customer_agent.api.rate_limit import SlidingWindowLimiter
 from customer_agent.application.chat import ChatService
 from customer_agent.application.ports import TokenVerifier
 from customer_agent.config import Settings, get_settings
-from customer_agent.observability import configure_logging, configure_tracing, get_logger
+from customer_agent.observability import (
+    configure_logging,
+    configure_tracing,
+    get_logger,
+    shutdown_langfuse,
+)
 
 log = get_logger("http")
 
@@ -44,9 +49,10 @@ def create_app(
             app.state.verifier = verifier
             yield
             return
-        from customer_agent.bootstrap import build_container
+        from customer_agent.bootstrap import build_container, start_langfuse
 
         container = build_container(settings)
+        start_langfuse(settings, tracing, __version__)
         app.state.chat = container.chat
         app.state.verifier = container.verifier
         app.state.readiness = container.readiness
@@ -57,6 +63,7 @@ def create_app(
             yield
         finally:
             await container.aclose()
+            shutdown_langfuse()
             tracing.force_flush()  # spans still queued in the batch processor
 
     app = FastAPI(

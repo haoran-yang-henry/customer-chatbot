@@ -8,6 +8,7 @@ import asyncio
 from dataclasses import dataclass
 
 from openai import AsyncOpenAI
+from opentelemetry.sdk.trace import TracerProvider
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 
@@ -48,7 +49,7 @@ from customer_agent.infrastructure.resilience import (
     BreakerLLM,
     CircuitBreaker,
 )
-from customer_agent.observability import get_logger
+from customer_agent.observability import configure_langfuse, get_logger, instrument_openai
 
 log = get_logger("bootstrap")
 
@@ -183,6 +184,24 @@ def _llm_providers(settings: Settings, breaker: CircuitBreaker | None) -> dict[s
 def create_llm_provider(settings: Settings) -> LLMProvider:
     """The answer-role provider (also used by the evaluation judge)."""
     return create_llm_providers(settings)["answer"]
+
+
+def start_langfuse(settings: Settings, tracer_provider: TracerProvider, version: str) -> bool:
+    """Langfuse tracing of turns and model calls, when configured (see ``langfuse_enabled``)."""
+    key, secret = settings.langfuse_public_key, settings.langfuse_secret_key
+    if not settings.langfuse_enabled or key is None or secret is None:
+        return False
+    configure_langfuse(
+        public_key=key,
+        secret_key=secret.get_secret_value(),
+        base_url=settings.langfuse_base_url,
+        environment=settings.app_env,
+        release=version,
+        tracer_provider=tracer_provider,
+    )
+    instrument_openai()
+    log.info("langfuse tracing enabled base_url=%s", settings.langfuse_base_url or "default")
+    return True
 
 
 def create_token_verifier(settings: Settings) -> TokenVerifier | None:
