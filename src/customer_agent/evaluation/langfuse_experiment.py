@@ -17,6 +17,7 @@ and the labels come back as a calibration sheet for ``--check-calibration``.
 """
 
 import asyncio
+import json
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
@@ -266,6 +267,16 @@ def _flag(value: object) -> bool:
     return str(value).strip().lower() in ("true", "1", "1.0")
 
 
+def _object(payload: object) -> dict[str, Any]:
+    """The observations API returns input and output as raw JSON strings."""
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except json.JSONDecodeError:
+            return {}
+    return payload if isinstance(payload, dict) else {}
+
+
 def labelled_rows(client: Langfuse, queue_id: str) -> list[dict[str, object]]:
     """The queue's human labels as calibration rows (the ``--check-calibration`` format), with
     the judge's verdict on the same trace; the latest label per case wins."""
@@ -279,16 +290,13 @@ def labelled_rows(client: Langfuse, queue_id: str) -> list[dict[str, object]]:
             subject = score.subject
             trace_id = getattr(subject, "trace_id", None) or subject.id
             root = client.api.observations.get_many(
-                trace_id=trace_id,
-                is_root_observation=True,
-                fields="core,basic,io,metadata",
-                parse_io_as_json=True,
+                trace_id=trace_id, is_root_observation=True, fields="core,basic,io,metadata"
             ).data[0]
             judge = client.api.scores.get_many(
                 trace_id=trace_id, name=JUDGE_SCORE, fields="core", limit=1
             ).data
-            case_input: dict[str, Any] = root.input or {}
-            output: dict[str, Any] = root.output or {}
+            case_input = _object(root.input)
+            output = _object(root.output)
             case_id = str((root.metadata or {}).get("case_id", trace_id))
             rows[case_id] = {
                 "case_id": case_id,

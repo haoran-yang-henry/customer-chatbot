@@ -1,5 +1,6 @@
 """Evaluation runs as Langfuse experiments: dataset sync and the experiment run, offline."""
 
+import json
 import threading
 from collections.abc import Iterator
 from datetime import UTC, datetime
@@ -228,8 +229,11 @@ def test_human_labels_become_calibration_rows_next_to_the_judges_verdict() -> No
         timestamp=datetime(2026, 10, 23, tzinfo=UTC),
     )
     root = SimpleNamespace(
-        input={"turns": [{"role": "user", "content": "Kostet die Rücksendung etwas?"}]},
-        output={"answer": "Nein, die Rücksendung ist kostenlos.", "sources": ["policy-returns-v5"]},
+        # The API returns input and output as raw JSON strings.
+        input=json.dumps({"turns": [{"role": "user", "content": "Kostet die Rücksendung etwas?"}]}),
+        output=json.dumps(
+            {"answer": "Nein, die Rücksendung ist kostenlos.", "sources": ["policy-returns-v5"]}
+        ),
         metadata={"case_id": "N-002"},
     )
 
