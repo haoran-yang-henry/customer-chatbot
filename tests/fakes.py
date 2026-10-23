@@ -20,9 +20,9 @@ from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from pydantic import Field
 
 from customer_agent.application.ports import (
+    AskedFeedback,
     ProviderUnavailableError,
     StoredSession,
-    StoredTurn,
 )
 from customer_agent.domain.knowledge import SourceType, TrustLevel
 from customer_agent.domain.orders import Order
@@ -30,6 +30,7 @@ from customer_agent.domain.retrieval import SearchMode, SearchScope
 from customer_agent.infrastructure.memory import InMemoryAuditLog, InMemoryTicketService
 
 if TYPE_CHECKING:
+    from customer_agent.application.feedback import FeedbackPolicy
     from customer_agent.application.guardrails.classifier import PromptAttackClassifier
     from customer_agent.application.orchestrator import ConversationOrchestrator
     from customer_agent.application.retrieval import HybridRetriever
@@ -205,8 +206,8 @@ class InMemorySessionStore:
     def __init__(self) -> None:
         self.sessions: dict[str, StoredSession] = {}
         self.leased: set[str] = set()
-        self.turns: dict[tuple[str, str], StoredTurn] = {}
-        self.ratings: dict[tuple[str, str], tuple[bool, str | None]] = {}
+        self.asked: dict[str, AskedFeedback] = {}
+        self.ratings: dict[str, tuple[bool, str | None]] = {}
 
     async def create(self, *, tenant_id: str, customer_id: str | None) -> StoredSession:
         session = StoredSession(
@@ -227,18 +228,16 @@ class InMemorySessionStore:
     async def release(self, session_id: str) -> None:
         self.leased.discard(session_id)
 
-    async def record_turn(self, turn: StoredTurn) -> None:
-        key = (turn.session_id, turn.request_id)
-        self.turns[key] = turn
-        self.ratings.pop(key, None)
+    async def ask_feedback(self, asked: AskedFeedback) -> None:
+        self.asked.setdefault(asked.session_id, asked)
 
-    async def rate_turn(
-        self, session_id: str, request_id: str, *, helpful: bool, comment: str | None
-    ) -> StoredTurn | None:
-        turn = self.turns.get((session_id, request_id))
-        if turn is not None:
-            self.ratings[(session_id, request_id)] = (helpful, comment)
-        return turn
+    async def rate_session(
+        self, session_id: str, *, helpful: bool, comment: str | None
+    ) -> AskedFeedback | None:
+        asked = self.asked.get(session_id)
+        if asked is not None:
+            self.ratings[session_id] = (helpful, comment)
+        return asked
 
 
 class SeedOrderRepository:
@@ -271,6 +270,7 @@ def make_orchestrator(
     classifier: "PromptAttackClassifier | None" = None,
     max_tickets_per_day: int = 3,
     checkpointer: BaseCheckpointSaver[Any] | None = None,
+    feedback: "FeedbackPolicy | None" = None,
 ) -> "ConversationOrchestrator":
     from customer_agent.application.answering import AnswerService
     from customer_agent.application.orchestrator import ConversationOrchestrator
@@ -293,6 +293,7 @@ def make_orchestrator(
         tenant_id="nordelektro",
         checkpointer=checkpointer or memory_checkpointer(),
         max_tickets_per_day=max_tickets_per_day,
+        feedback=feedback,
     )
 
 

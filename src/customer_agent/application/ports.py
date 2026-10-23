@@ -101,13 +101,13 @@ class StoredSession(BaseModel):
     customer_id: str | None
 
 
-class StoredTurn(BaseModel):
-    """A served turn the customer may rate: its request and its trace (Jaeger, Langfuse)."""
+class AskedFeedback(BaseModel):
+    """A session was asked whether the conversation helped, in this turn (request, trace)."""
 
     model_config = ConfigDict(frozen=True)
 
     session_id: str
-    request_id: str
+    request_id: str | None
     trace_id: str | None
 
 
@@ -127,15 +127,15 @@ class SessionStore(Protocol):
 
     async def release(self, session_id: str) -> None: ...
 
-    async def record_turn(self, turn: StoredTurn) -> None:
-        """Remember a served turn; a request id the session already has is overwritten."""
+    async def ask_feedback(self, asked: AskedFeedback) -> None:
+        """Remember that the session was asked for a rating (at most once per session)."""
         ...
 
-    async def rate_turn(
-        self, session_id: str, request_id: str, *, helpful: bool, comment: str | None
-    ) -> StoredTurn | None:
-        """The customer's rating of one answer, replacing an earlier one; ``None`` if the
-        session has no such turn."""
+    async def rate_session(
+        self, session_id: str, *, helpful: bool, comment: str | None
+    ) -> AskedFeedback | None:
+        """The customer's rating of the conversation, replacing an earlier one; ``None`` if the
+        session was never asked."""
         ...
 
 

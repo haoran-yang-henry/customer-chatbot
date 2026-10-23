@@ -26,20 +26,19 @@ class ChatResponse(BaseModel):
     intent: Intent | None
     sources: list[str]
     request_id: str
+    feedback_requested: bool = Field(
+        default=False,
+        description="Ask the customer whether the conversation helped (POST /v1/feedback).",
+    )
 
 
 class FeedbackRequest(BaseModel):
-    """The customer's rating of one answer of their session."""
+    """The customer's rating of a conversation they were asked about (``feedback_requested``)."""
 
     model_config = ConfigDict(
-        json_schema_extra={
-            "examples": [{"session_id": "4f1c…", "request_id": "33e7c505b6ef", "rating": "down"}]
-        }
+        json_schema_extra={"examples": [{"session_id": "4f1c…", "rating": "down"}]}
     )
 
     session_id: str = Field(min_length=1, max_length=64)
-    request_id: str = Field(
-        min_length=1, max_length=64, description="The ``request_id`` of the rated answer."
-    )
     rating: Literal["up", "down"]
     comment: str | None = Field(default=None, max_length=1000)

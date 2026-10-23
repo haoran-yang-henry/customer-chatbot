@@ -6,7 +6,7 @@ from customer_agent.observability.langfuse_tracing import (
     configure_langfuse,
     langchain_callbacks,
     langfuse_client,
-    score_turn,
+    score_session,
     shutdown_langfuse,
     trace_turn,
 )
@@ -39,7 +39,7 @@ __all__ = [
     "record_guardrail",
     "record_tokens",
     "request_id_var",
-    "score_turn",
+    "score_session",
     "session_id_var",
     "shutdown_langfuse",
     "step",

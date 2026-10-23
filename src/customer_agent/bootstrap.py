@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async
 
 from customer_agent.application.answering import AnswerService
 from customer_agent.application.chat import ChatService
+from customer_agent.application.feedback import FeedbackPolicy
 from customer_agent.application.guardrails.classifier import PromptAttackClassifier
 from customer_agent.application.orchestrator import ConversationOrchestrator
 from customer_agent.application.ports import (
@@ -330,6 +331,7 @@ def build_container(
         tenant_id=settings.tenant_id,
         checkpointer=checkpointer.saver,
         max_tickets_per_day=settings.max_tickets_per_day if side_effects else None,
+        feedback=FeedbackPolicy(settings.feedback_sample_rate, settings.feedback_min_rounds),
     )
     sessions = PostgresSessionStore(db)
     prompts = {"answer": answer_prompt.ref, "router": router_prompt.ref}

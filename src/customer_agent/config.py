@@ -107,6 +107,10 @@ class Settings(BaseSettings):
     max_tickets_per_day: int = 3  # per customer, rolling 24 hours (T12)
     # Chat messages per minute per customer (logged in) or client address (anonymous); 0 = off.
     rate_limit_per_minute: int = 20
+    # Customer feedback (rebuild phase 3): this share of sessions is asked once, from this many
+    # rounds on, whether the conversation helped.
+    feedback_sample_rate: float = Field(default=0.3, ge=0.0, le=1.0)
+    feedback_min_rounds: int = Field(default=3, ge=1)
 
     @field_validator(
         "openai_api_key",

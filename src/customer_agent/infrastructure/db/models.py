@@ -96,19 +96,19 @@ class ChatSessionRow(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
-class ChatTurnRow(Base):
-    """A served turn and the customer's rating of its answer (feedback)."""
+class ChatFeedbackRow(Base):
+    """A session asked whether the conversation helped, and the customer's rating."""
 
-    __tablename__ = "chat_turns"
+    __tablename__ = "chat_feedback"
 
     session_id: Mapped[str] = mapped_column(
         ForeignKey("chat_sessions.id", ondelete="CASCADE"), primary_key=True
     )
-    request_id: Mapped[str] = mapped_column(primary_key=True)
+    request_id: Mapped[str | None]  # the turn that asked
     trace_id: Mapped[str | None]
     helpful: Mapped[bool | None] = mapped_column(default=None)
     comment: Mapped[str | None] = mapped_column(default=None)  # masked
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    asked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     rated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
 
 

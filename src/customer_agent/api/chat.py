@@ -14,8 +14,8 @@ from customer_agent.application.answering import TextDelta
 from customer_agent.application.chat import (
     ChatService,
     ChatTurn,
+    FeedbackNotRequestedError,
     SessionNotFoundError,
-    TurnNotFoundError,
 )
 from customer_agent.application.ports import ConcurrentTurnError
 from customer_agent.observability import request_id_var
@@ -41,6 +41,7 @@ def _response(turn: ChatTurn, request_id: str) -> ChatResponse:
         intent=turn.response.intent,
         sources=turn.response.sources,
         request_id=request_id,
+        feedback_requested=turn.feedback_requested,
     )
 
 
@@ -109,21 +110,20 @@ async def chat_stream(
 @router.post(
     "/feedback",
     status_code=204,
-    responses={404: {"description": "Unknown session, or no such answer in it"}},
+    responses={404: {"description": "Unknown session, or it was not asked for feedback"}},
 )
 async def feedback(
     body: FeedbackRequest, service: Chat, principal: CurrentPrincipal, _: RateLimited
 ) -> Response:
-    """Rate one answer (👍/👎, optional comment); only the session's customer can. A later
-    rating of the same answer replaces the earlier one."""
+    """Rate the conversation (👍/👎, optional comment) after a reply with ``feedback_requested``;
+    only the session's customer can. A later rating replaces the earlier one."""
     try:
         await service.feedback(
             body.session_id,
             principal.customer_id if principal else None,
-            body.request_id,
             helpful=body.rating == "up",
             comment=body.comment,
         )
-    except (SessionNotFoundError, TurnNotFoundError):
-        raise HTTPException(status_code=404, detail="answer not found") from None
+    except (SessionNotFoundError, FeedbackNotRequestedError):
+        raise HTTPException(status_code=404, detail="no feedback requested") from None
     return Response(status_code=204)

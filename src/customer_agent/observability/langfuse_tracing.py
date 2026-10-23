@@ -97,16 +97,20 @@ def shutdown_langfuse() -> None:
         _client = None
 
 
-def score_turn(trace_id: str, *, helpful: bool, comment: str | None) -> None:
-    """The customer's rating of one answer, on that turn's trace; nothing when Langfuse is off.
-    ``comment`` must already be masked."""
+def score_session(
+    session_id: str, *, helpful: bool, comment: str | None, asked_in: str | None
+) -> None:
+    """The customer's rating of a conversation, on the Langfuse session (= our session id);
+    ``asked_in``: the trace of the turn that asked. Nothing when Langfuse is off. ``comment``
+    must already be masked."""
     if _client is not None:
         _client.create_score(
-            trace_id=trace_id,
+            session_id=session_id,
             name="user_feedback",
             value=1 if helpful else 0,
             data_type="BOOLEAN",
             comment=comment,
+            metadata={"asked_in_trace": asked_in} if asked_in else None,
         )
 
 

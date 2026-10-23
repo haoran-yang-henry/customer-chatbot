@@ -24,6 +24,7 @@ from customer_agent.application.answering import (
     stateless_session_id,
 )
 from customer_agent.application.fallbacks import TICKET_QUESTION, intent_of_question
+from customer_agent.application.feedback import FeedbackPolicy
 from customer_agent.application.ports import AuditLog, Clock, OrderRepository, TicketService
 from customer_agent.application.tools import CreateTicket, GetOrderStatus
 from customer_agent.application.turn_graph import (
@@ -56,6 +57,7 @@ class TurnResult(BaseModel):
     response: AgentResponse
     state: SessionState
     user_text: str
+    feedback_requested: bool = False  # the reply asks whether the conversation helped
 
 
 TurnEvent = TextDelta | TurnResult
@@ -74,6 +76,7 @@ class ConversationOrchestrator:
         tenant_id: str,
         checkpointer: BaseCheckpointSaver[Any],
         max_tickets_per_day: int | None = 3,  # None: no limit
+        feedback: FeedbackPolicy | None = None,  # None: the defaults
     ) -> None:
         self._understand = understand
         turn = TurnGraph(
@@ -81,6 +84,7 @@ class ConversationOrchestrator:
             GetOrderStatus(orders=orders, audit_log=audit),
             CreateTicket(tickets=tickets, audit_log=audit, max_per_day=max_tickets_per_day),
             clock,
+            feedback or FeedbackPolicy(),
         )
         self._stateless = turn.compile()
         self._sessions = turn.compile(checkpointer)
@@ -181,7 +185,12 @@ class ConversationOrchestrator:
         response = final["response"]
         if response is None:  # pragma: no cover - the graph always ends with a response
             raise RuntimeError("turn ended without a response")
-        yield TurnResult(response=response, state=final["session"], user_text=text)
+        yield TurnResult(
+            response=response,
+            state=final["session"],
+            user_text=text,
+            feedback_requested=final["feedback_requested"],
+        )
 
 
 def recover_state(conversation: Conversation, state: SessionState) -> SessionState:

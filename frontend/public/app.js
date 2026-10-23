@@ -133,20 +133,21 @@ function startChat(auth, backend) {
     if (final.sources.length) parts.push(`Quellen: ${final.sources.join(", ")}`);
     if (final.intent) parts.push(`Intent: ${final.intent}`);
     parts.push(`${seconds.toLocaleString("de-DE", { maximumFractionDigits: 1 })} s`);
-    parts.push(feedbackButtons(final));
+    if (final.feedback_requested) parts.push(feedbackButtons(final));
     meta.replaceChildren(...parts.map((part) => (typeof part === "string" ? Object.assign(document.createElement("span"), { textContent: part }) : part)));
     meta.title = `Anfrage ${final.request_id}`;
   }
 
-  // 👍/👎 per answer: becomes a score on the turn's trace in Langfuse (POST /v1/feedback).
+  // Asked once in a sampled share of longer conversations; becomes a score on the session in
+  // Langfuse (POST /v1/feedback).
   function feedbackButtons(final) {
-    const box = Object.assign(document.createElement("span"), { className: "feedback" });
+    const box = Object.assign(document.createElement("span"), { className: "feedback", textContent: "Hat Ihnen dieses Gespräch geholfen?" });
     const rate = async (helpful) => {
       for (const button of box.querySelectorAll("button")) button.disabled = true;
       try {
         const token = await auth.accessToken();
         if (!token) throw new ApiError(401);
-        await sendFeedback(backend, token, { sessionId: final.session_id, requestId: final.request_id, helpful });
+        await sendFeedback(backend, token, { sessionId: final.session_id, helpful });
         box.replaceChildren("Danke für Ihr Feedback.");
       } catch {
         box.replaceChildren("Feedback konnte nicht gesendet werden.");

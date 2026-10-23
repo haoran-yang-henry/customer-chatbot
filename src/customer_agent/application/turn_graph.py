@@ -21,7 +21,7 @@ the payment-data notice leave through the ``custom`` stream.
 import operator
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Annotated, Any, Protocol, TypedDict, cast
+from typing import Annotated, Any, NotRequired, Protocol, TypedDict, cast
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -42,6 +42,7 @@ from customer_agent.application.fallbacks import (
     ticket_question,
     with_payment_data_notice,
 )
+from customer_agent.application.feedback import FeedbackPolicy
 from customer_agent.application.guardrails import PAYMENT_DATA_REASONS
 from customer_agent.application.order_guidance import order_guidance, order_not_found
 from customer_agent.application.ports import Clock, ProviderUnavailableError
@@ -93,6 +94,8 @@ class TurnState(TypedDict):
     verdict: GuardrailDecision | None
     decision: Decision | None
     response: AgentResponse | None
+    feedback_requested: bool  # this reply asks whether the conversation helped
+    feedback_asked: NotRequired[bool]  # the session was asked once: never again
 
 
 def turn_input(
@@ -113,6 +116,7 @@ def turn_input(
         "verdict": verdict,
         "decision": None,
         "response": None,
+        "feedback_requested": False,
     }
 
 
@@ -137,11 +141,13 @@ class TurnGraph:
         order_tool: GetOrderStatus,
         ticket_tool: CreateTicket,
         clock: Clock,
+        feedback: FeedbackPolicy,
     ) -> None:
         self._answers = answers
         self._order_tool = order_tool
         self._ticket_tool = ticket_tool
         self._clock = clock
+        self._feedback = feedback
 
     def compile(
         self, checkpointer: BaseCheckpointSaver[Any] | None = None
@@ -307,8 +313,9 @@ class TurnGraph:
                 response = step_reply(decision.step.value)
         return _done(state, response)
 
-    def _finish(self, state: TurnState) -> Update:
-        """The reply joins the transcript as the customer sees it."""
+    def _finish(self, state: TurnState, runtime: Runtime[TurnContext]) -> Update:
+        """The reply joins the transcript as the customer sees it; a sampled session of several
+        rounds is asked once whether the conversation helped (``FeedbackPolicy``)."""
         response = state["response"]
         if response is None:  # pragma: no cover - every path to finish sets a response
             raise RuntimeError("turn ended without a response")
@@ -316,7 +323,14 @@ class TurnGraph:
             response = with_payment_data_notice(response)
         AGENT_REPLIES.labels(behavior=response.behavior, intent=str(response.intent)).inc()
         reply = Message(role=Role.ASSISTANT, content=response.answer)
-        return {"response": response, "messages": [reply]}
+        update: Update = {"response": response, "messages": [reply]}
+        rounds = sum(1 for message in state["messages"] if message.role is Role.USER)
+        if not state.get("feedback_asked", False) and self._feedback.asks(
+            runtime.context.session_id, rounds, response.behavior
+        ):
+            log.info("feedback requested rounds=%d", rounds)
+            update |= {"feedback_requested": True, "feedback_asked": True}
+        return update
 
     async def _lookup(self, order_id: str, context: TurnContext) -> Order | None:
         order = await self._order_tool.ainvoke({"order_id": order_id}, _tool_config(context))

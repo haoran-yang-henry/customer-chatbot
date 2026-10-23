@@ -15,7 +15,7 @@ from customer_agent.observability.langfuse_tracing import (
     configure_langfuse,
     exported,
     mask,
-    score_turn,
+    score_session,
     shutdown_langfuse,
     trace_turn,
 )
@@ -137,7 +137,7 @@ async def test_a_turn_reaches_langfuse_with_its_runs_and_without_the_raw_message
     assert IBAN not in payload and IBAN.replace(" ", "") not in payload
 
 
-def test_a_rating_becomes_a_boolean_score_on_the_turns_trace(
+def test_a_rating_becomes_a_boolean_score_on_the_session(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     sent: list[dict[str, object]] = []
@@ -148,18 +148,19 @@ def test_a_rating_becomes_a_boolean_score_on_the_turns_trace(
 
     monkeypatch.setattr(langfuse_tracing, "_client", Client())
 
-    score_turn("ab" * 16, helpful=False, comment="Falsch")
+    score_session("s-1", helpful=False, comment="Falsch", asked_in="ab" * 16)
 
     assert sent == [
         {
-            "trace_id": "ab" * 16,
+            "session_id": "s-1",
             "name": "user_feedback",
             "value": 0,
             "data_type": "BOOLEAN",
             "comment": "Falsch",
+            "metadata": {"asked_in_trace": "ab" * 16},
         }
     ]
 
 
 def test_a_rating_without_langfuse_is_not_sent() -> None:
-    score_turn("ab" * 16, helpful=True, comment=None)  # no client configured: nothing happens
+    score_session("s-1", helpful=True, comment=None, asked_in=None)  # no client: nothing happens

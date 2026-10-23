@@ -5,7 +5,7 @@ import asyncio
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
-from customer_agent.application.ports import StoredTurn
+from customer_agent.application.ports import AskedFeedback
 from customer_agent.infrastructure.db.session_repository import PostgresSessionStore
 
 
@@ -62,35 +62,31 @@ async def test_an_unknown_session_gets_no_lease(engine: AsyncEngine) -> None:
     assert not await store(engine).acquire("0" * 32)
 
 
-async def test_a_recorded_turn_is_rated_in_its_session_only(engine: AsyncEngine) -> None:
+async def test_only_an_asked_session_is_rated(engine: AsyncEngine) -> None:
     sessions = store(engine)
-    created = await sessions.create(tenant_id="nordelektro", customer_id="C-1001")
-    other = await sessions.create(tenant_id="nordelektro", customer_id="C-1001")
-    turn = StoredTurn(session_id=created.session_id, request_id="r1", trace_id="ab" * 16)
-    await sessions.record_turn(turn)
+    asked = await sessions.create(tenant_id="nordelektro", customer_id="C-1001")
+    never = await sessions.create(tenant_id="nordelektro", customer_id="C-1001")
+    question = AskedFeedback(session_id=asked.session_id, request_id="r3", trace_id="ab" * 16)
+    await sessions.ask_feedback(question)
 
-    rated = await sessions.rate_turn(created.session_id, "r1", helpful=False, comment="Falsch")
-    elsewhere = await sessions.rate_turn(other.session_id, "r1", helpful=True, comment=None)
+    rated = await sessions.rate_session(asked.session_id, helpful=False, comment="Falsch")
+    elsewhere = await sessions.rate_session(never.session_id, helpful=True, comment=None)
 
-    assert rated == turn and elsewhere is None
+    assert rated == question and elsewhere is None
     async with engine.connect() as connection:
-        row = (await connection.execute(text("SELECT helpful, comment FROM chat_turns"))).one()
+        row = (await connection.execute(text("SELECT helpful, comment FROM chat_feedback"))).one()
     assert tuple(row) == (False, "Falsch")
 
 
-async def test_a_repeated_request_id_overwrites_the_turn(engine: AsyncEngine) -> None:
-    """Request ids may come from the client (X-Request-ID)."""
+async def test_a_session_is_asked_once(engine: AsyncEngine) -> None:
     sessions = store(engine)
     created = await sessions.create(tenant_id="nordelektro", customer_id=None)
-    await sessions.record_turn(
-        StoredTurn(session_id=created.session_id, request_id="r", trace_id="a")
-    )
-    await sessions.rate_turn(created.session_id, "r", helpful=False, comment=None)
 
-    await sessions.record_turn(
-        StoredTurn(session_id=created.session_id, request_id="r", trace_id="b")
-    )
+    for request_id in ("r3", "r4"):
+        await sessions.ask_feedback(
+            AskedFeedback(session_id=created.session_id, request_id=request_id, trace_id=None)
+        )
 
     async with engine.connect() as connection:
-        rows = (await connection.execute(text("SELECT trace_id, helpful FROM chat_turns"))).all()
-    assert [tuple(r) for r in rows] == [("b", None)]
+        rows = (await connection.execute(text("SELECT request_id FROM chat_feedback"))).all()
+    assert [r[0] for r in rows] == ["r3"]

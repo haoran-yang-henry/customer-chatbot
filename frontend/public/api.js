@@ -55,12 +55,12 @@ export async function* chatStream(backend, token, message, sessionId) {
   yield* readEvents(response.body);
 }
 
-/** The customer's rating of one answer, identified by its request id. */
-export async function sendFeedback(backend, token, { sessionId, requestId, helpful }) {
+/** The customer's rating of the conversation, after a reply that asked for it. */
+export async function sendFeedback(backend, token, { sessionId, helpful }) {
   const response = await fetch(`${backend}/v1/feedback`, {
     method: "POST",
     headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-    body: JSON.stringify({ session_id: sessionId, request_id: requestId, rating: helpful ? "up" : "down" }),
+    body: JSON.stringify({ session_id: sessionId, rating: helpful ? "up" : "down" }),
   });
   if (!response.ok) throw new ApiError(response.status);
 }
