@@ -6,6 +6,7 @@ from customer_agent.observability.langfuse_tracing import (
     configure_langfuse,
     langchain_callbacks,
     langfuse_client,
+    score_turn,
     shutdown_langfuse,
     trace_turn,
 )
@@ -18,13 +19,19 @@ from customer_agent.observability.logs import (
     session_id_var,
 )
 from customer_agent.observability.metrics import record_guardrail, record_tokens
-from customer_agent.observability.tracing import configure_tracing, step, tracer
+from customer_agent.observability.tracing import (
+    configure_tracing,
+    current_trace_id,
+    step,
+    tracer,
+)
 
 __all__ = [
     "LogFormat",
     "configure_langfuse",
     "configure_logging",
     "configure_tracing",
+    "current_trace_id",
     "elapsed_ms",
     "get_logger",
     "langchain_callbacks",
@@ -32,6 +39,7 @@ __all__ = [
     "record_guardrail",
     "record_tokens",
     "request_id_var",
+    "score_turn",
     "session_id_var",
     "shutdown_langfuse",
     "step",

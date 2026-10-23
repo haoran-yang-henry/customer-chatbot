@@ -35,6 +35,13 @@ def configure_tracing(service: str, version: str, endpoint: str | None) -> Trace
     return provider
 
 
+def current_trace_id() -> str | None:
+    """The current trace's id as Jaeger and Langfuse show it (32 hex digits); ``None`` outside
+    a trace."""
+    context = trace.get_current_span().get_span_context()
+    return trace.format_trace_id(context.trace_id) if context.is_valid else None
+
+
 @contextmanager
 def step(name: str, **attributes: str | int | float | bool) -> Iterator[trace.Span]:
     """One agent step: a child span of the current one plus a duration sample.

@@ -22,6 +22,7 @@ from pydantic import Field
 from customer_agent.application.ports import (
     ProviderUnavailableError,
     StoredSession,
+    StoredTurn,
 )
 from customer_agent.domain.knowledge import SourceType, TrustLevel
 from customer_agent.domain.orders import Order
@@ -204,6 +205,8 @@ class InMemorySessionStore:
     def __init__(self) -> None:
         self.sessions: dict[str, StoredSession] = {}
         self.leased: set[str] = set()
+        self.turns: dict[tuple[str, str], StoredTurn] = {}
+        self.ratings: dict[tuple[str, str], tuple[bool, str | None]] = {}
 
     async def create(self, *, tenant_id: str, customer_id: str | None) -> StoredSession:
         session = StoredSession(
@@ -223,6 +226,19 @@ class InMemorySessionStore:
 
     async def release(self, session_id: str) -> None:
         self.leased.discard(session_id)
+
+    async def record_turn(self, turn: StoredTurn) -> None:
+        key = (turn.session_id, turn.request_id)
+        self.turns[key] = turn
+        self.ratings.pop(key, None)
+
+    async def rate_turn(
+        self, session_id: str, request_id: str, *, helpful: bool, comment: str | None
+    ) -> StoredTurn | None:
+        turn = self.turns.get((session_id, request_id))
+        if turn is not None:
+            self.ratings[(session_id, request_id)] = (helpful, comment)
+        return turn
 
 
 class SeedOrderRepository:

@@ -97,6 +97,19 @@ def shutdown_langfuse() -> None:
         _client = None
 
 
+def score_turn(trace_id: str, *, helpful: bool, comment: str | None) -> None:
+    """The customer's rating of one answer, on that turn's trace; nothing when Langfuse is off.
+    ``comment`` must already be masked."""
+    if _client is not None:
+        _client.create_score(
+            trace_id=trace_id,
+            name="user_feedback",
+            value=1 if helpful else 0,
+            data_type="BOOLEAN",
+            comment=comment,
+        )
+
+
 class TurnTrace:
     def __init__(self, span: LangfuseSpan | None) -> None:
         self._span = span

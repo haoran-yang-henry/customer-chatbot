@@ -10,10 +10,12 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 
 from customer_agent.config import Settings
 from customer_agent.domain.conversation import Conversation, Message, Role
+from customer_agent.observability import langfuse_tracing
 from customer_agent.observability.langfuse_tracing import (
     configure_langfuse,
     exported,
     mask,
+    score_turn,
     shutdown_langfuse,
     trace_turn,
 )
@@ -133,3 +135,31 @@ async def test_a_turn_reaches_langfuse_with_its_runs_and_without_the_raw_message
     assert len({span.context.trace_id for span in spans}) == 1
     assert "[IBAN entfernt]" in payload
     assert IBAN not in payload and IBAN.replace(" ", "") not in payload
+
+
+def test_a_rating_becomes_a_boolean_score_on_the_turns_trace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sent: list[dict[str, object]] = []
+
+    class Client:
+        def create_score(self, **score: object) -> None:
+            sent.append(score)
+
+    monkeypatch.setattr(langfuse_tracing, "_client", Client())
+
+    score_turn("ab" * 16, helpful=False, comment="Falsch")
+
+    assert sent == [
+        {
+            "trace_id": "ab" * 16,
+            "name": "user_feedback",
+            "value": 0,
+            "data_type": "BOOLEAN",
+            "comment": "Falsch",
+        }
+    ]
+
+
+def test_a_rating_without_langfuse_is_not_sent() -> None:
+    score_turn("ab" * 16, helpful=True, comment=None)  # no client configured: nothing happens

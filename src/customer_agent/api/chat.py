@@ -4,14 +4,19 @@ import json
 from collections.abc import AsyncIterator
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 
 from customer_agent.api.auth import CurrentPrincipal
 from customer_agent.api.rate_limit import RateLimited
-from customer_agent.api.schemas import ChatRequest, ChatResponse
+from customer_agent.api.schemas import ChatRequest, ChatResponse, FeedbackRequest
 from customer_agent.application.answering import TextDelta
-from customer_agent.application.chat import ChatService, ChatTurn, SessionNotFoundError
+from customer_agent.application.chat import (
+    ChatService,
+    ChatTurn,
+    SessionNotFoundError,
+    TurnNotFoundError,
+)
 from customer_agent.application.ports import ConcurrentTurnError
 from customer_agent.observability import request_id_var
 
@@ -99,3 +104,26 @@ async def chat_stream(
             event = await anext(events, None)
 
     return StreamingResponse(body_events(), media_type="text/event-stream")
+
+
+@router.post(
+    "/feedback",
+    status_code=204,
+    responses={404: {"description": "Unknown session, or no such answer in it"}},
+)
+async def feedback(
+    body: FeedbackRequest, service: Chat, principal: CurrentPrincipal, _: RateLimited
+) -> Response:
+    """Rate one answer (👍/👎, optional comment); only the session's customer can. A later
+    rating of the same answer replaces the earlier one."""
+    try:
+        await service.feedback(
+            body.session_id,
+            principal.customer_id if principal else None,
+            body.request_id,
+            helpful=body.rating == "up",
+            comment=body.comment,
+        )
+    except (SessionNotFoundError, TurnNotFoundError):
+        raise HTTPException(status_code=404, detail="answer not found") from None
+    return Response(status_code=204)

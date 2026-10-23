@@ -5,7 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from customer_agent.application.answering import TextDelta
-from customer_agent.application.chat import ChatTurn, SessionNotFoundError
+from customer_agent.application.chat import ChatTurn, SessionNotFoundError, TurnNotFoundError
 from customer_agent.application.ports import AuthenticationError, ConcurrentTurnError, Principal
 from customer_agent.config import Settings
 from customer_agent.domain.conversation import AgentResponse, Behavior
@@ -26,6 +26,7 @@ TURN = ChatTurn(
 class FakeChat:
     def __init__(self) -> None:
         self.calls: list[tuple[str | None, str | None, str]] = []
+        self.ratings: list[tuple[str, str | None, str, bool, str | None]] = []
 
     async def chat_stream(
         self, session_id: str | None, customer_id: str | None, text: str
@@ -44,6 +45,21 @@ class FakeChat:
             if isinstance(event, ChatTurn):
                 return event
         raise AssertionError
+
+    async def feedback(
+        self,
+        session_id: str,
+        customer_id: str | None,
+        request_id: str,
+        *,
+        helpful: bool,
+        comment: str | None = None,
+    ) -> None:
+        if session_id == "missing":
+            raise SessionNotFoundError(session_id)
+        if request_id == "unknown":
+            raise TurnNotFoundError(request_id)
+        self.ratings.append((session_id, customer_id, request_id, helpful, comment))
 
 
 class FakeVerifier:
@@ -223,3 +239,40 @@ def test_only_configured_browser_origins_may_call_the_api(monkeypatch: pytest.Mo
     assert "access-control-allow-origin" not in foreign.headers
     assert answer.headers["access-control-allow-origin"] == "https://demo.example.org"
     assert "x-request-id" in answer.headers["access-control-expose-headers"]
+
+
+def test_feedback_rates_an_answer_for_the_tokens_customer() -> None:
+    chat = FakeChat()
+    with client(chat, FakeVerifier()) as c:
+        response = c.post(
+            "/v1/feedback",
+            json={"session_id": "abc", "request_id": "r1", "rating": "down", "comment": "Falsch"},
+            headers={"authorization": "Bearer anna"},
+        )
+
+    assert response.status_code == 204 and response.content == b""
+    assert chat.ratings == [("abc", "C-1001", "r1", False, "Falsch")]
+
+
+@pytest.mark.parametrize(("session_id", "request_id"), [("missing", "r1"), ("abc", "unknown")])
+def test_feedback_on_an_unknown_answer_is_404(session_id: str, request_id: str) -> None:
+    with client(FakeChat()) as c:
+        response = c.post(
+            "/v1/feedback",
+            json={"session_id": session_id, "request_id": request_id, "rating": "up"},
+        )
+
+    assert response.status_code == 404
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"session_id": "abc", "request_id": "r1", "rating": "meh"},
+        {"session_id": "abc", "request_id": "r1", "rating": "up", "comment": "x" * 1001},
+        {"session_id": "abc", "rating": "up"},
+    ],
+)
+def test_malformed_feedback_is_422(body: dict[str, str]) -> None:
+    with client(FakeChat()) as c:
+        assert c.post("/v1/feedback", json=body).status_code == 422

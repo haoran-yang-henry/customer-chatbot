@@ -101,6 +101,16 @@ class StoredSession(BaseModel):
     customer_id: str | None
 
 
+class StoredTurn(BaseModel):
+    """A served turn the customer may rate: its request and its trace (Jaeger, Langfuse)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    session_id: str
+    request_id: str
+    trace_id: str | None
+
+
 class ConcurrentTurnError(RuntimeError):
     """Another turn of the same session is still running (it holds the session's lease)."""
 
@@ -116,6 +126,17 @@ class SessionStore(Protocol):
         ...
 
     async def release(self, session_id: str) -> None: ...
+
+    async def record_turn(self, turn: StoredTurn) -> None:
+        """Remember a served turn; a request id the session already has is overwritten."""
+        ...
+
+    async def rate_turn(
+        self, session_id: str, request_id: str, *, helpful: bool, comment: str | None
+    ) -> StoredTurn | None:
+        """The customer's rating of one answer, replacing an earlier one; ``None`` if the
+        session has no such turn."""
+        ...
 
 
 class OrderRepository(Protocol):

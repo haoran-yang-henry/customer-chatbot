@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { parseEvent, readEvents } from "../public/api.js";
+import { ApiError, parseEvent, readEvents, sendFeedback } from "../public/api.js";
 
 function streamOf(...chunks) {
   const encoder = new TextEncoder();
@@ -34,4 +34,24 @@ test("events are reassembled whatever the network chunking", async () => {
   );
   assert.equal(events.map((e) => e.data.text ?? "").join(""), "Die Rücksendung ist kostenlos.");
   assert.equal(events[2].data.behavior, "answer");
+});
+
+test("feedback posts the rating of one answer", async (t) => {
+  const requests = [];
+  t.mock.method(globalThis, "fetch", async (url, init) => {
+    requests.push({ url, init });
+    return new Response(null, { status: 204 });
+  });
+
+  await sendFeedback("https://agent.example", "tok", { sessionId: "s1", requestId: "r1", helpful: false });
+
+  assert.equal(requests[0].url, "https://agent.example/v1/feedback");
+  assert.equal(requests[0].init.headers.authorization, "Bearer tok");
+  assert.deepEqual(JSON.parse(requests[0].init.body), { session_id: "s1", request_id: "r1", rating: "down" });
+});
+
+test("rejected feedback is an ApiError with its status", async (t) => {
+  t.mock.method(globalThis, "fetch", async () => new Response(null, { status: 404 }));
+
+  await assert.rejects(sendFeedback("https://agent.example", "tok", { sessionId: "s1", requestId: "x", helpful: true }), (error) => error instanceof ApiError && error.status === 404);
 });

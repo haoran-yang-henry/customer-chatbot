@@ -7,6 +7,9 @@ one turn at a time: a concurrent one is rejected before it starts (409).
 Each turn runs in its own task, decoupled from the HTTP response: if the client disconnects
 while an answer streams, the turn still completes and is checkpointed, so the next turn sees a
 consistent transcript and state.
+
+Every answer can be rated by the session's customer (feedback): the rating is stored with the
+turn and becomes a score on the turn's trace in Langfuse.
 """
 
 import asyncio
@@ -16,15 +19,33 @@ from pydantic import BaseModel, ConfigDict
 
 from customer_agent.application.answering import TextDelta
 from customer_agent.application.orchestrator import ConversationOrchestrator, TurnResult
-from customer_agent.application.ports import ConcurrentTurnError, SessionStore, StoredSession
+from customer_agent.application.ports import (
+    ConcurrentTurnError,
+    SessionStore,
+    StoredSession,
+    StoredTurn,
+)
 from customer_agent.domain.conversation import AgentResponse
-from customer_agent.observability import get_logger, session_id_var, step, trace_turn
+from customer_agent.domain.pii import mask_personal_data
+from customer_agent.observability import (
+    current_trace_id,
+    get_logger,
+    request_id_var,
+    score_turn,
+    session_id_var,
+    step,
+    trace_turn,
+)
 
 log = get_logger("session")
 
 
 class SessionNotFoundError(LookupError):
     """Unknown session, or one of another customer or tenant (indistinguishable)."""
+
+
+class TurnNotFoundError(LookupError):
+    """The session has no answer with this request id."""
 
 
 class ChatTurn(BaseModel):
@@ -90,6 +111,7 @@ class ChatService:
                                 "intent": str(event.response.intent),
                             },
                         )
+                        await self._record(session.session_id)
                         # The checkpoint is written: the client may send the next message as
                         # soon as it has this reply.
                         await self._release(session.session_id)
@@ -106,6 +128,15 @@ class ChatService:
         finally:
             if not released:
                 await self._release(session.session_id)
+
+    async def _record(self, session_id: str) -> None:
+        """A turn served over HTTP can be rated later by its request id."""
+        request_id = request_id_var.get()
+        if request_id == "-":  # not an HTTP request: nothing to refer to
+            return
+        turn = StoredTurn(session_id=session_id, request_id=request_id, trace_id=current_trace_id())
+        with step("session.record_turn"):
+            await self._sessions.record_turn(turn)
 
     async def _release(self, session_id: str) -> None:
         with step("session.release"):
@@ -133,6 +164,28 @@ class ChatService:
             if isinstance(event, ChatTurn):
                 return event
         raise RuntimeError("turn ended without a result")  # pragma: no cover
+
+    async def feedback(
+        self,
+        session_id: str,
+        customer_id: str | None,
+        request_id: str,
+        *,
+        helpful: bool,
+        comment: str | None = None,
+    ) -> None:
+        """The customer rates one answer of their session; a later rating replaces it. The
+        comment is masked like any customer text before it is stored or traced (NFR-12)."""
+        await self._open(session_id, customer_id)  # SessionNotFoundError: unknown or not theirs
+        masked = mask_personal_data(comment)[0] if comment else None
+        turn = await self._sessions.rate_turn(
+            session_id, request_id, helpful=helpful, comment=masked
+        )
+        if turn is None:
+            raise TurnNotFoundError(request_id)
+        if turn.trace_id is not None:
+            score_turn(turn.trace_id, helpful=helpful, comment=masked)
+        log.info("feedback request_id=%s helpful=%s", request_id, helpful)
 
     async def drain(self) -> None:
         """Wait for turns still running (e.g. after client disconnects); call on shutdown."""

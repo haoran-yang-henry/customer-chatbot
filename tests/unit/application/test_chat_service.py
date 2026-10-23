@@ -2,11 +2,13 @@ import asyncio
 
 import pytest
 
-from customer_agent.application.chat import ChatService, SessionNotFoundError
+from customer_agent.application import chat as chat_module
+from customer_agent.application.chat import ChatService, SessionNotFoundError, TurnNotFoundError
 from customer_agent.application.orchestrator import ConversationOrchestrator
 from customer_agent.application.ports import ConcurrentTurnError
 from customer_agent.domain.conversation import Role
 from customer_agent.domain.session import SessionState, WorkflowState
+from customer_agent.observability import request_id_var
 from tests.fakes import (
     FakeRetriever,
     InMemorySessionStore,
@@ -134,3 +136,82 @@ async def test_transcript_stores_the_masked_message_never_the_raw_one() -> None:
 
     messages, _ = await agent.transcript(turn.session_id)
     assert messages[0].content == "Wo ist meine Bestellung? Rückruf unter [Telefonnummer entfernt]"
+
+
+# --- feedback --------------------------------------------------------------------------------
+
+TRACE = "0af7651916cd43dd8448eb211c80319c"
+
+
+@pytest.fixture
+def scores(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, bool, str | None]]:
+    """Langfuse scores sent; the turn runs in a trace with a fixed id, over HTTP (request id)."""
+    sent: list[tuple[str, bool, str | None]] = []
+
+    def score_turn(trace_id: str, *, helpful: bool, comment: str | None) -> None:
+        sent.append((trace_id, helpful, comment))
+
+    monkeypatch.setattr(chat_module, "score_turn", score_turn)
+    monkeypatch.setattr(chat_module, "current_trace_id", lambda: TRACE)
+    return sent
+
+
+async def served_turn(chat: ChatService, request_id: str, session_id: str | None = None) -> str:
+    token = request_id_var.set(request_id)  # what the HTTP middleware does
+    try:
+        turn = await chat.chat(session_id, "C-1001", "Wo ist meine Bestellung?")
+    finally:
+        request_id_var.reset(token)
+    return turn.session_id
+
+
+async def test_an_answer_is_rated_with_a_masked_comment_on_its_trace(
+    scores: list[tuple[str, bool, str | None]],
+) -> None:
+    store = InMemorySessionStore()
+    chat, _ = service(store)
+    session_id = await served_turn(chat, "req-1")
+
+    await chat.feedback(
+        session_id, "C-1001", "req-1", helpful=False, comment="Falsch. Ruf an: 0171 2345678"
+    )
+
+    masked = "Falsch. Ruf an: [Telefonnummer entfernt]"
+    assert store.ratings == {(session_id, "req-1"): (False, masked)}
+    assert scores == [(TRACE, False, masked)]
+
+
+async def test_a_later_rating_replaces_the_earlier_one(
+    scores: list[tuple[str, bool, str | None]],
+) -> None:
+    store = InMemorySessionStore()
+    chat, _ = service(store)
+    session_id = await served_turn(chat, "req-1")
+
+    await chat.feedback(session_id, "C-1001", "req-1", helpful=False)
+    await chat.feedback(session_id, "C-1001", "req-1", helpful=True)
+
+    assert store.ratings[(session_id, "req-1")] == (True, None)
+
+
+async def test_only_the_sessions_customer_rates_its_answers(
+    scores: list[tuple[str, bool, str | None]],
+) -> None:
+    store = InMemorySessionStore()
+    chat, _ = service(store)
+    session_id = await served_turn(chat, "req-1")
+
+    with pytest.raises(SessionNotFoundError):
+        await chat.feedback(session_id, "C-2002", "req-1", helpful=False)
+    with pytest.raises(TurnNotFoundError):
+        await chat.feedback(session_id, "C-1001", "req-unknown", helpful=False)
+    assert store.ratings == {} and scores == []
+
+
+async def test_a_turn_without_an_http_request_is_not_recorded() -> None:
+    store = InMemorySessionStore()
+    chat, _ = service(store)
+
+    await chat.chat(None, "C-1001", "Wo ist meine Bestellung?")
+
+    assert store.turns == {}
