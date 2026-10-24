@@ -39,6 +39,7 @@ customer-agent-search = "customer_agent.cli.search:main"
 customer-agent-token = "customer_agent.cli.token:main"
 customer-agent-seed = "customer_agent.cli.seed:main"
 customer-agent-retention = "customer_agent.cli.retention:main"
+customer-agent-prompts-sync = "customer_agent.cli.prompts_sync:main"
 
 [dependency-groups]
 dev = [

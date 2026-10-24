@@ -86,7 +86,7 @@ async def _judge(
     settings = get_settings()
     judge = GroundednessJudge(
         create_chat_model(settings),
-        load_prompt("judge", 1),
+        load_prompt("judge", settings.judge_prompt_version),
         load_knowledge_directory(settings.knowledge_dir),
     )
     client = langfuse_client() if traces else None

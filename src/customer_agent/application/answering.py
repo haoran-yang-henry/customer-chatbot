@@ -51,7 +51,13 @@ from customer_agent.application.prompts import PromptTemplate
 from customer_agent.domain.conversation import AgentResponse, Behavior, Conversation, Role
 from customer_agent.domain.guardrails import GuardrailAction
 from customer_agent.domain.knowledge import TrustLevel
-from customer_agent.observability import elapsed_ms, get_logger, record_guardrail, step
+from customer_agent.observability import (
+    elapsed_ms,
+    get_logger,
+    prompt_config,
+    record_guardrail,
+    step,
+)
 
 log = get_logger("answer")
 
@@ -201,8 +207,11 @@ class AnswerPrompt(Middleware):
     ) -> ModelResponse[Any] | AIMessage | ExtendedModelResponse[Any]:
         state = cast(AnswerState, request.state)
         context = request.runtime.context
-        system, user = self._prompt.render_messages(
-            evidence=state["evidence_text"], history=context.history, question=_question(state)
+        system, user = await self._prompt.arender(
+            prompt_config(self._prompt.ref),
+            evidence=state["evidence_text"],
+            history=context.history,
+            question=_question(state),
         )
         settings = {
             **request.model_settings,

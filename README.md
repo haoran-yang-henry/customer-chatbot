@@ -221,8 +221,9 @@ All settings are environment variables with the prefix `CA_` (see `.env.example`
   retrieval, model calls, tools). `make up-observability` starts Jaeger at http://localhost:16686.
 - **Langfuse** — with the `LANGFUSE_*` keys set, every chat turn is also a Langfuse trace (same
   trace id) with session and customer: each middleware hook, graph node, the retriever and every
-  model call with prompt, tokens and cost, through LangChain's callback handler; customer ratings
-  are scores on the session. Payloads are masked like the logs before they leave the process.
+  model call with prompt, tokens and cost, through LangChain's callback handler; each model call
+  is tied to its prompt version in Langfuse's prompt management (`make prompts-sync` publishes
+  `prompts/` there; git stays the source); customer ratings are scores on the session. Payloads are masked like the logs before they leave the process.
   Langfuse is not part of readiness: when it is down, turns go on and only traces are lost.
 - **Conversations** — the masked transcript and state are a LangGraph checkpoint per session; a
   lease admits one turn per session at a time. `make retention` (run daily) deletes
@@ -247,6 +248,7 @@ All settings are environment variables with the prefix `CA_` (see `.env.example`
 | `make load-test` | k6 load test with the model mocked out |
 | `make audit` | Secret, vulnerability and misconfiguration scans (gitleaks, Trivy, pip-audit) |
 | `make deps-check` | Unused or undeclared packages (deptry) and dead code (vulture) |
+| `make prompts-sync` | Publish the prompt versions from `prompts/` to Langfuse (after adding one) |
 | `make retention` | Delete conversations past the retention period |
 
 Every pull request runs four CI jobs: **check** (lint, types, unit and integration tests),

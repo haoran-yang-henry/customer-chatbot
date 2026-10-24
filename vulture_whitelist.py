@@ -48,3 +48,4 @@ last_name  # unused variable (infrastructure/db/models.py:121)
 country  # unused variable (infrastructure/db/models.py:123)
 at  # unused variable (infrastructure/db/models.py:161)
 check_embedding_ctx_length  # unused variable (infrastructure/embeddings.py:31)
+_.render_messages  # unused method (application/prompts.py:50): the tests' reference renderer

@@ -102,6 +102,7 @@ class Settings(BaseSettings):
     # Guardrails (Day 6, ADR-0011). The classifier uses the router's model and runs concurrently.
     guard_classifier_enabled: bool = True
     guard_prompt_version: int = 1
+    judge_prompt_version: int = 1  # the evaluation's groundedness judge
     # Attack probability at which the classifier blocks (evaluation plan §5.5).
     guard_classifier_threshold: float = 0.7
     max_tickets_per_day: int = 3  # per customer, rolling 24 hours (T12)

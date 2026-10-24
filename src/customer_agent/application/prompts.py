@@ -3,8 +3,10 @@
 from functools import cached_property
 from string import Template
 
+from langchain_core.language_models import LanguageModelInput
 from langchain_core.messages import BaseMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.runnables import Runnable, RunnableConfig
 from pydantic import BaseModel, ConfigDict
 
 
@@ -49,3 +51,20 @@ class PromptTemplate(BaseModel):
         """The system message and the user message with every placeholder filled; a missing
         value raises ``KeyError``."""
         return self.chat_prompt.format_messages(**values)
+
+    async def arender(
+        self, config: RunnableConfig | None = None, **values: str
+    ) -> list[BaseMessage]:
+        """The same messages, rendered as a LangChain run: a tracer can then tie the next model
+        call to this prompt (``config``: e.g. ``observability.prompt_config``)."""
+        rendered = await self.chat_prompt.ainvoke(values, config)
+        return rendered.to_messages()
+
+    def chain(
+        self,
+        model: Runnable[LanguageModelInput, BaseMessage],
+        config: RunnableConfig | None = None,
+    ) -> Runnable[dict[str, str], BaseMessage]:
+        """Prompt and model as one run, so a tracer ties the model call to this prompt even when
+        another prompt renders beside it (the classifier runs concurrently with the router)."""
+        return self.chat_prompt.with_config(config or {}) | model
