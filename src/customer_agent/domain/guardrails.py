@@ -1,4 +1,4 @@
-"""Guardrail decision contract (docs/architecture.md §5.1). Guardrails judge; the orchestrator
+"""Guardrail decision contract (docs/architecture.md §5.1). Guardrails judge; the turn graph
 decides what the customer sees."""
 
 from enum import StrEnum
@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class GuardrailAction(StrEnum):
     ALLOW = "allow"  # pass content through unchanged
     REDACT = "redact"  # pass through the modified content in ``content``
-    BLOCK = "block"  # discard content; the orchestrator answers with a fallback
+    BLOCK = "block"  # discard content; the turn graph answers with a fallback
 
 
 class GuardrailDecision(BaseModel):

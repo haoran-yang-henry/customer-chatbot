@@ -1,7 +1,7 @@
 """Order-specific guidance (Day 5, ADR-0006): facts from the order, eligibility from domain rules
 and self-service steps with a link. Deterministic templates, no LLM: order facts (status, dates,
 amounts) must be exact. When a change is still possible, ``Guidance.change_possible`` lets the
-orchestrator ask whether to forward it to the service team (ADR-0014).
+turn graph ask whether to forward it to the service team (ADR-0014).
 """
 
 from dataclasses import dataclass
