@@ -77,10 +77,18 @@ select = [
     "SIM",     # simplify
     "S",       # bandit (security)
     "RUF",     # ruff-specific
+    "C901",    # complexity: a function with more branches is split (rebuild phase 5)
+    "PLR0917", # more than five positional parameters: make the rest keyword-only
 ]
+# PLR0917 is a preview rule; only explicitly selected preview rules are on.
+preview = true
+explicit-preview-rules = true
 
 # German typography in customer-facing text (LR-04): dash and multiplication sign are intended.
 allowed-confusables = ["–", "×"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 12
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101", "S105", "S106"]  # asserts and fake test credentials

@@ -12,12 +12,9 @@ from pydantic import SecretStr
 
 from customer_agent.infrastructure.embeddings import ProviderEmbeddings
 from customer_agent.infrastructure.lifecycle import aclose_all
-from customer_agent.infrastructure.models import (
-    BreakerChatModel,
-    CachedChatModel,
-    ProviderChatModel,
-)
+from customer_agent.infrastructure.models import BreakerChatModel, ProviderChatModel
 from customer_agent.infrastructure.prompts import load_prompt
+from customer_agent.infrastructure.recorded import CachedChatModel
 from customer_agent.infrastructure.resilience import CircuitBreaker
 from tests.fakes import FakeLLM
 

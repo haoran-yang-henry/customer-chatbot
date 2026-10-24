@@ -14,7 +14,7 @@ from customer_agent.infrastructure.cassette import (
     ReplayMissError,
     chat_key,
 )
-from customer_agent.infrastructure.models import ReplayChatModel
+from customer_agent.infrastructure.recorded import ReplayChatModel
 from tests.fakes import FakeLLM
 
 MESSAGES: list[BaseMessage] = [SystemMessage("Regeln"), HumanMessage("Hallo")]

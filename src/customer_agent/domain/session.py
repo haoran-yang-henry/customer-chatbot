@@ -62,15 +62,9 @@ class Decision(BaseModel):
 
 def decide(state: SessionState, routing: RoutingResult, *, authenticated: bool) -> Decision:
     if state.workflow is WorkflowState.AWAITING_TICKET_CONFIRMATION:
-        reply = _confirmation(state, routing)
+        reply = _answer_to_question(state, routing)
         if reply is not None:
             return reply
-        if _follow_up(state, routing):
-            # A question about the same matter ("Wie sende ich das zurück?"): answer it from the
-            # documents; the question stays open, so a later "Ja" still forwards the request.
-            return Decision(
-                step=NextStep.ANSWER_FROM_KNOWLEDGE, intent=state.active_intent, state=state
-            )
         # Anything else is a new topic: the question lapses, nothing is forwarded.
         state = _without_request(state)
     if routing.source is RoutingSource.FALLBACK:
@@ -92,11 +86,8 @@ def decide(state: SessionState, routing: RoutingResult, *, authenticated: bool) 
         step = NextStep.GREET if intent is Intent.GREETING else NextStep.REFUSE_OUT_OF_SCOPE
         return Decision(step=step, intent=intent, state=idle)
     if routing.change_request and intent.group is not IntentGroup.TRANSACTIONAL:
-        # Data only the service team can change (account, address, …): ask once, then ticket.
         # Order changes take the transactional path: lookup and eligibility come first.
-        if not authenticated:
-            return Decision(step=NextStep.CONTACT, intent=intent, state=idle)
-        return _offer_ticket(idle, routing, intent)
+        return _service_team_change(idle, routing, intent, authenticated=authenticated)
     match intent.group:
         case IntentGroup.SUPPORT:
             # Nothing to change: a complaint gets the relevant information, a wish to talk to
@@ -107,7 +98,18 @@ def decide(state: SessionState, routing: RoutingResult, *, authenticated: bool) 
         case IntentGroup.KNOWLEDGE:
             return Decision(step=NextStep.ANSWER_FROM_KNOWLEDGE, intent=intent, state=idle)
 
-    # Transactional: about one concrete order of the customer, or a general how-to question?
+    return _transactional(state, idle, routing, intent, authenticated=authenticated)
+
+
+def _transactional(
+    state: SessionState,
+    idle: SessionState,
+    routing: RoutingResult,
+    intent: Intent,
+    *,
+    authenticated: bool,
+) -> Decision:
+    """About one concrete order of the customer, or a general how-to question?"""
     remembered = state.slots.get("order_id") if routing.about_specific_order else None
     order_id = routing.order_id or remembered
     if order_id is None and not routing.about_specific_order:
@@ -121,6 +123,15 @@ def decide(state: SessionState, routing: RoutingResult, *, authenticated: bool) 
     return Decision(step=NextStep.ORDER_GUIDANCE, intent=intent, state=with_order)
 
 
+def _service_team_change(
+    idle: SessionState, routing: RoutingResult, intent: Intent, *, authenticated: bool
+) -> Decision:
+    """Data only the service team can change (account, address, …): ask once, then ticket."""
+    if not authenticated:
+        return Decision(step=NextStep.CONTACT, intent=intent, state=idle)
+    return _offer_ticket(idle, routing, intent)
+
+
 def _offer_ticket(state: SessionState, routing: RoutingResult, intent: Intent) -> Decision:
     if "ticket_id" in state.slots:
         return Decision(step=NextStep.TICKET_EXISTS, intent=intent, state=state)
@@ -131,6 +142,21 @@ def _offer_ticket(state: SessionState, routing: RoutingResult, intent: Intent) -
         update={"workflow": WorkflowState.AWAITING_TICKET_CONFIRMATION, "slots": slots}
     )
     return Decision(step=NextStep.CONFIRM_TICKET, intent=intent, state=pending)
+
+
+def _answer_to_question(state: SessionState, routing: RoutingResult) -> Decision | None:
+    """The reply while "Soll ich … weitergeben?" is open: yes, no, or a follow-up question;
+    ``None`` for a new topic."""
+    reply = _confirmation(state, routing)
+    if reply is not None:
+        return reply
+    if _follow_up(state, routing):
+        # A question about the same matter ("Wie sende ich das zurück?"): answer it from the
+        # documents; the question stays open, so a later "Ja" still forwards the request.
+        return Decision(
+            step=NextStep.ANSWER_FROM_KNOWLEDGE, intent=state.active_intent, state=state
+        )
+    return None
 
 
 def _confirmation(state: SessionState, routing: RoutingResult) -> Decision | None:
