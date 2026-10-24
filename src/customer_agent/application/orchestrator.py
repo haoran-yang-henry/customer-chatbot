@@ -1,15 +1,16 @@
 """Conversation orchestrator: the ``CustomerServiceAgent`` behind the API and the evaluation.
 
-One turn: input guardrail → intent router ‖ attack classifier → state machine (``decide``) →
-handler (knowledge answer with output guardrail, order guidance, ticket flow). Guardrails judge;
-this class decides what the customer sees (ADR-0011). Tickets only for confirmed change
-requests, at most one per conversation (ADR-0014).
+One turn: understand agent (input guardrail, rule routing, intent router ‖ attack classifier) →
+state machine (``decide``) → handler (knowledge answer with output guardrail, order guidance,
+ticket flow). Guardrails judge; this class decides what the customer sees (ADR-0011). Tickets
+only for confirmed change requests, at most one per conversation (ADR-0014).
 """
 
-import asyncio
 import re
 from collections.abc import AsyncIterator
+from typing import cast
 
+from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, ConfigDict
 
 from customer_agent.application.answering import (
@@ -32,19 +33,22 @@ from customer_agent.application.fallbacks import (
     ticket_question,
     with_payment_data_notice,
 )
-from customer_agent.application.guardrails import PAYMENT_DATA_REASONS, check_input
-from customer_agent.application.guardrails.classifier import PromptAttackClassifier
+from customer_agent.application.guardrails import PAYMENT_DATA_REASONS
 from customer_agent.application.order_guidance import order_guidance, order_not_found
 from customer_agent.application.ports import (
-    AuditEntry,
     AuditLog,
     Clock,
-    NewTicket,
     OrderRepository,
     ProviderUnavailableError,
     TicketService,
 )
-from customer_agent.application.routing import IntentRouter, route_by_rules
+from customer_agent.application.tools import (
+    CreateTicket,
+    GetOrderStatus,
+    TicketOutcome,
+    tool_config,
+)
+from customer_agent.application.understanding import UnderstandAgent, Understanding
 from customer_agent.domain.conversation import AgentResponse, Conversation, Message, Role
 from customer_agent.domain.guardrails import GuardrailDecision
 from customer_agent.domain.intents import Intent
@@ -57,7 +61,7 @@ from customer_agent.domain.session import (
     WorkflowState,
     decide,
 )
-from customer_agent.observability import get_logger, record_guardrail, request_id_var
+from customer_agent.observability import get_logger, record_guardrail
 from customer_agent.observability import step as agent_step  # `step` is a Decision here
 from customer_agent.observability.metrics import AGENT_REPLIES
 
@@ -86,7 +90,7 @@ TurnEvent = TextDelta | TurnResult
 class ConversationOrchestrator:
     def __init__(
         self,
-        router: IntentRouter,
+        understand: UnderstandAgent,
         answers: AnswerService,
         *,
         orders: OrderRepository,
@@ -94,18 +98,16 @@ class ConversationOrchestrator:
         audit: AuditLog,
         clock: Clock,
         tenant_id: str,
-        classifier: PromptAttackClassifier | None = None,
         max_tickets_per_day: int | None = 3,  # None: no limit
     ) -> None:
-        self._router = router
+        self._understand = understand
         self._answers = answers
-        self._orders = orders
-        self._tickets = tickets
-        self._audit = audit
+        self._order_tool = GetOrderStatus(orders=orders, audit_log=audit)
+        self._ticket_tool = CreateTicket(
+            tickets=tickets, audit_log=audit, max_per_day=max_tickets_per_day
+        )
         self._clock = clock
         self._tenant_id = tenant_id
-        self._classifier = classifier
-        self._max_tickets_per_day = max_tickets_per_day
 
     # --- CustomerServiceAgent (stateless; used by the evaluation) -------------------------
 
@@ -128,11 +130,12 @@ class ConversationOrchestrator:
     async def handle_stream(
         self, conversation: Conversation, state: SessionState, *, session_id: str
     ) -> AsyncIterator[TurnEvent]:
-        raw = conversation.messages[-1].content
-        with agent_step("input_guardrail"):
-            screen = check_input(raw)
+        recovered = recover_state(conversation, state)
+        with agent_step("understand"):
+            understood = await self._understand.run(conversation, recovered, session_id=session_id)
+        screen = understood.input
         record_guardrail(screen)
-        text = screen.content if screen.content is not None else raw
+        text = understood.text
         if screen.blocked:
             log.info("input blocked reasons=%s", ",".join(screen.reasons))
             yield _counted(
@@ -145,7 +148,7 @@ class ConversationOrchestrator:
             return
         if screen.reasons:
             log.info("input redacted reasons=%s", ",".join(screen.reasons))
-        # From here on only the sanitised message exists: router, answer model, transcript.
+        # From here on only the sanitised message exists: answer model, transcript.
         sanitized = Message(role=Role.USER, content=text)
         conversation = conversation.model_copy(
             update={"messages": [*conversation.messages[:-1], sanitized]}
@@ -153,7 +156,7 @@ class ConversationOrchestrator:
         notice = not PAYMENT_DATA_REASONS.isdisjoint(screen.reasons)
         if notice:
             yield TextDelta(text=f"{PAYMENT_DATA_NOTICE}\n\n")
-        async for event in self._turn(conversation, state, session_id):
+        async for event in self._turn(conversation, recovered, understood, session_id):
             if isinstance(event, TurnResult):
                 if notice:
                     event = event.model_copy(
@@ -163,49 +166,32 @@ class ConversationOrchestrator:
             yield event
 
     async def _turn(
-        self, conversation: Conversation, state: SessionState, session_id: str
+        self,
+        conversation: Conversation,
+        state: SessionState,
+        understood: Understanding,
+        session_id: str,
     ) -> AsyncIterator[TurnEvent]:
         text = conversation.messages[-1].content
-        state = recover_state(conversation, state)
-        try:
-            routing, verdict = await self._route_and_screen(conversation, state, session_id)
-            if verdict is not None:
-                record_guardrail(verdict)
-            if verdict is not None and verdict.blocked:
+        routing, verdict = understood.routing, understood.verdict
+        if routing is None:
+            # Nothing was understood (NFR-11): contact channels at once, never a ticket.
+            yield TurnResult(response=outage_contact_reply(), state=state, user_text=text)
+            return
+        if verdict is not None:
+            record_guardrail(verdict)
+            if verdict.blocked:
                 log.warning("input blocked by classifier reasons=%s", ",".join(verdict.reasons))
                 yield TurnResult(response=_vetoed(verdict, routing), state=state, user_text=text)
                 return
+        try:
             step = decide(state, routing, authenticated=conversation.customer_id is not None)
             log.info("step=%s intent=%s workflow=%s", step.step, step.intent, step.state.workflow)
             async for event in self._execute(conversation, routing, step, session_id):
                 yield event
         except ProviderUnavailableError as exc:
             log.error("provider unavailable: %s", exc)
-            yield TurnResult(
-                # Nothing can be understood (NFR-11): contact channels at once, never a ticket.
-                response=outage_contact_reply(),
-                state=state,
-                user_text=text,
-            )
-
-    async def _route_and_screen(
-        self, conversation: Conversation, state: SessionState, session_id: str
-    ) -> tuple[RoutingResult, GuardrailDecision | None]:
-        """Router and classifier run concurrently: the classifier costs a call, not latency.
-        Rule-routed messages (a greeting, a bare order number) skip the classifier."""
-        if self._classifier is None or route_by_rules(conversation, state) is not None:
-            return await self._router.route(conversation, state, session_id=session_id), None
-        try:
-            async with asyncio.TaskGroup() as group:
-                routed = group.create_task(
-                    self._router.route(conversation, state, session_id=session_id)
-                )
-                screened = group.create_task(
-                    self._classifier.classify(conversation, session_id=session_id)
-                )
-        except ExceptionGroup as errors:  # keep ProviderUnavailableError catchable
-            raise errors.exceptions[0] from None
-        return routed.result(), screened.result()
+            yield TurnResult(response=outage_contact_reply(), state=state, user_text=text)
 
     async def _execute(
         self,
@@ -269,25 +255,15 @@ class ConversationOrchestrator:
     async def _lookup(
         self, conversation: Conversation, order_id: str, session_id: str
     ) -> Order | None:
-        """Read-only, scoped to the authenticated customer in SQL; every lookup is audited."""
-        customer_id = conversation.customer_id
-        if customer_id is None:  # decide() never routes anonymous users here
-            raise RuntimeError("order lookups require an authenticated customer")
-        with agent_step("tool.get_order_status"):
-            order = await self._orders.get_for_customer(
-                order_id, customer_id=customer_id, tenant_id=self._tenant_id
-            )
-        await self._audit.record(
-            AuditEntry(
-                tool="get_order_status",
-                customer_id=customer_id,
-                session_id=session_id,
-                request_id=request_id_var.get(),
-                arguments={"order_id": order_id},
-                outcome="found" if order else "not_found",
-            )
+        order = await self._order_tool.ainvoke(
+            {"order_id": order_id}, config=self._tool_config(conversation, session_id)
         )
-        return order
+        return cast(Order | None, order)
+
+    def _tool_config(self, conversation: Conversation, session_id: str) -> RunnableConfig:
+        return tool_config(
+            customer_id=conversation.customer_id, tenant_id=self._tenant_id, session_id=session_id
+        )
 
     async def _order_guidance(
         self,
@@ -344,67 +320,23 @@ class ConversationOrchestrator:
         self, conversation: Conversation, step: Decision, session_id: str
     ) -> tuple[AgentResponse, SessionState]:
         state = step.state
-        ticket_id, created = await self._open_ticket(
-            conversation,
-            session_id,
-            intent=step.intent,
-            order_id=state.slots.get("order_id"),
-            request=state.slots.get("request"),
+        arguments = {
+            "intent": step.intent,
+            "order_id": state.slots.get("order_id"),
+            # The confirmed request, not the confirmation itself ("Ja, bitte").
+            "request": state.slots.get("request") or conversation.messages[-1].content,
+        }
+        outcome = cast(
+            TicketOutcome,
+            await self._ticket_tool.ainvoke(
+                arguments, config=self._tool_config(conversation, session_id)
+            ),
         )
         slots = {k: v for k, v in state.slots.items() if k != "request"}
-        done = state.model_copy(update={"slots": {**slots, "ticket_id": ticket_id}})
-        if not created:
-            return ticket_exists_reply(ticket_id, intent=step.intent), done
-        return ticket_created_reply(ticket_id, intent=step.intent), done
-
-    async def _open_ticket(
-        self,
-        conversation: Conversation,
-        session_id: str,
-        *,
-        intent: Intent | None,
-        order_id: str | None,
-        request: str | None,
-    ) -> tuple[str, bool]:
-        """``(ticket number, created)``; at the limit the newest open ticket, not a new one."""
-        customer_id = conversation.customer_id
-        arguments = {"order_id": order_id or "-", "intent": str(intent)}
-
-        async def audit(outcome: str) -> None:
-            await self._audit.record(
-                AuditEntry(
-                    tool="create_ticket",
-                    customer_id=customer_id,
-                    session_id=session_id,
-                    request_id=request_id_var.get(),
-                    arguments=arguments,
-                    outcome=outcome,
-                )
-            )
-
-        if customer_id is not None and self._max_tickets_per_day is not None:
-            recent = await self._tickets.recent(customer_id=customer_id, tenant_id=self._tenant_id)
-            if len(recent) >= self._max_tickets_per_day:
-                # Rate limit on the only state-changing tool (T12): point to the open ticket.
-                await audit(f"rate_limited:{recent[0]}")
-                log.warning("ticket limit reached recent=%d", len(recent))
-                return recent[0], False
-        # The confirmed request, not the confirmation itself ("Ja, bitte").
-        summary = request or conversation.messages[-1].content
-        with agent_step("tool.create_ticket"):
-            ticket_id = await self._tickets.create(
-                NewTicket(
-                    tenant_id=self._tenant_id,
-                    customer_id=customer_id,
-                    session_id=session_id,
-                    intent=intent.value if intent else None,
-                    order_id=order_id,
-                    summary=f"{intent or 'UNKNOWN'}: {summary[:500]}",
-                )
-            )
-        await audit(ticket_id)
-        log.info("ticket=%s intent=%s order_id=%s", ticket_id, intent, order_id)
-        return ticket_id, True
+        done = state.model_copy(update={"slots": {**slots, "ticket_id": outcome.ticket_id}})
+        if not outcome.created:  # the daily limit: the newest open ticket, not a new one
+            return ticket_exists_reply(outcome.ticket_id, intent=step.intent), done
+        return ticket_created_reply(outcome.ticket_id, intent=step.intent), done
 
 
 def recover_state(conversation: Conversation, state: SessionState) -> SessionState:

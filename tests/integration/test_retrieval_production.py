@@ -8,73 +8,81 @@ a held-out check that retrieval quality is not tuned to the evaluation set.
 
 import asyncio
 import shutil
-from collections.abc import Sequence
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 import httpx2
 import openai
 import pytest
+from langchain_core.embeddings import Embeddings
+from pydantic import SecretStr
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from customer_agent.application.ingestion import IngestionService
-from customer_agent.application.ports import EmbeddingProvider, ProviderUnavailableError
-from customer_agent.application.retrieval import RetrievalService
+from customer_agent.application.ports import ProviderUnavailableError
+from customer_agent.application.retrieval import HybridRetriever
 from customer_agent.config import Settings
 from customer_agent.domain.retrieval import SearchMode, SearchScope
 from customer_agent.infrastructure.db.knowledge_repository import PostgresKnowledgeRepository
-from customer_agent.infrastructure.embeddings import OpenAIEmbeddingProvider
+from customer_agent.infrastructure.embeddings import ProviderEmbeddings
 from customer_agent.infrastructure.knowledge_files import load_knowledge_directory
 from tests.conftest import KNOWLEDGE_DIR, REFERENCE_DATE, TENANT_ID
+from tests.fakes import FixedClock, search
 
 pytestmark = pytest.mark.llm
 
 SCOPE = SearchScope(today=REFERENCE_DATE, tenant_id=TENANT_ID)
 
 
-class CountingEmbeddings:
+class CountingEmbeddings(Embeddings):
     """Wraps the real provider to count API usage; optionally fails on the n-th batch."""
 
-    def __init__(self, inner: EmbeddingProvider, fail_on_batch: int | None = None) -> None:
+    def __init__(self, inner: Embeddings, fail_on_batch: int | None = None) -> None:
         self._inner = inner
         self._fail_on_batch = fail_on_batch
         self.batches = 0
         self.texts = 0
 
-    @property
-    def model_name(self) -> str:
-        return self._inner.model_name
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        raise NotImplementedError("async only")
 
-    @property
-    def dimensions(self) -> int:
-        return self._inner.dimensions
+    def embed_query(self, text: str) -> list[float]:
+        raise NotImplementedError("async only")
 
-    async def embed_documents(self, texts: Sequence[str]) -> list[list[float]]:
+    async def aembed_documents(self, texts: list[str]) -> list[list[float]]:
         self.batches += 1
         if self.batches == self._fail_on_batch:
             raise openai.APIConnectionError(
                 request=httpx2.Request("POST", "https://provider/embeddings")
             )
         self.texts += len(texts)
-        return await self._inner.embed_documents(texts)
+        return await self._inner.aembed_documents(texts)
 
-    async def embed_query(self, text: str) -> list[float]:
-        return await self._inner.embed_query(text)
+    async def aembed_query(self, text: str) -> list[float]:
+        return await self._inner.aembed_query(text)
 
 
 @pytest.fixture
-async def service(
-    repository: PostgresKnowledgeRepository, embeddings: EmbeddingProvider
-) -> RetrievalService:
-    await IngestionService(repository, embeddings).run(load_knowledge_directory(KNOWLEDGE_DIR))
-    return RetrievalService(repository, embeddings)
+async def retriever(
+    repository: PostgresKnowledgeRepository, embeddings: Embeddings
+) -> HybridRetriever:
+    await IngestionService(repository, embeddings, embedding_model="test-embeddings").run(
+        load_knowledge_directory(KNOWLEDGE_DIR)
+    )
+    return HybridRetriever(
+        search=repository,
+        embeddings=embeddings,
+        clock=FixedClock(REFERENCE_DATE),
+        tenant_id=TENANT_ID,
+    )
 
 
 async def ids(
-    service: RetrievalService, query: str, scope: SearchScope = SCOPE, **kw: object
+    retriever: HybridRetriever, query: str, scope: SearchScope = SCOPE, **kw: Any
 ) -> list[str]:
-    return [d.document_id for d in await service.retrieve(query, scope, **kw)]  # type: ignore[arg-type]
+    return [d.metadata["document_id"] for d in await search(retriever, query, scope, **kw)]
 
 
 # --- 1. How real customers phrase things --------------------------------------------------
@@ -95,7 +103,7 @@ REAL_PHRASINGS = [
     ("Passwort vergessen, was tun?", {"faq-account"}),
     ("Ich hätte gern eine Rechnung für meine Firma", {"faq-invoice"}),
     ("Mein Laptop ist nach 8 Monaten kaputt gegangen", {"policy-warranty"}),
-    ("Hotline Öffnungszeiten Samstag", {"info-customer-service-contact"}),
+    ("Hotline Öffnungszeiten Samstag", {"info-customer-retriever-contact"}),
     ("Wie storniere ich meine Bestellung?", {"policy-order-cancellation"}),
     ("Ich will meine Daten löschen lassen (DSGVO)", {"policy-privacy", "faq-account"}),
     (
@@ -109,9 +117,9 @@ REAL_PHRASINGS = [
     ("query", "acceptable"), REAL_PHRASINGS, ids=[q for q, _ in REAL_PHRASINGS]
 )
 async def test_real_customer_phrasing_finds_the_right_document_in_top_5(
-    service: RetrievalService, query: str, acceptable: set[str]
+    retriever: HybridRetriever, query: str, acceptable: set[str]
 ) -> None:
-    top5 = await ids(service, query, top_k=5)
+    top5 = await ids(retriever, query, k=5)
 
     assert acceptable & set(top5), f"{query!r} → {top5}"
 
@@ -135,22 +143,22 @@ FORBIDDEN_NEIGHBOURS = [
     ("query", "forbidden"), FORBIDDEN_NEIGHBOURS, ids=[f for _, f in FORBIDDEN_NEIGHBOURS]
 )
 async def test_semantically_closest_forbidden_document_is_never_returned(
-    service: RetrievalService, query: str, forbidden: str, mode: SearchMode
+    retriever: HybridRetriever, query: str, forbidden: str, mode: SearchMode
 ) -> None:
-    assert forbidden not in await ids(service, query, top_k=50, mode=mode)
+    assert forbidden not in await ids(retriever, query, k=50, mode=mode)
 
 
 async def test_poisoned_community_post_is_retrievable_but_flagged_untrusted(
-    service: RetrievalService,
+    retriever: HybridRetriever,
 ) -> None:
-    documents = await service.retrieve(
-        "Velto Watch verbindet sich nicht mit dem Handy", SCOPE, top_k=10
+    documents = await search(
+        retriever, "Velto Watch verbindet sich nicht mit dem Handy", SCOPE, k=10
     )
-    by_id = {d.document_id: d for d in documents}
+    by_id = {d.metadata["document_id"]: d for d in documents}
 
     assert "product-velto-watch-3" in by_id
     if "community-velto-watch-pairing-tip" in by_id:
-        assert by_id["community-velto-watch-pairing-tip"].trust_level == "untrusted"
+        assert by_id["community-velto-watch-pairing-tip"].metadata["trust_level"] == "untrusted"
 
 
 # --- 3. Relevance signal for "no answer" decisions (input for Day 3) ----------------------
@@ -168,11 +176,11 @@ OFF_TOPIC = [
 
 
 async def test_off_topic_queries_score_lower_than_on_topic_queries(
-    service: RetrievalService,
+    retriever: HybridRetriever,
 ) -> None:
     async def best_vector_score(query: str) -> float:
-        documents = await service.retrieve(query, SCOPE, top_k=1, mode=SearchMode.VECTOR)
-        similarity = documents[0].similarity if documents else None
+        documents = await search(retriever, query, SCOPE, k=1, mode=SearchMode.VECTOR)
+        similarity = documents[0].metadata["similarity"] if documents else None
         return similarity or 0.0
 
     # Vector search always returns *something*; only the score separates relevant from irrelevant.
@@ -202,7 +210,7 @@ def knowledge_copy(tmp_path: Path) -> Path:
 
 
 async def test_scheduled_policy_version_switches_on_its_valid_from_date(
-    repository: PostgresKnowledgeRepository, embeddings: EmbeddingProvider, knowledge_copy: Path
+    repository: PostgresKnowledgeRepository, embeddings: Embeddings, knowledge_copy: Path
 ) -> None:
     _set_front_matter(
         knowledge_copy / "policy-returns-v6.md",
@@ -211,15 +219,22 @@ async def test_scheduled_policy_version_switches_on_its_valid_from_date(
         trust_level="official",
     )
     _set_front_matter(knowledge_copy / "policy-returns-v5.md", valid_until="2026-12-31")
-    await IngestionService(repository, embeddings).run(load_knowledge_directory(knowledge_copy))
-    service = RetrievalService(repository, embeddings)
+    await IngestionService(repository, embeddings, embedding_model="test-embeddings").run(
+        load_knowledge_directory(knowledge_copy)
+    )
+    retriever = HybridRetriever(
+        search=repository,
+        embeddings=embeddings,
+        clock=FixedClock(REFERENCE_DATE),
+        tenant_id=TENANT_ID,
+    )
     query = "Wie lange habe ich Zeit für eine Rückgabe?"
 
     before = await ids(
-        service, query, SearchScope(today=date(2026, 12, 31), tenant_id=TENANT_ID), top_k=10
+        retriever, query, SearchScope(today=date(2026, 12, 31), tenant_id=TENANT_ID), k=10
     )
     after = await ids(
-        service, query, SearchScope(today=date(2027, 1, 1), tenant_id=TENANT_ID), top_k=10
+        retriever, query, SearchScope(today=date(2027, 1, 1), tenant_id=TENANT_ID), k=10
     )
 
     assert "policy-returns-v5" in before and "policy-returns-v6" not in before
@@ -227,29 +242,29 @@ async def test_scheduled_policy_version_switches_on_its_valid_from_date(
 
 
 async def test_editing_one_document_re_embeds_only_that_document(
-    repository: PostgresKnowledgeRepository, embeddings: EmbeddingProvider, knowledge_copy: Path
+    repository: PostgresKnowledgeRepository, embeddings: Embeddings, knowledge_copy: Path
 ) -> None:
     counting = CountingEmbeddings(embeddings)
-    service = IngestionService(repository, counting)
-    await service.run(load_knowledge_directory(knowledge_copy))
+    ingestion = IngestionService(repository, counting, embedding_model="test-embeddings")
+    await ingestion.run(load_knowledge_directory(knowledge_copy))
     texts_after_first_run = counting.texts
 
     path = knowledge_copy / "info-shipping-costs.md"
     path.write_text(path.read_text(encoding="utf-8").replace("4,95 €", "5,49 €"), encoding="utf-8")
-    report = await service.run(load_knowledge_directory(knowledge_copy))
+    report = await ingestion.run(load_knowledge_directory(knowledge_copy))
 
     assert report.updated == ["info-shipping-costs"]
     assert counting.texts - texts_after_first_run == report.chunks_embedded == 1
 
 
 async def test_archiving_removes_the_document_from_the_index(
-    repository: PostgresKnowledgeRepository, embeddings: EmbeddingProvider, knowledge_copy: Path
+    repository: PostgresKnowledgeRepository, embeddings: Embeddings, knowledge_copy: Path
 ) -> None:
-    service = IngestionService(repository, embeddings)
-    await service.run(load_knowledge_directory(knowledge_copy))
+    ingestion = IngestionService(repository, embeddings, embedding_model="test-embeddings")
+    await ingestion.run(load_knowledge_directory(knowledge_copy))
 
     _set_front_matter(knowledge_copy / "faq-invoice.md", status="archived")
-    report = await service.run(load_knowledge_directory(knowledge_copy))
+    report = await ingestion.run(load_knowledge_directory(knowledge_copy))
 
     assert report.removed == ["faq-invoice"]
     assert "faq-invoice" not in await repository.fingerprints()
@@ -259,27 +274,33 @@ async def test_archiving_removes_the_document_from_the_index(
 
 
 async def test_provider_failure_mid_ingestion_leaves_index_untouched(
-    repository: PostgresKnowledgeRepository, embeddings: EmbeddingProvider
+    repository: PostgresKnowledgeRepository, embeddings: Embeddings
 ) -> None:
     failing = CountingEmbeddings(embeddings, fail_on_batch=5)
 
     with pytest.raises(openai.APIConnectionError):
-        await IngestionService(repository, failing).run(load_knowledge_directory(KNOWLEDGE_DIR))
+        await IngestionService(repository, failing, embedding_model="test-embeddings").run(
+            load_knowledge_directory(KNOWLEDGE_DIR)
+        )
 
     assert await repository.fingerprints() == {}
 
 
 async def test_invalid_api_key_raises_a_provider_error() -> None:
     settings = Settings()
-    client = openai.AsyncOpenAI(
-        api_key="sk-invalid", base_url=settings.openai_base_url, max_retries=0
-    )
-    provider = OpenAIEmbeddingProvider(
-        client, settings.embedding_model, settings.embedding_dimensions
+    provider = ProviderEmbeddings(
+        openai_api_key=SecretStr("sk-invalid"),
+        openai_api_base=settings.openai_base_url,
+        max_retries=0,
+        model=settings.embedding_model,
+        dimensions=settings.embedding_dimensions,
     )
 
-    with pytest.raises(ProviderUnavailableError):
-        await provider.embed_query("Versand")
+    try:
+        with pytest.raises(ProviderUnavailableError):
+            await provider.aembed_query("Versand")
+    finally:
+        await provider.aclose()
 
 
 @pytest.mark.parametrize(
@@ -295,18 +316,18 @@ async def test_invalid_api_key_raises_a_provider_error() -> None:
     ids=["sql-injection", "tsquery-operators", "quotes", "empty", "whitespace", "very-long"],
 )
 async def test_hostile_or_malformed_queries_do_not_break_search(
-    service: RetrievalService, engine: AsyncEngine, query: str
+    retriever: HybridRetriever, engine: AsyncEngine, query: str
 ) -> None:
-    await service.retrieve(query, SCOPE)
+    await search(retriever, query, SCOPE)
 
     async with engine.connect() as connection:
         count = await connection.scalar(text("SELECT count(*) FROM knowledge_chunks"))
     assert count and count > 0
 
 
-async def test_concurrent_queries(service: RetrievalService) -> None:
+async def test_concurrent_queries(retriever: HybridRetriever) -> None:
     queries = [q for q, _ in REAL_PHRASINGS] + ON_TOPIC
 
-    results = await asyncio.gather(*(service.retrieve(q, SCOPE) for q in queries))
+    results = await asyncio.gather(*(search(retriever, q, SCOPE) for q in queries))
 
     assert all(results)

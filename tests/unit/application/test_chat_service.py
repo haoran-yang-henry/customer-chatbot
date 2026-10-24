@@ -21,7 +21,9 @@ ROUTING = (
 
 def service(store: InMemorySessionStore) -> ChatService:
     llm = ScriptedRouterLLM(ROUTING)
-    agent = make_orchestrator(llm, FakeRetriever([document("policy-order-cancellation", 0.7)]))
+    agent = make_orchestrator(
+        llm, FakeRetriever(documents=[document("policy-order-cancellation", 0.7)])
+    )
     return ChatService(agent, store, tenant_id="nordelektro")
 
 

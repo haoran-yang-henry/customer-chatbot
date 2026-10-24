@@ -134,7 +134,7 @@ async def _judge(
     report: EvalReport, cases: list[EvalCase], traces: dict[str, str] | None = None
 ) -> EvalReport:
     """``traces``: the Langfuse trace per case id; the judge's calls then join the case's trace."""
-    from customer_agent.bootstrap import create_llm_provider
+    from customer_agent.bootstrap import create_chat_model
     from customer_agent.config import get_settings
     from customer_agent.evaluation.judge import GroundednessJudge, judgeable
     from customer_agent.evaluation.langfuse_experiment import case_trace
@@ -144,7 +144,7 @@ async def _judge(
 
     settings = get_settings()
     judge = GroundednessJudge(
-        create_llm_provider(settings),
+        create_chat_model(settings),
         load_prompt("judge", 1),
         load_knowledge_directory(settings.knowledge_dir),
     )

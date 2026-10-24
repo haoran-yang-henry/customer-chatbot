@@ -21,11 +21,11 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from customer_agent.infrastructure.embeddings import HashingEmbeddingProvider
+from customer_agent.infrastructure.embeddings import HashingEmbeddings
 
 LATENCY = float(os.environ.get("MOCK_LLM_LATENCY_MS", "0")) / 1000
 _DOCUMENT = re.compile(r'<document id="([^"]+)"')
-_EMBEDDER = HashingEmbeddingProvider(dimensions=1536)
+_EMBEDDER = HashingEmbeddings(dimensions=1536)
 
 app = FastAPI(title="mock-llm")
 
@@ -89,7 +89,7 @@ async def chat(request: Request) -> JSONResponse | StreamingResponse:
 async def embeddings(request: Request) -> JSONResponse:
     body: dict[str, Any] = await request.json()
     texts = body["input"] if isinstance(body["input"], list) else [body["input"]]
-    vectors = await _EMBEDDER.embed_documents(texts)
+    vectors = await _EMBEDDER.aembed_documents(texts)
     return JSONResponse(
         {
             "object": "list",

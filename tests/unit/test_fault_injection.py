@@ -2,20 +2,22 @@
 fallback within 10 s without a 5xx, and once the breaker opens the provider is not called."""
 
 import time
+from datetime import date
 
 import httpx2
-from openai import AsyncOpenAI
+from pydantic import SecretStr
 
 from customer_agent.application.answering import AnswerService
 from customer_agent.application.orchestrator import ConversationOrchestrator
-from customer_agent.application.routing import IntentRouter
+from customer_agent.application.understanding import UnderstandAgent
 from customer_agent.domain.conversation import Behavior, Conversation, Message, Role
-from customer_agent.infrastructure.llm import OpenAICompatibleLLM
 from customer_agent.infrastructure.memory import InMemoryAuditLog, InMemoryTicketService
+from customer_agent.infrastructure.models import BreakerChatModel, ProviderChatModel
 from customer_agent.infrastructure.prompts import load_prompt
-from customer_agent.infrastructure.resilience import BreakerLLM, CircuitBreaker
+from customer_agent.infrastructure.resilience import CircuitBreaker
 from tests.fakes import FakeRetriever, FixedClock, SeedOrderRepository, document
-from tests.unit.application.test_answering import TODAY
+
+TODAY = date(2026, 10, 5)
 
 NFR_11_SECONDS = 10.0
 
@@ -27,25 +29,23 @@ async def test_llm_outage_reaches_the_fallback_in_time_and_the_breaker_takes_ove
         attempts.append(request.url.path)
         raise httpx2.ConnectTimeout("provider unreachable", request=request)
 
-    client = AsyncOpenAI(
-        api_key="test",
-        base_url="https://llm.test/v1",
-        http_client=httpx2.AsyncClient(transport=httpx2.MockTransport(hanging)),
-        timeout=0.5,
+    provider = ProviderChatModel(
+        model_name="model-down",
+        openai_api_key=SecretStr("test"),
+        openai_api_base="https://llm.test/v1",
+        http_async_client=httpx2.AsyncClient(transport=httpx2.MockTransport(hanging)),
+        request_timeout=0.5,
         max_retries=1,
     )
-    llm = BreakerLLM(
-        OpenAICompatibleLLM(client, "model-down"),
-        CircuitBreaker("fault-llm", failure_threshold=2, reset_after=60),
+    llm = BreakerChatModel(
+        inner=provider, breaker=CircuitBreaker("fault-llm", failure_threshold=2, reset_after=60)
     )
     agent = ConversationOrchestrator(
-        IntentRouter(llm, load_prompt("router", 5)),
+        UnderstandAgent(llm, load_prompt("router", 5)),
         AnswerService(
-            FakeRetriever([document("policy-returns-v5", 0.7)]),
+            FakeRetriever(documents=[document("policy-returns-v5", 0.7)]),
             llm,
             load_prompt("answer", 4),
-            FixedClock(TODAY),
-            tenant_id="nordelektro",
             min_similarity=0.35,
         ),
         orders=SeedOrderRepository(),

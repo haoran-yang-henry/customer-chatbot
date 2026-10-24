@@ -101,7 +101,7 @@ def test_judging_keeps_the_token_usage(monkeypatch: pytest.MonkeyPatch) -> None:
     from customer_agent.evaluation.cli import _judge
     from tests.fakes import FakeLLM
 
-    monkeypatch.setattr(customer_agent.bootstrap, "create_llm_provider", lambda _s: FakeLLM())
+    monkeypatch.setattr(customer_agent.bootstrap, "create_chat_model", lambda _s: FakeLLM())
     cases = load_dataset(CORE_DATASET)
     report = asyncio.run(
         run_evaluation(cases, PlaceholderAgent(), target="p", dataset="core", current_day=7)

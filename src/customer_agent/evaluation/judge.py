@@ -11,9 +11,9 @@ import re
 from collections.abc import Sequence
 from pathlib import Path
 
+from langchain_core.language_models.chat_models import BaseChatModel
 from pydantic import BaseModel, ConfigDict
 
-from customer_agent.application.ports import ChatMessage, LLMProvider
 from customer_agent.application.prompts import PromptTemplate
 from customer_agent.domain.knowledge import KnowledgeDocument
 from customer_agent.evaluation.scoring import CaseResult
@@ -44,7 +44,7 @@ def parse_verdict(text: str) -> JudgeVerdict:
 
 class GroundednessJudge:
     def __init__(
-        self, llm: LLMProvider, prompt: PromptTemplate, documents: Sequence[KnowledgeDocument]
+        self, llm: BaseChatModel, prompt: PromptTemplate, documents: Sequence[KnowledgeDocument]
     ) -> None:
         self._llm = llm
         self._prompt = prompt
@@ -53,18 +53,13 @@ class GroundednessJudge:
     async def judge(self, answer: str, sources: Sequence[str]) -> JudgeVerdict:
         cited = [self._documents[s] for s in sources if s in self._documents]
         text = "\n\n".join(f'<document id="{d.meta.id}">\n{d.body}\n</document>' for d in cited)
-        result = await self._llm.complete(
-            [
-                ChatMessage(role="system", content=self._prompt.system),
-                ChatMessage(
-                    role="user", content=self._prompt.render_user(sources=text, answer=answer)
-                ),
-            ],
+        reply = await self._llm.ainvoke(
+            self._prompt.render_messages(sources=text, answer=answer),
+            session_id="judge-" + hashlib.sha256(answer.encode()).hexdigest()[:24],
             max_tokens=600,
             temperature=0.0,
-            session_id="judge-" + hashlib.sha256(answer.encode()).hexdigest()[:24],
         )
-        return parse_verdict(result.text)
+        return parse_verdict(reply.text)
 
 
 def judgeable(result: CaseResult) -> bool:

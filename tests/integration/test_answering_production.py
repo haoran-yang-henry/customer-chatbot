@@ -4,14 +4,14 @@ Run with ``make test-llm``; needs CA_OPENAI_API_KEY and CA_LLM_API_KEY.
 """
 
 import pytest
+from langchain_core.embeddings import Embeddings
 
 from customer_agent.application.answering import AnswerService
 from customer_agent.application.ingestion import IngestionService
 from customer_agent.application.orchestrator import ConversationOrchestrator, TurnResult
-from customer_agent.application.ports import EmbeddingProvider
-from customer_agent.application.retrieval import RetrievalService
-from customer_agent.application.routing import IntentRouter
-from customer_agent.bootstrap import create_llm_provider
+from customer_agent.application.retrieval import HybridRetriever
+from customer_agent.application.understanding import UnderstandAgent
+from customer_agent.bootstrap import create_chat_model
 from customer_agent.config import Settings
 from customer_agent.domain.conversation import Behavior, Conversation, Message, Role
 from customer_agent.domain.intents import Intent
@@ -29,23 +29,30 @@ pytestmark = pytest.mark.llm
 
 @pytest.fixture
 async def agent(
-    repository: PostgresKnowledgeRepository, embeddings: EmbeddingProvider
+    repository: PostgresKnowledgeRepository, embeddings: Embeddings
 ) -> ConversationOrchestrator:
     settings = Settings()
     if settings.llm_api_key is None:
         pytest.skip("CA_LLM_API_KEY is not set")
-    await IngestionService(repository, embeddings).run(load_knowledge_directory(KNOWLEDGE_DIR))
-    llm = create_llm_provider(settings)
+    await IngestionService(repository, embeddings, embedding_model="test-embeddings").run(
+        load_knowledge_directory(KNOWLEDGE_DIR)
+    )
+    llm = create_chat_model(settings)
+    retriever = HybridRetriever(
+        search=repository,
+        embeddings=embeddings,
+        clock=FixedClock(REFERENCE_DATE),
+        tenant_id=TENANT_ID,
+        k=settings.answer_top_k,
+    )
     answers = AnswerService(
-        RetrievalService(repository, embeddings),
+        retriever,
         llm,
         load_prompt("answer", settings.answer_prompt_version),
-        FixedClock(REFERENCE_DATE),
-        tenant_id=TENANT_ID,
         min_similarity=settings.min_answer_similarity,
     )
     return ConversationOrchestrator(
-        IntentRouter(llm, load_prompt("router", settings.router_prompt_version)),
+        UnderstandAgent(llm, load_prompt("router", settings.router_prompt_version)),
         answers,
         orders=SeedOrderRepository(),
         tickets=InMemoryTicketService(),

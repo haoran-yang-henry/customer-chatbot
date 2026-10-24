@@ -3,10 +3,11 @@
 import hashlib
 from collections.abc import Sequence
 
+from langchain_core.embeddings import Embeddings
 from pydantic import BaseModel, ConfigDict
 
 from customer_agent.application.chunking import CHUNKER_VERSION, chunk_document
-from customer_agent.application.ports import EmbeddingProvider, IndexedDocument, KnowledgeIndex
+from customer_agent.application.ports import IndexedDocument, KnowledgeIndex
 from customer_agent.domain.knowledge import DocumentStatus, KnowledgeDocument
 
 
@@ -32,9 +33,12 @@ def fingerprint(document: KnowledgeDocument, embedding_model: str) -> str:
 class IngestionService:
     """Idempotent: a second run with unchanged inputs makes no embedding calls and no writes."""
 
-    def __init__(self, index: KnowledgeIndex, embeddings: EmbeddingProvider) -> None:
+    def __init__(
+        self, index: KnowledgeIndex, embeddings: Embeddings, *, embedding_model: str
+    ) -> None:
         self._index = index
         self._embeddings = embeddings
+        self._embedding_model = embedding_model
 
     async def run(self, documents: Sequence[KnowledgeDocument]) -> IngestionReport:
         approved = [d for d in documents if d.meta.status is DocumentStatus.APPROVED]
@@ -43,7 +47,7 @@ class IngestionService:
         )
         indexed = await self._index.fingerprints()
 
-        model = self._embeddings.model_name
+        model = self._embedding_model
         changed = [d for d in approved if indexed.get(d.meta.id) != fingerprint(d, model)]
         upserts = [await self._prepare(d) for d in changed]
         wanted = {d.meta.id for d in approved}
@@ -64,10 +68,10 @@ class IngestionService:
 
     async def _prepare(self, document: KnowledgeDocument) -> IndexedDocument:
         chunks = chunk_document(document)
-        vectors = await self._embeddings.embed_documents([c.content for c in chunks])
+        vectors = await self._embeddings.aembed_documents([c.content for c in chunks])
         return IndexedDocument(
             meta=document.meta,
-            fingerprint=fingerprint(document, self._embeddings.model_name),
+            fingerprint=fingerprint(document, self._embedding_model),
             chunks=chunks,
             embeddings=vectors,
         )

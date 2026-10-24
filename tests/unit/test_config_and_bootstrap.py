@@ -8,12 +8,17 @@ from pydantic import ValidationError
 from customer_agent.bootstrap import (
     ConfigurationError,
     check_embedding_dimensions,
+    create_chat_models,
     create_embedding_provider,
-    create_llm_providers,
 )
 from customer_agent.config import Settings
-from customer_agent.infrastructure.cassette import CassetteEmbeddings, CassetteLLM
-from customer_agent.infrastructure.embeddings import HashingEmbeddingProvider
+from customer_agent.infrastructure.cassette import CassetteEmbeddings
+from customer_agent.infrastructure.lifecycle import aclose_all
+from customer_agent.infrastructure.models import (
+    BreakerChatModel,
+    ProviderChatModel,
+    ReplayChatModel,
+)
 
 
 def test_empty_optional_values_become_none() -> None:
@@ -48,9 +53,9 @@ def test_replaying_a_cassette_needs_no_api_key(tmp_path: Path) -> None:
         json.dump({"chat": {}, "embeddings": {}}, file)
     settings = Settings(_env_file=None, eval_cassette=cassette)
 
-    providers = create_llm_providers(settings)
+    models = create_chat_models(settings)
 
-    assert all(isinstance(llm, CassetteLLM) for llm in providers.values())
+    assert all(isinstance(model, ReplayChatModel) for model in models.values())
     assert isinstance(create_embedding_provider(settings), CassetteEmbeddings)
 
 
@@ -63,29 +68,37 @@ def test_evaluation_shortcuts_are_refused_in_prod(tmp_path: Path) -> None:
 
 def test_dimension_mismatch_with_database_column_is_rejected() -> None:
     with pytest.raises(ConfigurationError, match="dimensions"):
-        check_embedding_dimensions(HashingEmbeddingProvider(dimensions=3072))
+        check_embedding_dimensions(3072)
 
 
-def test_embedding_clients_have_short_timeouts(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_embedding_clients_have_short_timeouts(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CA_OPENAI_API_KEY", "sk-test")
 
     provider = create_embedding_provider(Settings(_env_file=None))._inner  # type: ignore[attr-defined]
 
-    assert provider._client.timeout == 15.0 and provider._client.max_retries == 1
-    assert provider._query_client.timeout == 5.0  # the request path waits less
+    model = provider
+    assert model.request_timeout == 15.0 and model.max_retries == 1
+    assert model.query_timeout == 5.0  # the request path waits less
+    await provider.aclose()
 
 
-def test_router_timeout_and_retries_stay_below_the_fallback_deadline(
+async def test_router_timeout_and_retries_stay_below_the_fallback_deadline(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """NFR-11: an LLM outage reaches the fallback within 10 s (timeout × attempts + backoff)."""
     monkeypatch.setenv("CA_LLM_API_KEY", "sk-test")
     settings = Settings(_env_file=None)
 
-    router = create_llm_providers(settings)["router"]._inner  # type: ignore[attr-defined]
+    models = create_chat_models(settings)
+    router = models["router"]
+    assert isinstance(router, BreakerChatModel)
+    model = router.inner
+    assert isinstance(model, ProviderChatModel)
 
     attempts = settings.llm_max_retries + 1
-    assert router._client.timeout * attempts + 1.0 < 10.0
+    assert isinstance(model.request_timeout, float)
+    assert model.request_timeout * attempts + 1.0 < 10.0
+    await aclose_all(*models.values())
 
 
 @pytest.mark.parametrize(

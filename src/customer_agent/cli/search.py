@@ -8,15 +8,18 @@ import argparse
 import asyncio
 from datetime import date
 
-from customer_agent.application.retrieval import RetrievalService
+from langchain_core.documents import Document
+
+from customer_agent.application.retrieval import HybridRetriever
 from customer_agent.bootstrap import (
     create_embedding_provider,
     create_engine,
     create_knowledge_repository,
 )
 from customer_agent.config import get_settings
-from customer_agent.domain.retrieval import RetrievedDocument, SearchMode, SearchScope
+from customer_agent.domain.retrieval import SearchMode
 from customer_agent.evaluation.schema import DATASET_REFERENCE_DATE
+from customer_agent.infrastructure.clock import FixedClock
 from customer_agent.infrastructure.lifecycle import aclose_all
 
 
@@ -34,15 +37,16 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _print(mode: SearchMode, documents: list[RetrievedDocument]) -> None:
+def _print(mode: SearchMode, documents: list[Document]) -> None:
     print(f"\n== {mode} ==")
     if not documents:
         print("  (no results)")
     for rank, doc in enumerate(documents, start=1):
-        similarity = f"{doc.similarity:.3f}" if doc.similarity is not None else "  -  "
-        flag = "  [UNTRUSTED]" if doc.trust_level == "untrusted" else ""
-        print(f"  {rank}. {doc.document_id:<36} rrf={doc.score:.4f} sim={similarity}{flag}")
-        best = doc.chunks[0].content.replace("\n", " ")
+        meta = doc.metadata
+        similarity = f"{meta['similarity']:.3f}" if meta["similarity"] is not None else "  -  "
+        flag = "  [UNTRUSTED]" if meta["trust_level"] == "untrusted" else ""
+        print(f"  {rank}. {meta['document_id']:<36} rrf={meta['score']:.4f} sim={similarity}{flag}")
+        best = doc.page_content.replace("\n", " ")  # the best chunk comes first
         print(f"     {best[:110]}…")
 
 
@@ -52,11 +56,16 @@ async def _run(args: argparse.Namespace) -> None:
     embeddings = None
     try:
         embeddings = create_embedding_provider(settings)
-        service = RetrievalService(create_knowledge_repository(engine), embeddings)
-        scope = SearchScope(today=args.date, tenant_id=settings.tenant_id)
+        retriever = HybridRetriever(
+            search=create_knowledge_repository(engine),
+            embeddings=embeddings,
+            clock=FixedClock(args.date),
+            tenant_id=settings.tenant_id,
+            k=args.k,
+        )
         modes = list(SearchMode) if args.mode == "all" else [SearchMode(args.mode)]
         for mode in modes:
-            _print(mode, await service.retrieve(args.query, scope, top_k=args.k, mode=mode))
+            _print(mode, await retriever.model_copy(update={"mode": mode}).ainvoke(args.query))
     finally:
         await aclose_all(embeddings)
         await engine.dispose()

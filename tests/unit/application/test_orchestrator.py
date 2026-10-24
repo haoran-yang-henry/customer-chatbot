@@ -20,7 +20,7 @@ from tests.fakes import (
     make_orchestrator,
 )
 
-RETRIEVER = FakeRetriever([document("policy-returns-v5", 0.7)])
+RETRIEVER = FakeRetriever(documents=[document("policy-returns-v5", 0.7)])
 
 
 def orchestrator(llm: ScriptedRouterLLM, **kwargs: Any) -> ConversationOrchestrator:
@@ -45,7 +45,7 @@ async def test_knowledge_intent_is_answered_with_rewritten_query_and_intent() ->
     response = await orchestrator(llm).respond(ask("Und was kostet das?"))
 
     assert response.behavior is Behavior.ANSWER and response.intent is Intent.RETURN_POLICY
-    assert RETRIEVER.queries[0][0] == "Rückgabe Kosten?"  # retrieval uses the rewrite
+    assert RETRIEVER.queries[0] == "Rückgabe Kosten?"  # retrieval uses the rewrite
     assert "Und was kostet das?" in llm.calls[-1][1].content  # the answer sees the original
 
 

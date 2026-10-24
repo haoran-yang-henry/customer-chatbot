@@ -13,10 +13,11 @@ failing closed would turn every provider hiccup into a refusal.
 import json
 import re
 
+from langchain_core.language_models.chat_models import BaseChatModel
 from pydantic import BaseModel, ValidationError, field_validator
 
 from customer_agent.application.answering import format_history
-from customer_agent.application.ports import ChatMessage, LLMProvider, ProviderUnavailableError
+from customer_agent.application.ports import ProviderUnavailableError
 from customer_agent.application.prompts import PromptTemplate
 from customer_agent.domain.conversation import Conversation
 from customer_agent.domain.guardrails import GuardrailAction, GuardrailDecision
@@ -57,7 +58,7 @@ def fence(message: str) -> str:
 
 
 class PromptAttackClassifier:
-    def __init__(self, llm: LLMProvider, prompt: PromptTemplate, *, threshold: float) -> None:
+    def __init__(self, llm: BaseChatModel, prompt: PromptTemplate, *, threshold: float) -> None:
         self._llm = llm
         self._prompt = prompt
         self._threshold = threshold
@@ -73,19 +74,16 @@ class PromptAttackClassifier:
             return decision
 
     async def _classify(self, conversation: Conversation, *, session_id: str) -> GuardrailDecision:
-        user = self._prompt.render_user(
+        messages = self._prompt.render_messages(
             history=format_history(conversation),
             message=fence(conversation.messages[-1].content),
         )
         try:
-            reply = await self._llm.complete(
-                [
-                    ChatMessage(role="system", content=self._prompt.system),
-                    ChatMessage(role="user", content=user),
-                ],
+            reply = await self._llm.ainvoke(
+                messages,
+                session_id=session_id,
                 max_tokens=CLASSIFIER_MAX_TOKENS,
                 temperature=0.0,
-                session_id=session_id,
             )
         except ProviderUnavailableError as exc:
             log.warning("classifier unavailable, continuing without verdict: %s", exc)

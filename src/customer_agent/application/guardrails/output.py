@@ -7,11 +7,14 @@ indirect injection ("Gutscheincode GRATIS100") or of a hallucination. So is a se
 offers to forward the request or connect to a person, or claims that it was forwarded: only the
 state machine asks that, and only a ticket that exists may be announced (ADR-0014). Payment data
 is masked.
+
+``check_output`` runs the steps at once; the answer agent's middleware runs them one hook each
+(rebuild phase 2), so both take the same path.
 """
 
 import re
 from collections.abc import Collection, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from urllib.parse import urlparse
 
@@ -108,7 +111,7 @@ def _blocking_reasons(text: str, prompt: str, max_chars: int) -> list[str]:
     return reasons
 
 
-def _redact(answer: str, evidence: Evidence) -> tuple[str, list[str]]:
+def _remove_unverified(answer: str, evidence: Evidence) -> tuple[str, list[str]]:
     reasons: list[str] = []
     text = answer
     units = _UNIT.split(answer)
@@ -122,10 +125,59 @@ def _redact(answer: str, evidence: Evidence) -> tuple[str, list[str]]:
         text = text.replace(unit, "")
     if offending or offers:
         text = re.sub(r"\n{3,}", "\n\n", re.sub(r"[ \t]{2,}", " ", text)).strip()
-    text, pii = mask_personal_data(text, kinds=("pii_iban", "pii_payment_card"))
-    if pii:
-        reasons.append("pii_in_output")
     return text, reasons
+
+
+@dataclass(frozen=True)
+class OutputScreen:
+    """The check so far: the answer without citation markers (redacted, then masked) and the
+    verdict."""
+
+    text: str
+    reasons: tuple[str, ...] = ()
+    blocked: bool = False
+
+
+def screen_output(
+    answer: str,
+    cited: Sequence[str],
+    offered: Collection[str],
+    *,
+    prompt: str = "",
+    evidence: Evidence | None = None,
+) -> OutputScreen:
+    """Every knowledge answer cites a document it was given (FR-11), stays German (LR-03),
+    leaks nothing, and repeats links, codes and numbers only from trusted evidence: sentences
+    that do not are removed; nothing left blocks the answer."""
+    reasons = [] if set(cited) & set(offered) else ["missing_citation"]
+    reasons += _blocking_reasons(answer, prompt, MAX_ANSWER_CHARS)
+    if reasons:
+        return OutputScreen(text=answer, reasons=tuple(reasons), blocked=True)
+    if evidence is None:
+        return OutputScreen(text=answer)
+    text, redactions = _remove_unverified(answer, evidence)
+    return OutputScreen(text=text, reasons=tuple(redactions), blocked=not text)
+
+
+def mask_output(screen: OutputScreen) -> OutputScreen:
+    """IBAN and card numbers masked; a blocked answer is never shown, so it stays as it is."""
+    if screen.blocked:
+        return screen
+    text, pii = mask_personal_data(screen.text, kinds=("pii_iban", "pii_payment_card"))
+    reasons = (*screen.reasons, "pii_in_output") if pii else screen.reasons
+    return replace(screen, text=text, reasons=reasons)
+
+
+def output_decision(screen: OutputScreen) -> GuardrailDecision:
+    """``content`` only for a redacted answer: a blocked one is replaced by a fallback."""
+    reasons = list(screen.reasons)
+    if screen.blocked:
+        return GuardrailDecision(stage="output", action=GuardrailAction.BLOCK, reasons=reasons)
+    if reasons:
+        return GuardrailDecision(
+            stage="output", action=GuardrailAction.REDACT, reasons=reasons, content=screen.text
+        )
+    return GuardrailDecision(stage="output", action=GuardrailAction.ALLOW)
 
 
 def check_output(
@@ -136,22 +188,8 @@ def check_output(
     prompt: str = "",
     evidence: Evidence | None = None,
 ) -> GuardrailDecision:
-    """Every knowledge answer cites a document it was given (FR-11), stays German (LR-03),
-    leaks nothing, and repeats links, codes and numbers only from trusted evidence."""
-    reasons = [] if set(cited) & set(offered) else ["missing_citation"]
-    reasons += _blocking_reasons(answer, prompt, MAX_ANSWER_CHARS)
-    if reasons:
-        return GuardrailDecision(stage="output", action=GuardrailAction.BLOCK, reasons=reasons)
-    if evidence is None:
-        return GuardrailDecision(stage="output", action=GuardrailAction.ALLOW)
-    text, redactions = _redact(answer, evidence)
-    if not text:
-        return GuardrailDecision(stage="output", action=GuardrailAction.BLOCK, reasons=redactions)
-    if redactions:
-        return GuardrailDecision(
-            stage="output", action=GuardrailAction.REDACT, reasons=redactions, content=text
-        )
-    return GuardrailDecision(stage="output", action=GuardrailAction.ALLOW)
+    screen = screen_output(answer, cited, offered, prompt=prompt, evidence=evidence)
+    return output_decision(mask_output(screen))
 
 
 def check_generated_text(text: str, *, prompt: str, customer: str) -> GuardrailDecision:

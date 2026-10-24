@@ -125,6 +125,15 @@ def test_payment_data_in_the_output_is_masked() -> None:
     assert decision.content == "Ihre Erstattung geht an [IBAN entfernt]."
 
 
+def test_payment_data_is_masked_without_evidence_too() -> None:
+    decision = check_output(
+        "Ihre Erstattung geht an DE89 3704 0044 0532 0130 00.", ["policy-returns-v5"], OFFERED
+    )
+
+    assert decision.reasons == ["pii_in_output"]
+    assert decision.content == "Ihre Erstattung geht an [IBAN entfernt]."
+
+
 @pytest.mark.parametrize(
     "offer",
     [

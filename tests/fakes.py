@@ -1,112 +1,166 @@
 """Test doubles for the application ports."""
 
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator
 from datetime import date
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
+from langchain_core.callbacks import (
+    AsyncCallbackManagerForLLMRun,
+    CallbackManagerForLLMRun,
+    CallbackManagerForRetrieverRun,
+)
+from langchain_core.documents import Document
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, UsageMetadata
+from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
+from langchain_core.retrievers import BaseRetriever
+from pydantic import Field
 
 from customer_agent.application.ports import (
-    ChatMessage,
     ConcurrentTurnError,
-    LLMResult,
     ProviderUnavailableError,
     StoredSession,
 )
 from customer_agent.domain.conversation import AgentResponse, Message, Role
 from customer_agent.domain.knowledge import SourceType, TrustLevel
 from customer_agent.domain.orders import Order
-from customer_agent.domain.retrieval import (
-    ChunkHit,
-    RetrievedDocument,
-    SearchMode,
-    SearchScope,
-)
+from customer_agent.domain.retrieval import SearchMode, SearchScope
 from customer_agent.domain.session import SessionState
 from customer_agent.infrastructure.memory import InMemoryAuditLog, InMemoryTicketService
 
 if TYPE_CHECKING:
     from customer_agent.application.guardrails.classifier import PromptAttackClassifier
     from customer_agent.application.orchestrator import ConversationOrchestrator
+    from customer_agent.application.retrieval import HybridRetriever
 
 
-def document(doc_id: str, similarity: float | None, content: str = "Inhalt.") -> RetrievedDocument:
-    hit = ChunkHit(
-        chunk_id=hash(doc_id) % 10_000,
-        document_id=doc_id,
-        title=doc_id,
-        source_type=SourceType.POLICY,
-        trust_level=TrustLevel.OFFICIAL,
-        content=content,
-        score=0.03,
-        similarity=similarity,
+def document(
+    doc_id: str,
+    similarity: float | None,
+    content: str = "Inhalt.",
+    *,
+    trust: TrustLevel = TrustLevel.OFFICIAL,
+) -> Document:
+    """A retrieved knowledge document as ``HybridRetriever`` returns it."""
+    metadata = {
+        "document_id": doc_id,
+        "title": doc_id,
+        "source_type": SourceType.POLICY.value,
+        "trust_level": trust.value,
+        "score": 0.03,
+        "similarity": similarity,
+        "chunk_ids": [hash(doc_id) % 10_000],
+    }
+    return Document(page_content=content, metadata=metadata)
+
+
+class FakeRetriever(BaseRetriever):
+    """Returns its documents for every query and records the queries."""
+
+    documents: list[Document]
+    queries: list[str] = Field(default_factory=list)
+
+    def _get_relevant_documents(
+        self, query: str, *, run_manager: CallbackManagerForRetrieverRun
+    ) -> list[Document]:
+        self.queries.append(query)
+        return self.documents
+
+
+async def search(
+    retriever: "HybridRetriever",
+    query: str,
+    scope: SearchScope,
+    *,
+    k: int = 5,
+    mode: SearchMode = SearchMode.HYBRID,
+) -> list[Document]:
+    """One search with this scope, depth and mode; the retriever's own are left as they are."""
+    configured = retriever.model_copy(
+        update={
+            "clock": FixedClock(scope.today),
+            "tenant_id": scope.tenant_id,
+            "k": k,
+            "mode": mode,
+        }
     )
-    return RetrievedDocument(
-        document_id=doc_id,
-        title=doc_id,
-        source_type=SourceType.POLICY,
-        trust_level=TrustLevel.OFFICIAL,
-        score=0.03,
-        chunks=[hit],
-    )
+    return await configured.ainvoke(query)
 
 
-class FakeRetriever:
-    def __init__(self, documents: list[RetrievedDocument]) -> None:
-        self.documents = documents
-        self.queries: list[tuple[str, SearchScope]] = []
+class FakeLLM(BaseChatModel):
+    """Chat-model double: a scripted reply, streamed in small pieces to exercise the stream
+    filter. Records every call's messages, keyword arguments (``max_tokens``, ``temperature``)
+    and the ``session_id`` keyword the caller passed."""
 
-    async def retrieve(
-        self,
-        query: str,
-        scope: SearchScope,
-        *,
-        top_k: int = 5,
-        mode: SearchMode = SearchMode.HYBRID,
-    ) -> list[RetrievedDocument]:
-        self.queries.append((query, scope))
-        return self.documents[:top_k]
+    reply: str = ""
+    fail: bool = False
+    piece: int = 7
+    usage: tuple[int, int] | None = None
+    calls: list[list[BaseMessage]] = Field(default_factory=list)
+    kwargs: list[dict[str, Any]] = Field(default_factory=list)
+    session_ids: list[str | None] = Field(default_factory=list)
 
-
-class FakeLLM:
-    """Returns a scripted reply; streams it in small pieces to exercise the stream filter."""
-
-    def __init__(self, reply: str = "", *, fail: bool = False, piece: int = 7) -> None:
-        self.reply = reply
-        self.fail = fail
-        self.piece = piece
-        self.calls: list[list[ChatMessage]] = []
-        self.session_ids: list[str | None] = []
+    def __init__(self, reply: str = "", **fields: Any) -> None:
+        super().__init__(**{"reply": reply, **fields})
 
     @property
-    def model_name(self) -> str:
+    def _llm_type(self) -> str:
         return "fake-llm"
 
-    async def complete(
+    def _record(
         self,
-        messages: Sequence[ChatMessage],
-        *,
-        max_tokens: int,
-        temperature: float,
-        session_id: str | None = None,
-    ) -> LLMResult:
+        messages: list[BaseMessage],
+        kwargs: dict[str, Any],
+        run_manager: AsyncCallbackManagerForLLMRun | CallbackManagerForLLMRun | None,
+    ) -> str:
+        """The reply for this call; raises like a provider outage when ``fail`` is set."""
         self.calls.append(list(messages))
-        self.session_ids.append(session_id)
+        self.kwargs.append(kwargs)
+        self.session_ids.append(kwargs.get("session_id"))
         if self.fail:
             raise ProviderUnavailableError("fake outage")
-        return LLMResult(text=self.reply, model="fake-llm")
+        return self.reply
 
-    async def stream(
-        self,
-        messages: Sequence[ChatMessage],
-        *,
-        max_tokens: int,
-        temperature: float,
-        session_id: str | None = None,
-    ) -> AsyncIterator[str]:
-        result = await self.complete(
-            messages, max_tokens=max_tokens, temperature=temperature, session_id=session_id
+    def _usage(self) -> UsageMetadata | None:
+        if self.usage is None:
+            return None
+        prompt, completion = self.usage
+        return UsageMetadata(
+            input_tokens=prompt, output_tokens=completion, total_tokens=prompt + completion
         )
-        for i in range(0, len(result.text), self.piece):
-            yield result.text[i : i + self.piece]
+
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        text = self._record(messages, kwargs, run_manager)
+        message = AIMessage(content=text, usage_metadata=self._usage())
+        return ChatResult(generations=[ChatGeneration(message=message)])
+
+    async def _agenerate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: AsyncCallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        text = self._record(messages, kwargs, run_manager)
+        message = AIMessage(content=text, usage_metadata=self._usage())
+        return ChatResult(generations=[ChatGeneration(message=message)])
+
+    async def _astream(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: AsyncCallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[ChatGenerationChunk]:
+        text = self._record(messages, kwargs, run_manager)
+        for i in range(0, len(text), self.piece):
+            yield ChatGenerationChunk(message=AIMessageChunk(content=text[i : i + self.piece]))
 
 
 class FixedClock:
@@ -120,31 +174,30 @@ class FixedClock:
 class ScriptedRouterLLM(FakeLLM):
     """Answers router prompts with a JSON routing and answer prompts with ``answer``."""
 
-    def __init__(self, routing: str, answer: str = "Ok. [policy-returns-v5]") -> None:
-        super().__init__(answer)
-        self.routing = routing
-        self.router_calls = 0
-        self.router_prompts: list[list[ChatMessage]] = []
-        self.router_session_ids: list[str | None] = []
+    routing: str
+    router_calls: int = 0
+    router_prompts: list[list[BaseMessage]] = Field(default_factory=list)
+    router_session_ids: list[str | None] = Field(default_factory=list)
 
-    async def complete(
+    def __init__(
+        self, routing: str, answer: str = "Ok. [policy-returns-v5]", **fields: Any
+    ) -> None:
+        super().__init__(answer, routing=routing, **fields)
+
+    def _record(
         self,
-        messages: Sequence[ChatMessage],
-        *,
-        max_tokens: int,
-        temperature: float,
-        session_id: str | None = None,
-    ) -> LLMResult:
-        if "You classify customer messages" in messages[0].content:
-            self.router_calls += 1
-            self.router_prompts.append(list(messages))
-            self.router_session_ids.append(session_id)
-            if self.fail:
-                raise ProviderUnavailableError("fake outage")
-            return LLMResult(text=self.routing, model="fake-llm")
-        return await super().complete(
-            messages, max_tokens=max_tokens, temperature=temperature, session_id=session_id
-        )
+        messages: list[BaseMessage],
+        kwargs: dict[str, Any],
+        run_manager: AsyncCallbackManagerForLLMRun | CallbackManagerForLLMRun | None,
+    ) -> str:
+        if "You classify customer messages" not in messages[0].text:
+            return super()._record(messages, kwargs, run_manager)
+        self.router_calls += 1
+        self.router_prompts.append(list(messages))
+        self.router_session_ids.append(kwargs.get("session_id"))
+        if self.fail:
+            raise ProviderUnavailableError("fake outage")
+        return self.routing
 
 
 class InMemorySessionStore:
@@ -222,25 +275,22 @@ def make_orchestrator(
 ) -> "ConversationOrchestrator":
     from customer_agent.application.answering import AnswerService
     from customer_agent.application.orchestrator import ConversationOrchestrator
-    from customer_agent.application.routing import IntentRouter
+    from customer_agent.application.understanding import UnderstandAgent
     from customer_agent.infrastructure.prompts import load_prompt
 
     answers = AnswerService(
-        retriever or FakeRetriever([document("policy-returns-v5", 0.7)]),
+        retriever or FakeRetriever(documents=[document("policy-returns-v5", 0.7)]),
         llm,
         load_prompt("answer", 4),
-        FixedClock(today),
-        tenant_id="nordelektro",
         min_similarity=0.35,
     )
     return ConversationOrchestrator(
-        IntentRouter(llm, load_prompt("router", 5)),
+        UnderstandAgent(llm, load_prompt("router", 5), classifier=classifier),
         answers,
         orders=orders or SeedOrderRepository(),
         tickets=tickets or InMemoryTicketService(),
         audit=audit or InMemoryAuditLog(),
         clock=FixedClock(today),
         tenant_id="nordelektro",
-        classifier=classifier,
         max_tickets_per_day=max_tickets_per_day,
     )

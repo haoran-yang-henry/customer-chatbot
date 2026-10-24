@@ -3,65 +3,68 @@
 import hashlib
 import math
 from collections.abc import Sequence
+from typing import Any, Self
 
 import openai
-from openai import AsyncOpenAI
+from langchain_core.embeddings import Embeddings
+from langchain_openai import OpenAIEmbeddings
+from openai.resources.embeddings import AsyncEmbeddings
+from openai.types import CreateEmbeddingResponse
+from pydantic import model_validator
 
 from customer_agent.application.ports import ProviderUnavailableError
 from customer_agent.observability import step
 
 
-class OpenAIEmbeddingProvider:
-    """OpenAI embeddings API (ADR-0007). The SDK retries transient errors itself."""
+class _OrderedAsyncEmbeddings(AsyncEmbeddings):
+    """LangChain consumes response order; the provider's index defines input order."""
 
-    def __init__(
-        self,
-        client: AsyncOpenAI,
-        model: str,
-        dimensions: int,
-        batch_size: int = 256,
-        query_timeout: float | None = None,
-    ) -> None:
-        self._client = client
-        # A query embedding sits on the request path; ingestion batches may take longer.
-        self._query_client = client.with_options(timeout=query_timeout) if query_timeout else client
-        self._model = model
-        self._dimensions = dimensions
-        self._batch_size = batch_size
+    async def create(self, **kwargs: Any) -> CreateEmbeddingResponse:
+        response = await super().create(**kwargs)
+        response.data.sort(key=lambda item: item.index)
+        return response
 
-    @property
-    def model_name(self) -> str:
-        return self._model
 
-    @property
-    def dimensions(self) -> int:
-        return self._dimensions
+class ProviderEmbeddings(OpenAIEmbeddings):
+    """LangChain embeddings with the application's timeout and failure contract.
+
+    Chunking already happens during ingestion: send the original strings, without LangChain's
+    automatic tokenisation, splitting or vector averaging, so the existing index stays valid.
+    """
+
+    check_embedding_ctx_length: bool = False
+    chunk_size: int = 256
+    query_timeout: float | None = None
+
+    @model_validator(mode="after")
+    def _order_response(self) -> Self:
+        if isinstance(self.async_client, AsyncEmbeddings):
+            self.async_client = _OrderedAsyncEmbeddings(self.async_client._client)
+        return self
 
     async def aclose(self) -> None:
-        await self._client.close()
+        # LangChain keeps the SDK resource objects, not their owning root clients.
+        try:
+            await self.async_client._client.close()
+        finally:
+            self.client._client.close()
 
-    async def embed_documents(self, texts: Sequence[str]) -> list[list[float]]:
-        return await self._embed(self._client, texts)
+    async def aembed_documents(
+        self, texts: list[str], chunk_size: int | None = None, **kwargs: Any
+    ) -> list[list[float]]:
+        try:
+            with step("embed", model=self.model, texts=len(texts)):
+                return await super().aembed_documents(texts, chunk_size, **kwargs)
+        except openai.OpenAIError as exc:
+            raise ProviderUnavailableError(f"{self.model}: {exc}") from exc
 
-    async def embed_query(self, text: str) -> list[float]:
-        return (await self._embed(self._query_client, [text]))[0]
-
-    async def _embed(self, client: AsyncOpenAI, texts: Sequence[str]) -> list[list[float]]:
-        vectors: list[list[float]] = []
-        for start in range(0, len(texts), self._batch_size):
-            batch = list(texts[start : start + self._batch_size])
-            try:
-                with step("embed", model=self._model, texts=len(batch)):
-                    response = await client.embeddings.create(
-                        model=self._model, input=batch, dimensions=self._dimensions
-                    )
-            except openai.OpenAIError as exc:
-                raise ProviderUnavailableError(f"{self._model}: {exc}") from exc
-            vectors.extend(item.embedding for item in sorted(response.data, key=lambda d: d.index))
-        return vectors
+    async def aembed_query(self, text: str, **kwargs: Any) -> list[float]:
+        if self.query_timeout is not None:
+            kwargs.setdefault("timeout", self.query_timeout)
+        return await super().aembed_query(text, **kwargs)
 
 
-class HashingEmbeddingProvider:
+class HashingEmbeddings(Embeddings):
     """Deterministic, offline stand-in for tests: hashed character trigrams, L2-normalised.
 
     Captures lexical overlap only — good enough to exercise the pipeline, useless for measuring
@@ -89,8 +92,14 @@ class HashingEmbeddingProvider:
         norm = math.sqrt(sum(v * v for v in vector)) or 1.0
         return [v / norm for v in vector]
 
-    async def embed_documents(self, texts: Sequence[str]) -> list[list[float]]:
+    async def aembed_documents(self, texts: Sequence[str]) -> list[list[float]]:
         return [self._embed(text) for text in texts]
 
-    async def embed_query(self, text: str) -> list[float]:
+    async def aembed_query(self, text: str) -> list[float]:
+        return self._embed(text)
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        return [self._embed(text) for text in texts]
+
+    def embed_query(self, text: str) -> list[float]:
         return self._embed(text)

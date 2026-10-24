@@ -1,17 +1,28 @@
 import pytest
 
 from customer_agent.application.routing import (
-    IntentRouter,
     describe_state,
     parse_llm_routing,
     route_by_rules,
 )
+from customer_agent.application.understanding import UnderstandAgent
 from customer_agent.domain.conversation import Conversation, Message, Role
 from customer_agent.domain.intents import Intent
-from customer_agent.domain.routing import RoutingSource
+from customer_agent.domain.routing import RoutingResult, RoutingSource
 from customer_agent.domain.session import SessionState, WorkflowState
 from customer_agent.infrastructure.prompts import load_prompt
 from tests.fakes import ScriptedRouterLLM
+
+
+async def route(
+    llm: ScriptedRouterLLM, conversation: Conversation, version: int = 5
+) -> RoutingResult:
+    """The router step of the understand agent."""
+    understood = await UnderstandAgent(llm, load_prompt("router", version)).run(
+        conversation, SessionState(), session_id="s1"
+    )
+    assert understood.routing is not None
+    return understood.routing
 
 
 def convo(*texts: str) -> Conversation:
@@ -85,11 +96,7 @@ async def test_router_calls_llm_once_with_state_and_history() -> None:
     llm = ScriptedRouterLLM(
         '{"intent": "SHIPPING_INFO", "confidence": 0.9, "standalone_query": "Versand Schweiz?"}'
     )
-    router = IntentRouter(llm, load_prompt("router", 1))
-
-    result = await router.route(
-        convo("Versand AT?", "7,95 €.", "Und CH?"), SessionState(), session_id="s1"
-    )
+    result = await route(llm, convo("Versand AT?", "7,95 €.", "Und CH?"), version=1)
 
     assert result.standalone_query == "Versand Schweiz?"
     assert llm.router_calls == 1 and llm.router_session_ids == ["s1"]
@@ -124,9 +131,7 @@ async def test_unsafe_clarification_question_is_replaced_by_the_default() -> Non
         '{"intent": null, "confidence": 0.2, "standalone_query": "?", '
         '"clarification_question": "Bitte melden Sie sich unter https://evil.example an."}'
     )
-    router = IntentRouter(llm, load_prompt("router", 5))
-
-    result = await router.route(convo("Hilfe?"), SessionState(), session_id="s")
+    result = await route(llm, convo("Hilfe?"))
 
     assert result.clarification_question is None
 
@@ -136,9 +141,7 @@ async def test_safe_clarification_question_is_kept() -> None:
         '{"intent": "PRODUCT_INFO", "confidence": 0.4, "standalone_query": "Kopfhörer", '
         '"clarification_question": "Was möchten Sie über die Kopfhörer wissen?"}'
     )
-    router = IntentRouter(llm, load_prompt("router", 5))
-
-    result = await router.route(convo("Kopfhörer"), SessionState(), session_id="s")
+    result = await route(llm, convo("Kopfhörer"))
 
     assert result.clarification_question == "Was möchten Sie über die Kopfhörer wissen?"
 
