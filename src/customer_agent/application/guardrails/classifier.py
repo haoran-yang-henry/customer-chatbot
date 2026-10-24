@@ -21,7 +21,7 @@ from customer_agent.application.ports import ProviderUnavailableError
 from customer_agent.application.prompts import PromptTemplate
 from customer_agent.domain.conversation import Conversation
 from customer_agent.domain.guardrails import GuardrailAction, GuardrailDecision
-from customer_agent.observability import get_logger, step
+from customer_agent.observability import get_logger, prompt_config, step
 
 log = get_logger("guard")
 
@@ -74,18 +74,16 @@ class PromptAttackClassifier:
             return decision
 
     async def _classify(self, conversation: Conversation, *, session_id: str) -> GuardrailDecision:
-        messages = self._prompt.render_messages(
-            history=format_history(conversation),
-            message=fence(conversation.messages[-1].content),
-        )
+        model = self._llm.bind(
+            session_id=session_id, max_tokens=CLASSIFIER_MAX_TOKENS, temperature=0.0
+        ).with_config(run_name="classifier")  # the router's model, a different task
+        chain = self._prompt.chain(model, prompt_config(self._prompt.ref))
+        values = {
+            "history": format_history(conversation),
+            "message": fence(conversation.messages[-1].content),
+        }
         try:
-            reply = await self._llm.ainvoke(
-                messages,
-                {"run_name": "classifier"},  # the router's model, a different task
-                session_id=session_id,
-                max_tokens=CLASSIFIER_MAX_TOKENS,
-                temperature=0.0,
-            )
+            reply = await chain.ainvoke(values)
         except ProviderUnavailableError as exc:
             log.warning("classifier unavailable, continuing without verdict: %s", exc)
             return _allow(["classifier_unavailable"])

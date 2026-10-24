@@ -49,6 +49,7 @@ from customer_agent.infrastructure.prompts import load_prompt
 from customer_agent.infrastructure.recorded import CachedChatModel, ReplayChatModel
 from customer_agent.infrastructure.resilience import BreakerEmbeddings, CircuitBreaker
 from customer_agent.observability import configure_langfuse, get_logger
+from customer_agent.observability.langfuse_prompts import prefetch_prompts
 
 log = get_logger("bootstrap")
 
@@ -208,7 +209,7 @@ def start_langfuse(
     key, secret = settings.langfuse_public_key, settings.langfuse_secret_key
     if not settings.langfuse_enabled or key is None or secret is None:
         return False
-    configure_langfuse(
+    client = configure_langfuse(
         public_key=key,
         secret_key=secret.get_secret_value(),
         base_url=settings.langfuse_base_url,
@@ -216,8 +217,19 @@ def start_langfuse(
         release=version,
         tracer_provider=tracer_provider,
     )
+    prefetch_prompts(client, [load_prompt(name, v) for name, v in prompts_in_use(settings)])
     log.info("langfuse tracing enabled base_url=%s", settings.langfuse_base_url or "default")
     return True
+
+
+def prompts_in_use(settings: Settings) -> list[tuple[str, int]]:
+    """The prompt versions this configuration renders (Langfuse label ``production``)."""
+    return [
+        ("router", settings.router_prompt_version),
+        ("answer", settings.answer_prompt_version),
+        ("guard", settings.guard_prompt_version),
+        ("judge", settings.judge_prompt_version),
+    ]
 
 
 def create_token_verifier(settings: Settings) -> TokenVerifier | None:

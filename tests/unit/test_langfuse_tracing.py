@@ -40,18 +40,23 @@ def test_mask_masks_every_string_in_a_payload() -> None:
     assert masked["streamed"] is True
 
 
-def test_only_langfuse_and_agent_step_spans_are_exported() -> None:
+def test_only_langfuse_and_agent_step_spans_but_no_model_steps_are_exported() -> None:
     finished = InMemorySpanExporter()
     provider = TracerProvider()
     provider.add_span_processor(SimpleSpanProcessor(finished))
 
-    with provider.get_tracer("customer_agent").start_as_current_span("agent.route"):
-        pass
+    for name in ("agent.route", "agent.embed", "agent.llm", "agent.llm.stream"):
+        with provider.get_tracer("customer_agent").start_as_current_span(name):
+            pass
     with provider.get_tracer("fastapi").start_as_current_span("GET /health"):
         pass
 
+    # Model calls reach Langfuse through LangChain's callback; the provider's steps would double.
     assert {span.name: exported(span) for span in finished.get_finished_spans()} == {
         "agent.route": True,
+        "agent.embed": True,
+        "agent.llm": False,
+        "agent.llm.stream": False,
         "GET /health": False,
     }
 

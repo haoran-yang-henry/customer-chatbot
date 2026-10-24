@@ -21,6 +21,7 @@ from langfuse.span_filter import is_default_export_span
 from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
 
 from customer_agent.domain.pii import mask_personal_data
+from customer_agent.observability.langfuse_prompts import forget_prompts
 from customer_agent.observability.logs import request_id_var
 
 AGENT_SCOPE = "customer_agent"  # the tracer behind observability.step
@@ -40,10 +41,17 @@ def mask(*, data: Any, **_: Any) -> Any:
     return data
 
 
+# The provider's own step spans: LangChain's callback already reports each model call as a
+# generation with prompt, tokens and cost; in Langfuse they would be duplicates (Jaeger keeps them).
+_MODEL_STEPS = frozenset({"agent.llm", "agent.llm.stream"})
+
+
 def exported(span: ReadableSpan) -> bool:
-    """Langfuse's own spans, LLM instrumentation and the agent steps; nothing else."""
+    """Langfuse's own spans and the agent steps, except the model steps; nothing else."""
     scope = span.instrumentation_scope
-    return is_default_export_span(span) or (scope is not None and scope.name == AGENT_SCOPE)
+    if scope is not None and scope.name == AGENT_SCOPE:
+        return span.name not in _MODEL_STEPS
+    return is_default_export_span(span)
 
 
 def configure_langfuse(
@@ -95,6 +103,7 @@ def shutdown_langfuse() -> None:
     if _client is not None:
         _client.shutdown()
         _client = None
+    forget_prompts()
 
 
 def score_session(

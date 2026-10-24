@@ -5,7 +5,6 @@ The understand agent (``application.understanding``) runs these steps as middlew
 import json
 import re
 
-from langchain_core.messages import BaseMessage
 from pydantic import BaseModel, ValidationError, field_validator
 
 from customer_agent.application.answering import format_history, search_query
@@ -161,15 +160,14 @@ def describe_state(state: SessionState) -> str:
     return "New conversation."
 
 
-def router_messages(
-    prompt: PromptTemplate, conversation: Conversation, state: SessionState
-) -> list[BaseMessage]:
-    """The router's request: the state, the earlier turns and the (masked) latest message."""
-    return prompt.render_messages(
-        state=describe_state(state),
-        history=format_history(conversation),
-        message=conversation.messages[-1].content,
-    )
+def router_values(conversation: Conversation, state: SessionState) -> dict[str, str]:
+    """What the router prompt is filled with: the state, the earlier turns and the (masked)
+    latest message."""
+    return {
+        "state": describe_state(state),
+        "history": format_history(conversation),
+        "message": conversation.messages[-1].content,
+    }
 
 
 def vet_clarification(

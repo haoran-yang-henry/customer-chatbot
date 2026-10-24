@@ -49,14 +49,14 @@ from customer_agent.application.routing import (
     log_routing,
     parse_llm_routing,
     route_by_rules,
-    router_messages,
+    router_values,
     vet_clarification,
 )
 from customer_agent.domain.conversation import Conversation, Message, Role
 from customer_agent.domain.guardrails import GuardrailDecision
 from customer_agent.domain.routing import RoutingResult
 from customer_agent.domain.session import SessionState
-from customer_agent.observability import get_logger, step
+from customer_agent.observability import get_logger, prompt_config, step
 
 log = get_logger("understand")
 
@@ -265,7 +265,9 @@ class RouterPrompt(Middleware):
     ) -> ModelResponse[Any] | AIMessage | ExtendedModelResponse[Any]:
         context = request.runtime.context
         conversation = _conversation(cast(UnderstandState, request.state), context)
-        system, user = router_messages(self._prompt, conversation, context.state)
+        system, user = await self._prompt.arender(
+            prompt_config(self._prompt.ref), **router_values(conversation, context.state)
+        )
         settings = {
             **request.model_settings,
             "max_tokens": ROUTER_MAX_TOKENS,

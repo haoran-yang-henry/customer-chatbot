@@ -2,6 +2,7 @@
 Day 7; Langfuse traces (``langfuse_tracing``), rebuild phase 1. Everything other modules need
 is importable from here."""
 
+from customer_agent.observability.langfuse_prompts import prompt_config
 from customer_agent.observability.langfuse_tracing import (
     configure_langfuse,
     langchain_callbacks,
@@ -36,6 +37,7 @@ __all__ = [
     "get_logger",
     "langchain_callbacks",
     "langfuse_client",
+    "prompt_config",
     "record_guardrail",
     "record_tokens",
     "request_id_var",
