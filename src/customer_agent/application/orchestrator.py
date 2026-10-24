@@ -38,10 +38,8 @@ from customer_agent.application.understanding import UnderstandAgent
 from customer_agent.domain.conversation import AgentResponse, Conversation, Message, Role
 from customer_agent.domain.routing import extract_order_id
 from customer_agent.domain.session import SessionState, WorkflowState
-from customer_agent.observability import get_logger, langchain_callbacks, record_guardrail
+from customer_agent.observability import langchain_callbacks, record_guardrail
 from customer_agent.observability import step as agent_step
-
-log = get_logger("chat")
 
 _TICKET_NUMBER = re.compile(r"Ticketnummer (?:lautet )?(T-\d{6})")
 

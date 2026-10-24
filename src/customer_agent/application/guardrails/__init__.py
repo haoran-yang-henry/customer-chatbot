@@ -1,5 +1,7 @@
 """Guardrails (Day 3 baseline, Day 6 layers, ADR-0011). Pure checks return a
-``GuardrailDecision``; the orchestrator decides what the customer sees.
+``GuardrailDecision``; the turn graph decides what the customer sees. The agents run them as
+middleware, one step per hook (``understanding``, ``answering``); ``check_input`` and
+``check_output`` run the same steps in one call.
 
 - ``input``: normalisation, size, prompt-injection heuristics, personal data masking
 - ``classifier``: LLM second opinion on prompt attacks (import it from its module)

@@ -2,7 +2,7 @@
 # Pinned by digest, like in .github/workflows/ci.yml (keep both in sync).
 GITLEAKS_IMAGE := zricethezav/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
 TRIVY_IMAGE := aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969
-.PHONY: seed token help install lint format typecheck test test-integration test-llm check audit eval eval-labels eval-smoke eval-smoke-record eval-redteam eval-retrieval ttft load-test load-test-capacity migrate ingest run up up-app up-observability down demo-public demo-public-down demo-frontend
+.PHONY: seed token help install lint format typecheck test test-integration test-llm check deps-check audit eval eval-labels eval-smoke eval-smoke-record eval-redteam eval-retrieval ttft load-test load-test-capacity migrate retention ingest run up up-app up-observability down demo-public demo-public-down demo-frontend
 
 help:  ## Show available targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-18s %s\n", $$1, $$2}'
@@ -32,6 +32,10 @@ test-llm:  ## All integration tests with the real embedding model + production s
 	uv run pytest -m integration --embeddings=openai
 
 check: lint typecheck test  ## Fast checks (no Docker, no API keys)
+
+deps-check:  ## Unused or undeclared packages (deptry) and dead code (vulture, see vulture_whitelist.py)
+	uv run deptry src
+	uv run vulture
 
 audit:  ## Security scans: secrets in git history, Trivy on the tree, pip-audit (needs Docker)
 	docker run --rm -v "$(CURDIR):/repo:ro" --user "$$(id -u):$$(id -g)" $(GITLEAKS_IMAGE) \
@@ -77,6 +81,9 @@ load-test:  ## NFR-09: 20 customers with think time, mocked model (needs make up
 
 load-test-capacity:  ## Saturation: 20 users without think time, measures turns per second
 	THINK_MIN=0 THINK_MAX=0 tests/load/run.sh eval/results/day7-load-capacity.json
+
+retention:  ## Delete conversations past the retention period (CA_RETENTION_DAYS, default 90)
+	uv run customer-agent-retention
 
 migrate:  ## Apply database migrations
 	uv run alembic upgrade head

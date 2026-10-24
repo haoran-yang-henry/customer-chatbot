@@ -2,8 +2,8 @@ from collections.abc import Sequence
 
 from customer_agent.application.ingestion import IngestionService, fingerprint
 from customer_agent.application.ports import IndexedDocument
-from customer_agent.infrastructure.embeddings import HashingEmbeddings
 from tests.factories import make_document
+from tests.fakes import HashingEmbeddings
 
 
 class InMemoryIndex:

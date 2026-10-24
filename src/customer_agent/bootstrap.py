@@ -44,14 +44,9 @@ from customer_agent.infrastructure.db.session_repository import PostgresSessionS
 from customer_agent.infrastructure.embeddings import ProviderEmbeddings
 from customer_agent.infrastructure.lifecycle import aclose_all
 from customer_agent.infrastructure.memory import InMemoryAuditLog, InMemoryTicketService
-from customer_agent.infrastructure.models import (
-    BreakerChatModel,
-    CachedChatModel,
-    ProviderChatModel,
-    ReplayChatModel,
-    model_label,
-)
+from customer_agent.infrastructure.models import BreakerChatModel, ProviderChatModel, model_label
 from customer_agent.infrastructure.prompts import load_prompt
+from customer_agent.infrastructure.recorded import CachedChatModel, ReplayChatModel
 from customer_agent.infrastructure.resilience import BreakerEmbeddings, CircuitBreaker
 from customer_agent.observability import configure_langfuse, get_logger
 

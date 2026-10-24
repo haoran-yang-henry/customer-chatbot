@@ -5,9 +5,9 @@ The transcript and the state are the turn graph's checkpoint (``infrastructure/c
 """
 
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta
 
-from sqlalchemy import func, or_, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -92,3 +92,18 @@ class PostgresSessionStore:
         return AskedFeedback(
             session_id=session_id, request_id=row.request_id, trace_id=row.trace_id
         )
+
+    async def idle_since(self, before: datetime) -> list[str]:
+        """Sessions whose last turn ended before ``before`` and that run none now (retention)."""
+        async with self._sessions() as session:
+            rows = await session.scalars(
+                select(ChatSessionRow.id)
+                .where(ChatSessionRow.updated_at < before)
+                .where(ChatSessionRow.turn_started_at.is_(None))
+            )
+            return list(rows)
+
+    async def delete(self, session_id: str) -> None:
+        """The session and its feedback (cascade); its checkpoint thread is the caller's."""
+        async with self._sessions.begin() as session:
+            await session.execute(delete(ChatSessionRow).where(ChatSessionRow.id == session_id))

@@ -278,4 +278,3 @@ def injection_score(hits: dict[str, float]) -> float:
 URL = re.compile(r"\b(?:https?://|www\.)[^\s<>\"')\]]+", re.IGNORECASE)
 # Voucher-like codes: upper-case letters and digits mixed, at least 5 characters (GRATIS100).
 CODE = re.compile(r"\b(?=[A-Z0-9-]*\d)(?=[A-Z0-9-]*[A-Z])[A-Z0-9][A-Z0-9-]{3,}[A-Z0-9]\b")
-SENTENCE_END = re.compile(r"(?<=[.!?])\s+")

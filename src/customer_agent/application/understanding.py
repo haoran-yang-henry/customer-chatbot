@@ -198,7 +198,7 @@ class RuleRouting(Middleware):
 
 class ProviderOutage(Middleware):
     """The router's provider failed: the turn continues with the masked message and no routing,
-    so the orchestrator can answer with the contact channels (NFR-11)."""
+    so the turn graph can answer with the contact channels (NFR-11)."""
 
     state_schema = UnderstandState
 

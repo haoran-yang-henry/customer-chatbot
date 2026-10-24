@@ -35,10 +35,6 @@ class Intent(StrEnum):
     def group(self) -> IntentGroup:
         return _INTENT_GROUPS[self]
 
-    @property
-    def requires_authentication(self) -> bool:
-        return self.group is IntentGroup.TRANSACTIONAL
-
 
 _INTENT_GROUPS: dict[Intent, IntentGroup] = {
     Intent.RETURN_POLICY: IntentGroup.KNOWLEDGE,

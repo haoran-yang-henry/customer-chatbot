@@ -1,25 +1,35 @@
 import asyncio
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
 from customer_agent.domain.conversation import AgentResponse, Behavior
 from customer_agent.evaluation.cli import main, select_cases
-from customer_agent.evaluation.runner import build_report, run_evaluation, safety_summary
-from customer_agent.evaluation.schema import load_dataset
+from customer_agent.evaluation.runner import EvalReport, build_report, run_cases, safety_summary
+from customer_agent.evaluation.schema import EvalCase, load_dataset
 from customer_agent.evaluation.scoring import CaseResult
 from customer_agent.evaluation.targets import PlaceholderAgent
 from tests.conftest import CORE_DATASET
 
 
+def evaluate(cases: list[EvalCase], *, current_day: int) -> EvalReport:
+    """What the CLI does without Langfuse: run the cases, build the report."""
+    started_at = datetime.now(UTC)
+    results = asyncio.run(run_cases(cases, PlaceholderAgent(), current_day=current_day))
+    return build_report(
+        results,
+        target="placeholder",
+        dataset="core",
+        current_day=current_day,
+        started_at=started_at,
+    )
+
+
 def test_gated_summary_only_counts_cases_due_by_current_day() -> None:
     cases = load_dataset(CORE_DATASET)
 
-    report = asyncio.run(
-        run_evaluation(
-            cases, PlaceholderAgent(), target="placeholder", dataset="core", current_day=3
-        )
-    )
+    report = evaluate(cases, current_day=3)
 
     assert report.overall.total == len(cases)
     assert report.gated.total == sum(1 for case in cases if case.target_day <= 3)
@@ -103,9 +113,9 @@ def test_judging_keeps_the_token_usage(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(customer_agent.bootstrap, "create_chat_model", lambda _s: FakeLLM())
     cases = load_dataset(CORE_DATASET)
-    report = asyncio.run(
-        run_evaluation(cases, PlaceholderAgent(), target="p", dataset="core", current_day=7)
-    ).model_copy(update={"usage": {"prompt_tokens_per_turn": 1.0}})
+    report = evaluate(cases, current_day=7).model_copy(
+        update={"usage": {"prompt_tokens_per_turn": 1.0}}
+    )
 
     judged = asyncio.run(_judge(report, cases))
 

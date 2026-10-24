@@ -111,6 +111,9 @@ class Settings(BaseSettings):
     # rounds on, whether the conversation helped.
     feedback_sample_rate: float = Field(default=0.3, ge=0.0, le=1.0)
     feedback_min_rounds: int = Field(default=3, ge=1)
+    # Conversations without a turn for this long are deleted (policy-privacy;
+    # customer-agent-retention, run daily).
+    retention_days: int = Field(default=90, ge=1)
 
     @field_validator(
         "openai_api_key",

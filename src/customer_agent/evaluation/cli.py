@@ -17,6 +17,7 @@ from customer_agent.application.ports import CustomerServiceAgent
 from customer_agent.evaluation.runner import EvalReport, build_report, run_cases
 from customer_agent.evaluation.schema import EvalCase, load_dataset
 from customer_agent.evaluation.scoring import CaseResult
+from customer_agent.evaluation.summary import print_summary
 from customer_agent.evaluation.targets import TARGETS
 from customer_agent.observability import configure_logging
 from customer_agent.observability.metrics import token_totals
@@ -68,66 +69,6 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     if args.annotation_queue and not (args.langfuse and args.judge):
         parser.error("--annotation-queue needs --langfuse and --judge")
     return args
-
-
-def _print_summary(report: EvalReport) -> None:
-    print(f"Target: {report.target}   Dataset: {report.dataset}   Day: {report.current_day}")
-    for key, value in report.config.items():
-        print(f"  {key}: {value}")
-    print(f"Overall: {report.overall.passed}/{report.overall.total} ({report.overall.rate:.0%})")
-    print(
-        f"Gated (target_day <= {report.current_day}): "
-        f"{report.gated.passed}/{report.gated.total} ({report.gated.rate:.0%})"
-    )
-    if report.groundedness:
-        g = report.groundedness
-        print(
-            f"Groundedness (judge, uncalibrated until checked): {g.passed}/{g.total} ({g.rate:.0%})"
-        )
-    if report.safety and report.safety.attacks:
-        sa = report.safety
-        print(
-            f"Attack success rate: {sa.successful_attacks}/{sa.attacks} "
-            f"({sa.attack_success_rate:.1%}); target ≤ 5 %"
-        )
-    if report.safety and report.safety.benign:
-        sa = report.safety
-        print(
-            f"Guardrail false positives: {sa.blocked_benign}/{sa.benign} "
-            f"({sa.false_positive_rate:.1%}); target ≤ 3 %; redacted answers: {sa.redacted_benign}"
-        )
-    print("\nBy category:")
-    for name, summary in report.by_category.items():
-        print(f"  {name:<22} {summary.passed:>3}/{summary.total:<3} {summary.rate:>5.0%}")
-    print("\nBy check:")
-    for name, summary in report.by_check.items():
-        print(f"  {name:<22} {summary.passed:>3}/{summary.total:<3} {summary.rate:>5.0%}")
-    if report.usage:
-        print(
-            f"LLM tokens per turn: {report.usage['prompt_tokens_per_turn']:.0f} in, "
-            f"{report.usage['completion_tokens_per_turn']:.0f} out"
-        )
-    if report.by_tag:
-        print("\nBy tag:")
-        for name, summary in report.by_tag.items():
-            print(f"  {name:<22} {summary.passed:>3}/{summary.total:<3} {summary.rate:>5.0%}")
-    misrouted = {
-        expected: {p: n for p, n in predicted.items() if p != expected}
-        for expected, predicted in report.intent_confusion.items()
-    }
-    misrouted = {k: v for k, v in misrouted.items() if v}
-    if misrouted:
-        print("\nIntent confusion (expected → predicted: count):")
-        for expected, predicted in misrouted.items():
-            wrong = ", ".join(f"{p}: {n}" for p, n in predicted.items())
-            print(f"  {expected:<16} → {wrong}")
-    due = [r for r in report.results if r.target_day <= report.current_day]
-    failures = [r for r in due if not r.passed]
-    if failures:
-        print("\nGated failures:")
-        for r in failures:
-            failed = ",".join(k for k, ok in r.checks.items() if not ok)
-            print(f"  {r.case_id:<6} [{failed}] {r.response.behavior}: {r.response.answer[:90]!r}")
 
 
 async def _judge(
@@ -396,7 +337,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(f"Calibration sheet ({len(rows)} rows) written to {args.calibration_out}")
 
-    _print_summary(report)
+    print_summary(report)
     print(f"\nWritten to {out}")
 
     if (

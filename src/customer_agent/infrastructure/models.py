@@ -1,5 +1,6 @@
 """Chat models (rebuild phase 2, ADR-0015): LangChain's ``ChatOpenAI`` for every model role, with
-the project's resilience, evaluation cache and CI replay as ``BaseChatModel`` wrappers.
+the project's error contract and circuit breaker; evaluation runs and the CI gate put the
+recorded-response models of ``recorded.py`` in front.
 
     ReplayChatModel (CI)  →  CachedChatModel (evaluation)  →  BreakerChatModel  →  ProviderChatModel
 
@@ -9,13 +10,9 @@ the conversation's ``session_id`` as call keyword arguments; only ``ProviderChat
 the provider wants the session as a header.
 """
 
-import asyncio
-import hashlib
-import json
 import time
-from collections.abc import AsyncGenerator, AsyncIterator, Sequence
+from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import aclosing
-from pathlib import Path
 from typing import Any, cast
 
 import openai
@@ -26,24 +23,14 @@ from langchain_core.messages import (
     AIMessage,
     AIMessageChunk,
     BaseMessage,
-    HumanMessage,
-    SystemMessage,
     UsageMetadata,
 )
-from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
+from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from langchain_openai import ChatOpenAI
 from opentelemetry import trace
 from pydantic import ConfigDict, model_validator
 
 from customer_agent.application.ports import ProviderUnavailableError
-from customer_agent.infrastructure.cassette import (
-    RERECORD,
-    Cassette,
-    ChatMessage,
-    LLMResult,
-    ReplayMissError,
-    chat_key,
-)
 from customer_agent.infrastructure.lifecycle import aclose_all
 from customer_agent.infrastructure.resilience import CircuitBreaker
 from customer_agent.observability import elapsed_ms, get_logger, record_tokens, step, tracer
@@ -54,13 +41,6 @@ log = get_logger("llm")
 # LangChain types streams as AsyncIterator; they are async generators, which can be closed.
 Stream = AsyncGenerator[ChatGenerationChunk, None]
 
-_ROLES = {SystemMessage: "system", HumanMessage: "user", AIMessage: "assistant"}
-
-
-def as_chat_messages(messages: Sequence[BaseMessage]) -> list[ChatMessage]:
-    """The project's message shape: keys of the cassette and the cache are built from it."""
-    return [ChatMessage(role=_ROLES[type(m)], content=m.text) for m in messages]  # type: ignore[arg-type]
-
 
 def model_label(model: BaseChatModel) -> str:
     """The provider's model name through any wrappers."""
@@ -69,21 +49,7 @@ def model_label(model: BaseChatModel) -> str:
     return str(getattr(model, "label", None) or getattr(model, "model_name", model._llm_type))
 
 
-def _usage(prompt: int | None, completion: int | None) -> UsageMetadata | None:
-    if prompt is None or completion is None:
-        return None
-    return UsageMetadata(
-        input_tokens=prompt, output_tokens=completion, total_tokens=prompt + completion
-    )
-
-
-def _result(text: str, usage: UsageMetadata | None) -> ChatResult:
-    return ChatResult(
-        generations=[ChatGeneration(message=AIMessage(content=text, usage_metadata=usage))]
-    )
-
-
-class _AsyncOnly(BaseChatModel):
+class AsyncOnlyChatModel(BaseChatModel):
     """Base of the wrappers: async only (a synchronous call is a bug), and traced as the model
     they wrap, so Langfuse names the provider's model, also for streamed calls."""
 
@@ -261,7 +227,7 @@ class ProviderChatModel(ChatOpenAI):
         )
 
 
-class BreakerChatModel(_AsyncOnly):
+class BreakerChatModel(AsyncOnlyChatModel):
     """Every call passes the circuit breaker of its endpoint (Day 7, NFR-11)."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -318,148 +284,3 @@ class BreakerChatModel(_AsyncOnly):
                 self.breaker.record_success()
             else:
                 self.breaker.abandon()  # no-op after record_failure
-
-
-class CachedChatModel(_AsyncOnly):
-    """On-disk answers for evaluation runs (``CA_LLM_CACHE_DIR``): identical requests are
-    answered from disk. Never in production — answers would not reflect knowledge or prompt
-    changes outside the request itself. ``namespace`` must identify everything besides the
-    request that changes the output (endpoint, model, reasoning settings). Keys and files are
-    those of the Day 3 cache, so existing caches stay valid."""
-
-    inner: BaseChatModel
-    directory: Path
-    namespace: str
-
-    @property
-    def _llm_type(self) -> str:
-        return "cached"
-
-    async def aclose(self) -> None:
-        await aclose_all(self.inner)
-
-    def _path(self, messages: Sequence[BaseMessage], kwargs: dict[str, Any]) -> Path:
-        key = json.dumps(
-            [
-                self.namespace,
-                [m.model_dump() for m in as_chat_messages(messages)],
-                kwargs.get("max_tokens"),
-                kwargs.get("temperature"),
-            ],
-            ensure_ascii=False,
-        )
-        return self.directory / f"{hashlib.sha256(key.encode()).hexdigest()}.json"
-
-    async def _agenerate(
-        self,
-        messages: list[BaseMessage],
-        stop: list[str] | None = None,
-        run_manager: AsyncCallbackManagerForLLMRun | None = None,
-        **kwargs: Any,
-    ) -> ChatResult:
-        path = self._path(messages, kwargs)
-        # File I/O blocks; run it in the default thread pool so concurrent turns keep running.
-        if await asyncio.to_thread(path.exists):
-            cached = LLMResult.model_validate_json(
-                await asyncio.to_thread(path.read_text, encoding="utf-8")
-            )
-            # Count the recorded usage: an evaluation's token totals are what the run would cost.
-            record_tokens(model_label(self.inner), cached.prompt_tokens, cached.completion_tokens)
-            return _result(cached.text, _usage(cached.prompt_tokens, cached.completion_tokens))
-        result = await self.inner._agenerate(messages, stop, run_manager, **kwargs)
-        message = result.generations[0].message
-        if message.text.strip():  # never cache an empty (failed) generation
-            usage = message.usage_metadata if isinstance(message, AIMessage) else None
-            entry = LLMResult(
-                text=message.text,
-                model=model_label(self.inner),
-                prompt_tokens=usage["input_tokens"] if usage else None,
-                completion_tokens=usage["output_tokens"] if usage else None,
-            )
-            self.directory.mkdir(parents=True, exist_ok=True)
-            await asyncio.to_thread(path.write_text, entry.model_dump_json(), encoding="utf-8")
-        return result
-
-    async def _astream(
-        self,
-        messages: list[BaseMessage],
-        stop: list[str] | None = None,
-        run_manager: AsyncCallbackManagerForLLMRun | None = None,
-        **kwargs: Any,
-    ) -> AsyncIterator[ChatGenerationChunk]:
-        result = await self._agenerate(messages, stop, run_manager, **kwargs)
-        message = result.generations[0].message
-        yield ChatGenerationChunk(
-            message=AIMessageChunk(
-                content=message.text,
-                usage_metadata=message.usage_metadata if isinstance(message, AIMessage) else None,
-            )
-        )
-
-
-class ReplayChatModel(_AsyncOnly):
-    """Answers from the cassette (ADR-0013); in record mode, asks ``inner`` for misses. Keys are
-    the request content only (messages, max tokens, temperature), as before the rebuild."""
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    cassette: Cassette
-    inner: BaseChatModel | None = None
-    label: str
-
-    @property
-    def _llm_type(self) -> str:
-        return "replay"
-
-    async def aclose(self) -> None:
-        self.cassette.save()
-        await aclose_all(self.inner)
-
-    async def _agenerate(
-        self,
-        messages: list[BaseMessage],
-        stop: list[str] | None = None,
-        run_manager: AsyncCallbackManagerForLLMRun | None = None,
-        **kwargs: Any,
-    ) -> ChatResult:
-        key = chat_key(
-            as_chat_messages(messages), kwargs.get("max_tokens", 0), kwargs.get("temperature", 0.0)
-        )
-        recorded = self.cassette.chat(key)
-        if recorded is not None:
-            record_tokens(self.label, recorded.prompt_tokens, recorded.completion_tokens)
-            return _result(
-                recorded.text, _usage(recorded.prompt_tokens, recorded.completion_tokens)
-            )
-        if not self.cassette.record or self.inner is None:
-            raise ReplayMissError(f"no recorded chat response {key[:12]}: {RERECORD}")
-        result = await self.inner._agenerate(messages, stop, run_manager, **kwargs)
-        message = result.generations[0].message
-        if message.text.strip():  # an empty generation is a failure, not a recording
-            usage = message.usage_metadata if isinstance(message, AIMessage) else None
-            self.cassette.put_chat(
-                key,
-                LLMResult(
-                    text=message.text,
-                    model=self.label,
-                    prompt_tokens=usage["input_tokens"] if usage else None,
-                    completion_tokens=usage["output_tokens"] if usage else None,
-                ),
-            )
-        return result
-
-    async def _astream(
-        self,
-        messages: list[BaseMessage],
-        stop: list[str] | None = None,
-        run_manager: AsyncCallbackManagerForLLMRun | None = None,
-        **kwargs: Any,
-    ) -> AsyncIterator[ChatGenerationChunk]:
-        result = await self._agenerate(messages, stop, run_manager, **kwargs)
-        message = result.generations[0].message
-        yield ChatGenerationChunk(
-            message=AIMessageChunk(
-                content=message.text,
-                usage_metadata=message.usage_metadata if isinstance(message, AIMessage) else None,
-            )
-        )

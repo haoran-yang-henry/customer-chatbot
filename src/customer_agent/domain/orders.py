@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict
 
 RETURN_WINDOW_DAYS = 30  # policy-returns-v5
 WARRANTY_YEARS = 2  # policy-warranty: statutory warranty from delivery
-PRESUMPTION_MONTHS = 12  # policy-warranty: defect presumed present at delivery
+PRESUMPTION_YEARS = 1  # policy-warranty: within 12 months, a defect is presumed at delivery
 # In-ear headphones: returnable only with an intact hygiene seal (policy-return-exceptions).
 HYGIENE_SEAL_SKUS = frozenset({"KW-BUDSS"})
 
@@ -137,7 +137,7 @@ def can_claim_warranty(order: Order, today: date) -> Eligibility:
 def defect_presumed(order: Order, today: date) -> bool:
     """Within the first 12 months the defect is presumed to have existed at delivery."""
     delivered = order.shipping.delivered_at
-    return delivered is not None and today <= _years_after(delivered, 1)
+    return delivered is not None and today <= _years_after(delivered, PRESUMPTION_YEARS)
 
 
 def can_return(order: Order, today: date) -> Eligibility:

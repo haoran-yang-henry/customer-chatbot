@@ -14,11 +14,8 @@ from customer_agent.bootstrap import (
 from customer_agent.config import Settings
 from customer_agent.infrastructure.cassette import CassetteEmbeddings
 from customer_agent.infrastructure.lifecycle import aclose_all
-from customer_agent.infrastructure.models import (
-    BreakerChatModel,
-    ProviderChatModel,
-    ReplayChatModel,
-)
+from customer_agent.infrastructure.models import BreakerChatModel, ProviderChatModel
+from customer_agent.infrastructure.recorded import ReplayChatModel
 
 
 def test_empty_optional_values_become_none() -> None:

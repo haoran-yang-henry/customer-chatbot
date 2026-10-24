@@ -27,6 +27,8 @@ dependencies = [
     "langchain-openai>=1.7.2",
     "langgraph>=1.2.16",
     "langgraph-checkpoint-postgres>=3.2.0",
+    "starlette>=1.7.0",
+    "psycopg-pool>=3.3.3",
 ]
 
 [project.scripts]
@@ -36,9 +38,11 @@ customer-agent-ingest = "customer_agent.cli.ingest:main"
 customer-agent-search = "customer_agent.cli.search:main"
 customer-agent-token = "customer_agent.cli.token:main"
 customer-agent-seed = "customer_agent.cli.seed:main"
+customer-agent-retention = "customer_agent.cli.retention:main"
 
 [dependency-groups]
 dev = [
+    "deptry>=0.25.1",
     "httpx2>=2.13.1",
     "mypy>=1.11",
     "pre-commit>=3.8",
@@ -48,6 +52,7 @@ dev = [
     "ruff>=0.6",
     "testcontainers[postgres]>=4.9",
     "types-PyYAML>=6.0",
+    "vulture>=2.16",
 ]
 
 [build-system]
@@ -73,13 +78,42 @@ select = [
     "SIM",     # simplify
     "S",       # bandit (security)
     "RUF",     # ruff-specific
+    "C901",    # complexity: a function with more branches is split (rebuild phase 5)
+    "PLR0917", # more than five positional parameters: make the rest keyword-only
 ]
+# PLR0917 is a preview rule; only explicitly selected preview rules are on.
+preview = true
+explicit-preview-rules = true
 
 # German typography in customer-facing text (LR-04): dash and multiplication sign are intended.
 allowed-confusables = ["–", "×"]
 
+[tool.ruff.lint.mccabe]
+max-complexity = 12
+
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101", "S105", "S106"]  # asserts and fake test credentials
+
+[tool.deptry.per_rule_ignores]
+# Used without an import: the server command, the migrations.
+DEP002 = ["uvicorn", "alembic"]
+
+[tool.vulture]
+paths = ["src", "vulture_whitelist.py"]
+min_confidence = 60
+# Called by the frameworks by name: LangChain and LangGraph hooks, pydantic and SQLAlchemy
+# configuration, the uvicorn factory.
+ignore_names = [
+    "model_config", "state_schema", "args_schema", "description", "type_annotation_map",
+    "before_agent", "before_model", "after_model", "awrap_model_call",
+    "_run", "_arun", "_generate", "_agenerate", "_astream", "_llm_type",
+    "_get_ls_params", "_get_request_payload", "_get_relevant_documents",
+    "_aget_relevant_documents", "embed_documents", "embed_query", "create_app",
+]
+ignore_decorators = [
+    "@field_validator", "@model_validator", "@router.get", "@router.post", "@hook_config",
+    "@property",
+]
 
 [tool.mypy]
 python_version = "3.12"

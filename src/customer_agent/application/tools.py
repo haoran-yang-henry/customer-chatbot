@@ -1,7 +1,7 @@
 """The agent's two tools as LangChain tools (rebuild phase 2, invariants I1 and I2).
 
-No model sees or chooses them: the state machine (``decide``) does, and the orchestrator calls
-them. As tools, each call is a run with its arguments and outcome, and a later sub-agent could
+No model sees or chooses them: the state machine (``decide``) does, and the turn graph's nodes
+call them. As tools, each call is a run with its arguments and outcome, and a later sub-agent could
 be given them behind a confirmation gate. The arguments are only what is asked for; who asks
 (customer, tenant, session) comes from the caller's ``RunnableConfig``, which no model can set.
 Every call is audited; ``create_ticket`` is the only state-changing tool and is rate limited.

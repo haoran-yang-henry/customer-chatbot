@@ -3,7 +3,7 @@
 import asyncio
 from collections import defaultdict
 from collections.abc import Sequence
-from datetime import UTC, datetime
+from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, computed_field
 
@@ -155,25 +155,3 @@ async def run_cases(
         return score_case(case, response, current_day)
 
     return list(await asyncio.gather(*(one(c) for c in cases)))
-
-
-async def run_evaluation(
-    cases: list[EvalCase],
-    agent: CustomerServiceAgent,
-    *,
-    target: str,
-    dataset: str,
-    current_day: int,
-    config: dict[str, str] | None = None,
-    concurrency: int = 4,
-) -> EvalReport:
-    started_at = datetime.now(UTC)
-    results = await run_cases(cases, agent, current_day=current_day, concurrency=concurrency)
-    return build_report(
-        results,
-        target=target,
-        dataset=dataset,
-        current_day=current_day,
-        started_at=started_at,
-        config=config,
-    )
