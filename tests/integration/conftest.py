@@ -18,8 +18,8 @@ from customer_agent.bootstrap import create_embedding_provider, create_knowledge
 from customer_agent.config import Settings
 from customer_agent.infrastructure.db.knowledge_repository import PostgresKnowledgeRepository
 from customer_agent.infrastructure.db.models import EMBEDDING_DIMENSIONS
-from customer_agent.infrastructure.embeddings import HashingEmbeddings
 from tests.conftest import PROJECT_ROOT
+from tests.fakes import HashingEmbeddings
 
 POSTGRES_IMAGE = "pgvector/pgvector:pg16"  # same image as docker-compose.yml
 

@@ -84,13 +84,6 @@ class PostgresAuditLog:
             session.add(AuditLogRow(**entry.model_dump()))
 
 
-def _jsonable(value: Any) -> Any:
-    """Seed JSON keeps money as strings; JSONB columns store them unchanged."""
-    if isinstance(value, Decimal | date):
-        return str(value)
-    return value
-
-
 async def seed_orders(
     sessions: async_sessionmaker[AsyncSession],
     customers: Sequence[dict[str, Any]],

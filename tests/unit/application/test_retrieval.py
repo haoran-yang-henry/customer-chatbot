@@ -15,8 +15,7 @@ from customer_agent.application.retrieval import (
 )
 from customer_agent.domain.knowledge import SourceType, TrustLevel
 from customer_agent.domain.retrieval import ChunkHit, SearchMode, SearchScope
-from customer_agent.infrastructure.embeddings import HashingEmbeddings
-from tests.fakes import FixedClock
+from tests.fakes import FixedClock, HashingEmbeddings
 
 SCOPE = SearchScope(today=date(2026, 10, 5), tenant_id="nordelektro")
 

@@ -10,8 +10,9 @@ from pydantic import SecretStr
 
 from customer_agent.application.ports import ProviderUnavailableError
 from customer_agent.infrastructure.cassette import Cassette, CassetteEmbeddings
-from customer_agent.infrastructure.embeddings import HashingEmbeddings, ProviderEmbeddings
+from customer_agent.infrastructure.embeddings import ProviderEmbeddings
 from customer_agent.infrastructure.resilience import BreakerEmbeddings, CircuitBreaker, CircuitState
+from tests.fakes import HashingEmbeddings
 
 
 async def test_hashing_embeddings_are_deterministic_and_normalised() -> None:

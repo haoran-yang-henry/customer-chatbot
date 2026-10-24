@@ -1,12 +1,8 @@
 """Embedding provider adapters."""
 
-import hashlib
-import math
-from collections.abc import Sequence
 from typing import Any, Self
 
 import openai
-from langchain_core.embeddings import Embeddings
 from langchain_openai import OpenAIEmbeddings
 from openai.resources.embeddings import AsyncEmbeddings
 from openai.types import CreateEmbeddingResponse
@@ -62,44 +58,3 @@ class ProviderEmbeddings(OpenAIEmbeddings):
         if self.query_timeout is not None:
             kwargs.setdefault("timeout", self.query_timeout)
         return await super().aembed_query(text, **kwargs)
-
-
-class HashingEmbeddings(Embeddings):
-    """Deterministic, offline stand-in for tests: hashed character trigrams, L2-normalised.
-
-    Captures lexical overlap only — good enough to exercise the pipeline, useless for measuring
-    retrieval quality. Uses blake2b because Python's built-in ``hash`` is salted per process.
-    """
-
-    def __init__(self, dimensions: int, model_name: str = "hashing-trigram-v1") -> None:
-        self._dimensions = dimensions
-        self._model_name = model_name
-
-    @property
-    def model_name(self) -> str:
-        return self._model_name
-
-    @property
-    def dimensions(self) -> int:
-        return self._dimensions
-
-    def _embed(self, text: str) -> list[float]:
-        vector = [0.0] * self._dimensions
-        padded = f"  {text.casefold()}  "
-        for i in range(len(padded) - 2):
-            digest = hashlib.blake2b(padded[i : i + 3].encode(), digest_size=8).digest()
-            vector[int.from_bytes(digest) % self._dimensions] += 1.0
-        norm = math.sqrt(sum(v * v for v in vector)) or 1.0
-        return [v / norm for v in vector]
-
-    async def aembed_documents(self, texts: Sequence[str]) -> list[list[float]]:
-        return [self._embed(text) for text in texts]
-
-    async def aembed_query(self, text: str) -> list[float]:
-        return self._embed(text)
-
-    def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        return [self._embed(text) for text in texts]
-
-    def embed_query(self, text: str) -> list[float]:
-        return self._embed(text)

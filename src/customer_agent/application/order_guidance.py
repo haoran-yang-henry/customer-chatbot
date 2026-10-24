@@ -12,6 +12,7 @@ from customer_agent.application.formatting import format_date_de, format_eur
 from customer_agent.domain.conversation import AgentResponse, Behavior
 from customer_agent.domain.intents import Intent
 from customer_agent.domain.orders import (
+    PRESUMPTION_YEARS,
     Order,
     OrderStatus,
     can_cancel,
@@ -204,7 +205,8 @@ def _warranty(order: Order, today: date) -> Guidance:
         )
         return Guidance(_reply(text, Behavior.ANSWER, Intent.RETURN_REQUEST, sources))
     presumption = (
-        " Da die Zustellung weniger als 12 Monate zurückliegt, wird vermutet, dass der Mangel "
+        f" Da die Zustellung weniger als {12 * PRESUMPTION_YEARS} Monate zurückliegt, wird "
+        "vermutet, dass der Mangel "
         "schon bei der Übergabe vorlag."
         if defect_presumed(order, today)
         else ""

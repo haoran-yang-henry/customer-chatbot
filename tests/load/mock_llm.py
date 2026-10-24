@@ -21,7 +21,7 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from customer_agent.infrastructure.embeddings import HashingEmbeddings
+from tests.fakes import HashingEmbeddings
 
 LATENCY = float(os.environ.get("MOCK_LLM_LATENCY_MS", "0")) / 1000
 _DOCUMENT = re.compile(r'<document id="([^"]+)"')
