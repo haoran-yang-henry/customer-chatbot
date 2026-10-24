@@ -9,13 +9,17 @@ from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 from customer_agent.config import Settings
+from customer_agent.domain.conversation import Conversation, Message, Role
+from customer_agent.observability import langfuse_tracing
 from customer_agent.observability.langfuse_tracing import (
     configure_langfuse,
     exported,
     mask,
+    score_session,
     shutdown_langfuse,
     trace_turn,
 )
+from tests.fakes import ScriptedRouterLLM, make_orchestrator
 
 IBAN = "DE89 3704 0044 0532 0130 00"
 
@@ -96,3 +100,67 @@ def test_an_unreachable_langfuse_does_not_slow_a_turn() -> None:
         assert time.perf_counter() - start < 0.2
     finally:
         shutdown_langfuse()
+
+
+async def test_a_turn_reaches_langfuse_with_its_runs_and_without_the_raw_message() -> None:
+    """Invariant I3 for traces: the understand agent's input is the raw message; the mask hook
+    keeps it out of everything Langfuse would receive."""
+    finished = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(finished))
+    configure_langfuse(
+        # Its own key: Langfuse keeps one client per key, also after another test shut it down.
+        public_key="pk-lf-i3",
+        secret_key="sk-lf-test",
+        base_url="http://127.0.0.1:9",  # nothing listens here; spans are captured above
+        environment="test",
+        release="test",
+        tracer_provider=provider,
+        timeout=1,
+    )
+    routing = '{"intent": "RETURN_POLICY", "confidence": 0.9, "standalone_query": "Erstattung?"}'
+    message = f"Erstattung bitte an {IBAN}, wie lange dauert das?"
+    try:
+        with trace_turn(session_id="s-1", customer_id=None):
+            await make_orchestrator(ScriptedRouterLLM(routing)).respond(
+                Conversation(messages=[Message(role=Role.USER, content=message)])
+            )
+    finally:
+        shutdown_langfuse()
+
+    spans = finished.get_finished_spans()
+    payload = " ".join(str(dict(span.attributes or {})) for span in spans)
+    names = {span.name for span in spans}
+    assert {"chat-turn", "understand", "turn", "answer"} <= names
+    assert len({span.context.trace_id for span in spans}) == 1
+    assert "[IBAN entfernt]" in payload
+    assert IBAN not in payload and IBAN.replace(" ", "") not in payload
+
+
+def test_a_rating_becomes_a_boolean_score_on_the_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sent: list[dict[str, object]] = []
+
+    class Client:
+        def create_score(self, **score: object) -> None:
+            sent.append(score)
+
+    monkeypatch.setattr(langfuse_tracing, "_client", Client())
+
+    score_session("s-1", helpful=False, comment="Falsch", asked_in="ab" * 16)
+
+    assert sent == [
+        {
+            "session_id": "s-1",
+            "name": "user_feedback",
+            "value": 0,
+            "data_type": "BOOLEAN",
+            "comment": "Falsch",
+            "metadata": {"asked_in_trace": "ab" * 16},
+        }
+    ]
+
+
+def test_a_rating_without_langfuse_is_not_sent() -> None:
+    score_session("s-1", helpful=True, comment=None, asked_in=None)  # no client: nothing happens

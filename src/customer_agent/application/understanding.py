@@ -30,6 +30,7 @@ from langchain.agents.middleware import (
 )
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from langgraph.types import Command
 
@@ -331,8 +332,14 @@ class UnderstandAgent:
         )
 
     async def run(
-        self, conversation: Conversation, state: SessionState, *, session_id: str
+        self,
+        conversation: Conversation,
+        state: SessionState,
+        *,
+        session_id: str,
+        config: RunnableConfig | None = None,
     ) -> Understanding:
+        """``config``: the turn's callbacks (tracing); the agent needs nothing else from it."""
         context = UnderstandContext(
             history=tuple(conversation.messages[:-1]),
             state=state,
@@ -340,7 +347,9 @@ class UnderstandAgent:
             customer_id=conversation.customer_id,
         )
         result = await self._agent.ainvoke(
-            {"messages": [HumanMessage(conversation.messages[-1].content)]}, context=context
+            {"messages": [HumanMessage(conversation.messages[-1].content)]},
+            config,
+            context=context,
         )
         outcome = cast(UnderstandState, result)
         screen = InputScreen(

@@ -52,6 +52,7 @@ def create_app(
         from customer_agent.bootstrap import build_container, start_langfuse
 
         container = build_container(settings)
+        await container.start()
         start_langfuse(settings, tracing, __version__)
         app.state.chat = container.chat
         app.state.verifier = container.verifier

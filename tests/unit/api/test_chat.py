@@ -5,7 +5,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 from customer_agent.application.answering import TextDelta
-from customer_agent.application.chat import ChatTurn, SessionNotFoundError
+from customer_agent.application.chat import (
+    ChatTurn,
+    FeedbackNotRequestedError,
+    SessionNotFoundError,
+)
 from customer_agent.application.ports import AuthenticationError, ConcurrentTurnError, Principal
 from customer_agent.config import Settings
 from customer_agent.domain.conversation import AgentResponse, Behavior
@@ -26,6 +30,7 @@ TURN = ChatTurn(
 class FakeChat:
     def __init__(self) -> None:
         self.calls: list[tuple[str | None, str | None, str]] = []
+        self.ratings: list[tuple[str, str | None, bool, str | None]] = []
 
     async def chat_stream(
         self, session_id: str | None, customer_id: str | None, text: str
@@ -44,6 +49,20 @@ class FakeChat:
             if isinstance(event, ChatTurn):
                 return event
         raise AssertionError
+
+    async def feedback(
+        self,
+        session_id: str,
+        customer_id: str | None,
+        *,
+        helpful: bool,
+        comment: str | None = None,
+    ) -> None:
+        if session_id == "missing":
+            raise SessionNotFoundError(session_id)
+        if session_id == "not-asked":
+            raise FeedbackNotRequestedError(session_id)
+        self.ratings.append((session_id, customer_id, helpful, comment))
 
 
 class FakeVerifier:
@@ -77,6 +96,7 @@ def test_chat_returns_session_answer_intent_and_request_id() -> None:
         "intent": "RETURN_POLICY",
         "sources": ["policy-returns-v5"],
         "request_id": "req-123",
+        "feedback_requested": False,
     }
     assert chat.calls == [(None, None, "Kostet die Rücksendung etwas?")]  # customer from token only
 
@@ -114,6 +134,14 @@ def test_concurrent_turn_is_409() -> None:
         response = c.post("/v1/chat", json={"session_id": "busy", "message": "Hallo"})
 
     assert response.status_code == 409
+
+
+def test_concurrent_turn_on_the_stream_is_409_before_any_event() -> None:
+    with client(FakeChat()) as c:
+        response = c.post("/v1/chat/stream", json={"session_id": "busy", "message": "Hallo"})
+
+    assert response.status_code == 409
+    assert "event:" not in response.text
 
 
 def test_errors_are_rfc9457_problem_details() -> None:
@@ -215,3 +243,44 @@ def test_only_configured_browser_origins_may_call_the_api(monkeypatch: pytest.Mo
     assert "access-control-allow-origin" not in foreign.headers
     assert answer.headers["access-control-allow-origin"] == "https://demo.example.org"
     assert "x-request-id" in answer.headers["access-control-expose-headers"]
+
+
+def test_feedback_rates_the_conversation_for_the_tokens_customer() -> None:
+    chat = FakeChat()
+    with client(chat, FakeVerifier()) as c:
+        response = c.post(
+            "/v1/feedback",
+            json={"session_id": "abc", "rating": "down", "comment": "Falsch"},
+            headers={"authorization": "Bearer anna"},
+        )
+
+    assert response.status_code == 204 and response.content == b""
+    assert chat.ratings == [("abc", "C-1001", False, "Falsch")]
+
+
+@pytest.mark.parametrize("session_id", ["missing", "not-asked"])
+def test_feedback_on_a_session_not_asked_is_404(session_id: str) -> None:
+    with client(FakeChat()) as c:
+        response = c.post("/v1/feedback", json={"session_id": session_id, "rating": "up"})
+
+    assert response.status_code == 404
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"session_id": "abc", "rating": "meh"},
+        {"session_id": "abc", "rating": "up", "comment": "x" * 1001},
+        {"rating": "up"},
+    ],
+)
+def test_malformed_feedback_is_422(body: dict[str, str]) -> None:
+    with client(FakeChat()) as c:
+        assert c.post("/v1/feedback", json=body).status_code == 422
+
+
+def test_the_final_event_says_whether_to_ask_for_feedback() -> None:
+    with client(FakeChat()) as c:
+        response = c.post("/v1/chat", json={"message": "Hallo"})
+
+    assert response.json()["feedback_requested"] is False

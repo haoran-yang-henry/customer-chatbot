@@ -4,14 +4,19 @@ import json
 from collections.abc import AsyncIterator
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 
 from customer_agent.api.auth import CurrentPrincipal
 from customer_agent.api.rate_limit import RateLimited
-from customer_agent.api.schemas import ChatRequest, ChatResponse
+from customer_agent.api.schemas import ChatRequest, ChatResponse, FeedbackRequest
 from customer_agent.application.answering import TextDelta
-from customer_agent.application.chat import ChatService, ChatTurn, SessionNotFoundError
+from customer_agent.application.chat import (
+    ChatService,
+    ChatTurn,
+    FeedbackNotRequestedError,
+    SessionNotFoundError,
+)
 from customer_agent.application.ports import ConcurrentTurnError
 from customer_agent.observability import request_id_var
 
@@ -36,6 +41,7 @@ def _response(turn: ChatTurn, request_id: str) -> ChatResponse:
         intent=turn.response.intent,
         sources=turn.response.sources,
         request_id=request_id,
+        feedback_requested=turn.feedback_requested,
     )
 
 
@@ -82,9 +88,12 @@ async def chat_stream(
         body.session_id, principal.customer_id if principal else None, body.message
     )
     try:
-        first = await anext(events)  # resolve the session before the 200 response starts
+        # Resolve the session and take its lease before the 200 response starts.
+        first = await anext(events)
     except SessionNotFoundError:
         raise _NOT_FOUND from None
+    except ConcurrentTurnError:
+        raise HTTPException(status_code=409, detail=_CONFLICT_DETAIL) from None
 
     async def body_events() -> AsyncIterator[str]:
         event: TextDelta | ChatTurn | None = first
@@ -93,11 +102,28 @@ async def chat_stream(
                 yield _sse("delta", {"text": event.text})
             else:
                 yield _sse("final", _response(event, request_id).model_dump(mode="json"))
-            try:
-                event = await anext(events, None)
-            except ConcurrentTurnError:
-                # The 200 status is already sent; report the conflict as a stream event.
-                yield _sse("error", {"status": 409, "detail": _CONFLICT_DETAIL})
-                return
+            event = await anext(events, None)
 
     return StreamingResponse(body_events(), media_type="text/event-stream")
+
+
+@router.post(
+    "/feedback",
+    status_code=204,
+    responses={404: {"description": "Unknown session, or it was not asked for feedback"}},
+)
+async def feedback(
+    body: FeedbackRequest, service: Chat, principal: CurrentPrincipal, _: RateLimited
+) -> Response:
+    """Rate the conversation (👍/👎, optional comment) after a reply with ``feedback_requested``;
+    only the session's customer can. A later rating replaces the earlier one."""
+    try:
+        await service.feedback(
+            body.session_id,
+            principal.customer_id if principal else None,
+            helpful=body.rating == "up",
+            comment=body.comment,
+        )
+    except (SessionNotFoundError, FeedbackNotRequestedError):
+        raise HTTPException(status_code=404, detail="no feedback requested") from None
+    return Response(status_code=204)

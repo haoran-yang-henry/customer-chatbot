@@ -217,6 +217,8 @@ main {
 }
 .meta:empty { display: none; }
 .meta button { padding: 0.2rem 0.6rem; font-size: 0.8rem; }
+.feedback { display: inline-flex; align-items: center; gap: 0.3rem; margin-left: auto; }
+.feedback button { padding: 0.1rem 0.45rem; }
 
 .badge { padding: 0.1rem 0.5rem; border-radius: 999px; font-weight: 600; }
 .badge.answer { background: var(--badge-answer); color: var(--badge-answer-text); }

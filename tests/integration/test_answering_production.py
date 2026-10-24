@@ -22,7 +22,7 @@ from customer_agent.infrastructure.knowledge_files import load_knowledge_directo
 from customer_agent.infrastructure.memory import InMemoryAuditLog, InMemoryTicketService
 from customer_agent.infrastructure.prompts import load_prompt
 from tests.conftest import KNOWLEDGE_DIR, REFERENCE_DATE, TENANT_ID
-from tests.fakes import SeedOrderRepository
+from tests.fakes import SeedOrderRepository, memory_checkpointer
 
 pytestmark = pytest.mark.llm
 
@@ -59,6 +59,7 @@ async def agent(
         audit=InMemoryAuditLog(),
         clock=FixedClock(REFERENCE_DATE),
         tenant_id=TENANT_ID,
+        checkpointer=memory_checkpointer(),
     )
 
 

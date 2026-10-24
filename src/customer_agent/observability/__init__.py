@@ -4,8 +4,9 @@ is importable from here."""
 
 from customer_agent.observability.langfuse_tracing import (
     configure_langfuse,
-    instrument_openai,
+    langchain_callbacks,
     langfuse_client,
+    score_session,
     shutdown_langfuse,
     trace_turn,
 )
@@ -18,20 +19,27 @@ from customer_agent.observability.logs import (
     session_id_var,
 )
 from customer_agent.observability.metrics import record_guardrail, record_tokens
-from customer_agent.observability.tracing import configure_tracing, step, tracer
+from customer_agent.observability.tracing import (
+    configure_tracing,
+    current_trace_id,
+    step,
+    tracer,
+)
 
 __all__ = [
     "LogFormat",
     "configure_langfuse",
     "configure_logging",
     "configure_tracing",
+    "current_trace_id",
     "elapsed_ms",
     "get_logger",
-    "instrument_openai",
+    "langchain_callbacks",
     "langfuse_client",
     "record_guardrail",
     "record_tokens",
     "request_id_var",
+    "score_session",
     "session_id_var",
     "shutdown_langfuse",
     "step",

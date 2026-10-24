@@ -84,34 +84,32 @@ class KnowledgeChunkRow(Base):
 
 
 class ChatSessionRow(Base):
+    """Ownership and the turn lease; transcript and state live in the checkpoint tables."""
+
     __tablename__ = "chat_sessions"
 
     id: Mapped[str] = mapped_column(primary_key=True)
     tenant_id: Mapped[str]
     customer_id: Mapped[str | None]
-    active_intent: Mapped[str | None]
-    workflow_state: Mapped[str]
-    slots: Mapped[dict[str, str]] = mapped_column(JSONB)
-    version: Mapped[int] = mapped_column(default=0)
+    turn_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
-class ChatMessageRow(Base):
-    __tablename__ = "chat_messages"
-    __table_args__ = (UniqueConstraint("session_id", "position"),)
+class ChatFeedbackRow(Base):
+    """A session asked whether the conversation helped, and the customer's rating."""
 
-    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    __tablename__ = "chat_feedback"
+
     session_id: Mapped[str] = mapped_column(
-        ForeignKey("chat_sessions.id", ondelete="CASCADE"), index=True
+        ForeignKey("chat_sessions.id", ondelete="CASCADE"), primary_key=True
     )
-    position: Mapped[int]
-    role: Mapped[str]
-    content: Mapped[str]
-    intent: Mapped[str | None] = mapped_column(default=None)
-    behavior: Mapped[str | None] = mapped_column(default=None)
-    sources: Mapped[list[str] | None] = mapped_column(ARRAY(Text), default=None)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    request_id: Mapped[str | None]  # the turn that asked
+    trace_id: Mapped[str | None]
+    helpful: Mapped[bool | None] = mapped_column(default=None)
+    comment: Mapped[str | None] = mapped_column(default=None)  # masked
+    asked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    rated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
 
 
 class CustomerRow(Base):

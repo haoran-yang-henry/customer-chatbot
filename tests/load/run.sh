@@ -14,7 +14,9 @@ MOCK_PORT=9100
 API_PORT=8001
 DB=customer_agent_load
 K6_IMAGE="grafana/k6:2.3.0@sha256:9c2dee7f8ed74d317e4027c06a10f169b625638189de8d4555d0b3486a5aeb34"
-WORK=$(mktemp -d)
+# Under the project, not /tmp: a snap-installed Docker mounts its own private /tmp.
+mkdir -p .cache
+WORK=$(mktemp -d "$PWD/.cache/load.XXXXXX")
 
 # Environment variables override .env (pydantic-settings); empty values switch features off.
 export CA_DATABASE_URL="postgresql+psycopg://agent:agent@localhost:5432/$DB"
@@ -22,6 +24,8 @@ export CA_OPENAI_API_KEY=mock CA_OPENAI_BASE_URL="http://127.0.0.1:$MOCK_PORT/v1
 export CA_LLM_API_KEY=mock CA_LLM_BASE_URL="http://127.0.0.1:$MOCK_PORT/v1"
 export CA_LLM_CACHE_DIR= CA_LLM_SESSION_HEADER= CA_LLM_REASONING_EFFORT=
 export CA_AUTH_ISSUER= CA_RATE_LIMIT_PER_MINUTE=0 CA_LOG_LEVEL=WARNING
+# Mock turns would flood the Langfuse project (one trace with ~25 observations per turn).
+export LANGFUSE_PUBLIC_KEY= LANGFUSE_SECRET_KEY=
 export CA_OTEL_ENDPOINT=${LOAD_OTEL_ENDPOINT:-}  # e.g. http://localhost:4318 to inspect slow traces
 export MOCK_LLM_LATENCY_MS=${MOCK_LLM_LATENCY_MS:-0}
 

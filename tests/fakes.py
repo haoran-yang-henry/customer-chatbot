@@ -14,21 +14,23 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, UsageMetadata
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from langchain_core.retrievers import BaseRetriever
+from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from pydantic import Field
 
 from customer_agent.application.ports import (
-    ConcurrentTurnError,
+    AskedFeedback,
     ProviderUnavailableError,
     StoredSession,
 )
-from customer_agent.domain.conversation import AgentResponse, Message, Role
 from customer_agent.domain.knowledge import SourceType, TrustLevel
 from customer_agent.domain.orders import Order
 from customer_agent.domain.retrieval import SearchMode, SearchScope
-from customer_agent.domain.session import SessionState
 from customer_agent.infrastructure.memory import InMemoryAuditLog, InMemoryTicketService
 
 if TYPE_CHECKING:
+    from customer_agent.application.feedback import FeedbackPolicy
     from customer_agent.application.guardrails.classifier import PromptAttackClassifier
     from customer_agent.application.orchestrator import ConversationOrchestrator
     from customer_agent.application.retrieval import HybridRetriever
@@ -203,14 +205,13 @@ class ScriptedRouterLLM(FakeLLM):
 class InMemorySessionStore:
     def __init__(self) -> None:
         self.sessions: dict[str, StoredSession] = {}
+        self.leased: set[str] = set()
+        self.asked: dict[str, AskedFeedback] = {}
+        self.ratings: dict[str, tuple[bool, str | None]] = {}
 
     async def create(self, *, tenant_id: str, customer_id: str | None) -> StoredSession:
         session = StoredSession(
-            session_id=f"s{len(self.sessions) + 1}",
-            tenant_id=tenant_id,
-            customer_id=customer_id,
-            state=SessionState(),
-            messages=[],
+            session_id=f"s{len(self.sessions) + 1}", tenant_id=tenant_id, customer_id=customer_id
         )
         self.sessions[session.session_id] = session
         return session
@@ -218,29 +219,25 @@ class InMemorySessionStore:
     async def load(self, session_id: str) -> StoredSession | None:
         return self.sessions.get(session_id)
 
-    async def save_turn(
-        self,
-        session_id: str,
-        *,
-        expected_version: int,
-        state: SessionState,
-        user: str,
-        reply: AgentResponse,
-    ) -> None:
-        old = self.sessions[session_id]
-        if old.version != expected_version:
-            raise ConcurrentTurnError(session_id)
-        self.sessions[session_id] = old.model_copy(
-            update={
-                "version": old.version + 1,
-                "state": state,
-                "messages": [
-                    *old.messages,
-                    Message(role=Role.USER, content=user),
-                    Message(role=Role.ASSISTANT, content=reply.answer),
-                ],
-            }
-        )
+    async def acquire(self, session_id: str) -> bool:
+        if session_id in self.leased:
+            return False
+        self.leased.add(session_id)
+        return True
+
+    async def release(self, session_id: str) -> None:
+        self.leased.discard(session_id)
+
+    async def ask_feedback(self, asked: AskedFeedback) -> None:
+        self.asked.setdefault(asked.session_id, asked)
+
+    async def rate_session(
+        self, session_id: str, *, helpful: bool, comment: str | None
+    ) -> AskedFeedback | None:
+        asked = self.asked.get(session_id)
+        if asked is not None:
+            self.ratings[session_id] = (helpful, comment)
+        return asked
 
 
 class SeedOrderRepository:
@@ -272,6 +269,8 @@ def make_orchestrator(
     today: date = date(2026, 10, 5),
     classifier: "PromptAttackClassifier | None" = None,
     max_tickets_per_day: int = 3,
+    checkpointer: BaseCheckpointSaver[Any] | None = None,
+    feedback: "FeedbackPolicy | None" = None,
 ) -> "ConversationOrchestrator":
     from customer_agent.application.answering import AnswerService
     from customer_agent.application.orchestrator import ConversationOrchestrator
@@ -292,5 +291,14 @@ def make_orchestrator(
         audit=audit or InMemoryAuditLog(),
         clock=FixedClock(today),
         tenant_id="nordelektro",
+        checkpointer=checkpointer or memory_checkpointer(),
         max_tickets_per_day=max_tickets_per_day,
+        feedback=feedback,
     )
+
+
+def memory_checkpointer() -> InMemorySaver:
+    """The production serializer's type allowlist, kept in memory."""
+    from customer_agent.application.turn_graph import CHECKPOINT_TYPES
+
+    return InMemorySaver(serde=JsonPlusSerializer(allowed_msgpack_modules=CHECKPOINT_TYPES))

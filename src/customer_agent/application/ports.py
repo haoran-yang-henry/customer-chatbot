@@ -6,14 +6,13 @@ from typing import Protocol, Self
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
-from customer_agent.domain.conversation import AgentResponse, Conversation, Message
+from customer_agent.domain.conversation import AgentResponse, Conversation
 from customer_agent.domain.knowledge import KnowledgeChunk, KnowledgeDocumentMeta
 from customer_agent.domain.orders import Order
 from customer_agent.domain.retrieval import (
     ChunkHit,
     SearchScope,
 )
-from customer_agent.domain.session import SessionState
 
 
 class Principal(BaseModel):
@@ -93,18 +92,27 @@ class Clock(Protocol):
 
 
 class StoredSession(BaseModel):
+    """Whose session it is. Its transcript and state are the turn graph's checkpoint."""
+
     model_config = ConfigDict(frozen=True)
 
     session_id: str
     tenant_id: str
     customer_id: str | None
-    state: SessionState
-    messages: list[Message]
-    version: int = 0  # optimistic concurrency token, incremented by every saved turn
+
+
+class AskedFeedback(BaseModel):
+    """A session was asked whether the conversation helped, in this turn (request, trace)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    session_id: str
+    request_id: str | None
+    trace_id: str | None
 
 
 class ConcurrentTurnError(RuntimeError):
-    """Another turn of the same session was saved since this one loaded it (lost update)."""
+    """Another turn of the same session is still running (it holds the session's lease)."""
 
 
 class SessionStore(Protocol):
@@ -112,19 +120,22 @@ class SessionStore(Protocol):
 
     async def load(self, session_id: str) -> StoredSession | None: ...
 
-    async def save_turn(
-        self,
-        session_id: str,
-        *,
-        expected_version: int,
-        state: SessionState,
-        user: str,
-        reply: AgentResponse,
-    ) -> None:
-        """Append the user message and the reply and store the new state, atomically.
+    async def acquire(self, session_id: str) -> bool:
+        """Take the session's turn lease; ``False`` while another turn holds it. A lease older
+        than a turn can take counts as abandoned (a crashed process)."""
+        ...
 
-        Raises ``ConcurrentTurnError`` if the stored version differs from ``expected_version``.
-        """
+    async def release(self, session_id: str) -> None: ...
+
+    async def ask_feedback(self, asked: AskedFeedback) -> None:
+        """Remember that the session was asked for a rating (at most once per session)."""
+        ...
+
+    async def rate_session(
+        self, session_id: str, *, helpful: bool, comment: str | None
+    ) -> AskedFeedback | None:
+        """The customer's rating of the conversation, replacing an earlier one; ``None`` if the
+        session was never asked."""
         ...
 
 

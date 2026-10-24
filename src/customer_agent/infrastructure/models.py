@@ -20,6 +20,7 @@ from typing import Any, cast
 
 import openai
 from langchain_core.callbacks import AsyncCallbackManagerForLLMRun, CallbackManagerForLLMRun
+from langchain_core.language_models import LangSmithParams
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import (
     AIMessage,
@@ -83,7 +84,16 @@ def _result(text: str, usage: UsageMetadata | None) -> ChatResult:
 
 
 class _AsyncOnly(BaseChatModel):
-    """The agent only calls models asynchronously; a synchronous call is a bug."""
+    """Base of the wrappers: async only (a synchronous call is a bug), and traced as the model
+    they wrap, so Langfuse names the provider's model, also for streamed calls."""
+
+    def _get_ls_params(self, stop: list[str] | None = None, **kwargs: Any) -> LangSmithParams:
+        inner = getattr(self, "inner", None)
+        if isinstance(inner, BaseChatModel):
+            return inner._get_ls_params(stop=stop, **kwargs)
+        params = super()._get_ls_params(stop=stop, **kwargs)
+        params["ls_model_name"] = model_label(self)  # replay without a provider: the recording's
+        return params
 
     def _generate(
         self,

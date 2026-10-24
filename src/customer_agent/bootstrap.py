@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async
 
 from customer_agent.application.answering import AnswerService
 from customer_agent.application.chat import ChatService
+from customer_agent.application.feedback import FeedbackPolicy
 from customer_agent.application.guardrails.classifier import PromptAttackClassifier
 from customer_agent.application.orchestrator import ConversationOrchestrator
 from customer_agent.application.ports import (
@@ -25,10 +26,12 @@ from customer_agent.application.ports import (
     TokenVerifier,
 )
 from customer_agent.application.retrieval import HybridRetriever
+from customer_agent.application.turn_graph import CHECKPOINT_TYPES
 from customer_agent.application.understanding import UnderstandAgent
 from customer_agent.config import Settings
 from customer_agent.infrastructure.auth import JwtVerifier, jwks_resolver
 from customer_agent.infrastructure.cassette import CassetteEmbeddings, open_cassette
+from customer_agent.infrastructure.checkpointer import PostgresCheckpointer
 from customer_agent.infrastructure.clock import SystemClock
 from customer_agent.infrastructure.db.knowledge_repository import PostgresKnowledgeRepository
 from customer_agent.infrastructure.db.models import EMBEDDING_DIMENSIONS
@@ -50,7 +53,7 @@ from customer_agent.infrastructure.models import (
 )
 from customer_agent.infrastructure.prompts import load_prompt
 from customer_agent.infrastructure.resilience import BreakerEmbeddings, CircuitBreaker
-from customer_agent.observability import configure_langfuse, get_logger, instrument_openai
+from customer_agent.observability import configure_langfuse, get_logger
 
 log = get_logger("bootstrap")
 
@@ -134,7 +137,10 @@ def create_chat_models(
         }
         return {
             role: ReplayChatModel(
-                cassette=cassette, inner=inner[role] if inner else None, label=labels[role]
+                name=role,
+                cassette=cassette,
+                inner=inner[role] if inner else None,
+                label=labels[role],
             )
             for role in roles
         }
@@ -167,6 +173,7 @@ def _chat_models(
         name = model_override or settings.llm_model
         effort = effort_override or settings.llm_reasoning_effort
         model: BaseChatModel = BreakerChatModel(
+            name=role,  # the run name in traces
             inner=ProviderChatModel(
                 model_name=name,
                 openai_api_key=settings.llm_api_key,
@@ -183,7 +190,7 @@ def _chat_models(
         if settings.llm_cache_dir is not None:
             namespace = f"{settings.llm_base_url or 'openai-default'}|{name}|reasoning={effort}"
             model = CachedChatModel(
-                inner=model, directory=settings.llm_cache_dir, namespace=namespace
+                name=role, inner=model, directory=settings.llm_cache_dir, namespace=namespace
             )
         models[role] = model
     return models
@@ -200,8 +207,9 @@ def start_langfuse(
     version: str,
     environment: str | None = None,
 ) -> bool:
-    """Langfuse tracing of turns and model calls, when configured (see ``langfuse_enabled``).
-    ``environment`` separates evaluation runs from chat traces (default: ``CA_APP_ENV``)."""
+    """Langfuse tracing of turns, agent runs and model calls, when configured (see
+    ``langfuse_enabled``). ``environment`` separates evaluation runs from chat traces (default:
+    ``CA_APP_ENV``)."""
     key, secret = settings.langfuse_public_key, settings.langfuse_secret_key
     if not settings.langfuse_enabled or key is None or secret is None:
         return False
@@ -213,7 +221,6 @@ def start_langfuse(
         release=version,
         tracer_provider=tracer_provider,
     )
-    instrument_openai()
     log.info("langfuse tracing enabled base_url=%s", settings.langfuse_base_url or "default")
     return True
 
@@ -233,6 +240,7 @@ class Container:
     """Long-lived objects of one process; ``aclose`` releases connections."""
 
     engine: AsyncEngine
+    checkpointer: PostgresCheckpointer
     agent: ConversationOrchestrator
     chat: ChatService
     llms: dict[str, BaseChatModel]
@@ -250,6 +258,7 @@ class Container:
         keeps the instance ready: it still answers with the outage fallback (NFR-11), and
         taking every instance out of the load balancer would turn an outage into downtime."""
         checks: dict[str, str] = {name: breaker.state for name, breaker in self.breakers.items()}
+        checks["checkpoints"] = "ok" if self.checkpointer.ready else "pending"
         try:
             async with asyncio.timeout(2.0), self.engine.connect() as connection:
                 await connection.execute(text("SELECT 1"))
@@ -260,10 +269,16 @@ class Container:
             checks["database"] = "unavailable"
         return checks
 
+    async def start(self) -> None:
+        """Before serving sessions: connect the checkpointer and create its tables if missing,
+        in the background (readiness waits for them)."""
+        await self.checkpointer.start()
+
     async def aclose(self) -> None:
         """Graceful shutdown: let in-flight turns finish, then release connections."""
         await self.chat.drain()
         await aclose_all(*self.llms.values(), self.embeddings)
+        await self.checkpointer.aclose()
         await self.engine.dispose()
 
 
@@ -307,6 +322,7 @@ def build_container(
     db = async_sessionmaker(engine, expire_on_commit=False)
     tickets: TicketService = PostgresTicketService(db) if side_effects else InMemoryTicketService()
     audit: AuditLog = PostgresAuditLog(db) if side_effects else InMemoryAuditLog()
+    checkpointer = PostgresCheckpointer(settings.database_url, CHECKPOINT_TYPES)
     agent = ConversationOrchestrator(
         UnderstandAgent(llms["router"], router_prompt, classifier=classifier),
         answers,
@@ -315,7 +331,9 @@ def build_container(
         audit=audit,
         clock=clock,
         tenant_id=settings.tenant_id,
+        checkpointer=checkpointer.saver,
         max_tickets_per_day=settings.max_tickets_per_day if side_effects else None,
+        feedback=FeedbackPolicy(settings.feedback_sample_rate, settings.feedback_min_rounds),
     )
     sessions = PostgresSessionStore(db)
     prompts = {"answer": answer_prompt.ref, "router": router_prompt.ref}
@@ -323,6 +341,7 @@ def build_container(
         prompts["guard"] = classifier.prompt_ref
     return Container(
         engine=engine,
+        checkpointer=checkpointer,
         agent=agent,
         chat=ChatService(agent, sessions, tenant_id=settings.tenant_id),
         llms=llms,

@@ -1,4 +1,4 @@
-import { ApiError, chatStream, isReady } from "./api.js";
+import { ApiError, chatStream, isReady, sendFeedback } from "./api.js";
 import { Auth } from "./auth.js";
 import { normaliseBackend } from "./config.js";
 import { render } from "./format.js";
@@ -133,8 +133,33 @@ function startChat(auth, backend) {
     if (final.sources.length) parts.push(`Quellen: ${final.sources.join(", ")}`);
     if (final.intent) parts.push(`Intent: ${final.intent}`);
     parts.push(`${seconds.toLocaleString("de-DE", { maximumFractionDigits: 1 })} s`);
+    if (final.feedback_requested) parts.push(feedbackButtons(final));
     meta.replaceChildren(...parts.map((part) => (typeof part === "string" ? Object.assign(document.createElement("span"), { textContent: part }) : part)));
     meta.title = `Anfrage ${final.request_id}`;
+  }
+
+  // Asked once in a sampled share of longer conversations; becomes a score on the session in
+  // Langfuse (POST /v1/feedback).
+  function feedbackButtons(final) {
+    const box = Object.assign(document.createElement("span"), { className: "feedback", textContent: "Hat Ihnen dieses Gespräch geholfen?" });
+    const rate = async (helpful) => {
+      for (const button of box.querySelectorAll("button")) button.disabled = true;
+      try {
+        const token = await auth.accessToken();
+        if (!token) throw new ApiError(401);
+        await sendFeedback(backend, token, { sessionId: final.session_id, helpful });
+        box.replaceChildren("Danke für Ihr Feedback.");
+      } catch {
+        box.replaceChildren("Feedback konnte nicht gesendet werden.");
+      }
+    };
+    for (const [label, title, helpful] of [["👍", "Hilfreich", true], ["👎", "Nicht hilfreich", false]]) {
+      const button = Object.assign(document.createElement("button"), { type: "button", textContent: label, title });
+      button.setAttribute("aria-label", title);
+      button.addEventListener("click", () => rate(helpful));
+      box.append(button);
+    }
+    return box;
   }
 
   function fail(item, error) {

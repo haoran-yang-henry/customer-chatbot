@@ -1,6 +1,11 @@
+import asyncio
+from collections.abc import AsyncIterator
 from typing import Any
 
 import pytest
+from langchain_core.messages import BaseMessage
+from langchain_core.outputs import ChatGenerationChunk
+from pydantic import PrivateAttr
 
 from customer_agent.application.answering import TextDelta
 from customer_agent.application.fallbacks import CONTACT_EMAIL, PAYMENT_DATA_NOTICE, TICKET_QUESTION
@@ -134,6 +139,47 @@ async def test_stream_ends_with_turn_result() -> None:
 
     assert isinstance(events[-1], TurnResult)
     assert events[-1].state.active_intent is Intent.RETURN_POLICY
+
+
+class GatedRouterLLM(ScriptedRouterLLM):
+    """Streams the first piece of its answer, then waits until the caller has seen it."""
+
+    _seen: asyncio.Event = PrivateAttr(default_factory=asyncio.Event)
+
+    def __init__(self, routing: str, answer: str) -> None:
+        super().__init__(routing, answer)
+
+    async def _astream(
+        self, messages: list[BaseMessage], *args: Any, **kwargs: Any
+    ) -> AsyncIterator[ChatGenerationChunk]:
+        pieces = [chunk async for chunk in super()._astream(messages, *args, **kwargs)]
+        yield pieces[0]
+        await self._seen.wait()
+        for chunk in pieces[1:]:
+            yield chunk
+
+    def release(self) -> None:
+        self._seen.set()
+
+
+async def test_the_turn_graph_passes_tokens_on_while_the_model_still_writes() -> None:
+    llm = GatedRouterLLM(
+        routing("RETURN_POLICY"), answer="Die Rücksendung ist kostenlos. [policy-returns-v5]"
+    )
+
+    events: list[Any] = []
+    async with asyncio.timeout(5):  # a buffering graph would wait here for good
+        async for event in orchestrator(llm).handle_stream(
+            ask("Kosten?"), SessionState(), session_id="s"
+        ):
+            if isinstance(event, TextDelta):
+                llm.release()
+            events.append(event)
+
+    assert isinstance(events[0], TextDelta)
+    assert isinstance(events[-1], TurnResult)
+    streamed = "".join(e.text for e in events if isinstance(e, TextDelta))
+    assert streamed.strip() == events[-1].response.answer
 
 
 async def test_own_order_is_looked_up_audited_and_explained() -> None:
