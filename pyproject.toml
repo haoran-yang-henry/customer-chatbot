@@ -38,6 +38,7 @@ customer-agent-ingest = "customer_agent.cli.ingest:main"
 customer-agent-search = "customer_agent.cli.search:main"
 customer-agent-token = "customer_agent.cli.token:main"
 customer-agent-seed = "customer_agent.cli.seed:main"
+customer-agent-retention = "customer_agent.cli.retention:main"
 
 [dependency-groups]
 dev = [
