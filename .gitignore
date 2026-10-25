@@ -19,3 +19,7 @@ eval/calibration/*-latest.jsonl
 .cache/
 # Project documentation is kept locally, not under version control
 docs/
+# Terraform (infra/gcp): the state holds generated passwords; the lock file is committed
+.terraform/
+*.tfstate
+*.tfstate.*

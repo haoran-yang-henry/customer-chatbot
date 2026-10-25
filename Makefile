@@ -2,7 +2,7 @@
 # Pinned by digest, like in .github/workflows/ci.yml (keep both in sync).
 GITLEAKS_IMAGE := zricethezav/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
 TRIVY_IMAGE := aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969
-.PHONY: seed token help install lint format typecheck test test-integration test-llm check deps-check audit eval eval-labels eval-smoke eval-smoke-record eval-redteam eval-retrieval ttft load-test load-test-capacity migrate prompts-sync retention ingest run up up-app up-observability down demo-public demo-public-down demo-frontend
+.PHONY: seed token help install lint format typecheck test test-integration test-llm check deps-check audit eval eval-labels eval-smoke eval-smoke-record eval-redteam eval-retrieval ttft load-test load-test-capacity migrate prompts-sync retention ingest run up up-app up-observability down demo-public demo-public-down demo-frontend gcp-plan gcp-deploy gcp-pause gcp-resume gcp-destroy
 
 help:  ## Show available targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-18s %s\n", $$1, $$2}'
@@ -111,6 +111,21 @@ demo-public-down:  ## Stop the browser demo's tunnel and restore the local setup
 
 demo-frontend:  ## Serve the browser demo locally on http://localhost:3000 (allowed by Keycloak and CORS)
 	python3 -m http.server 3000 --bind 127.0.0.1 -d frontend/public
+
+gcp-plan:  ## Preview the Google Cloud deployment (infra/gcp; needs GCP_PROJECT_ID, GCP_BILLING_ACCOUNT in .env)
+	uv run python infra/gcp/deploy.py plan
+
+gcp-deploy:  ## Build, push and deploy the backend to Cloud Run, then run migrations, seed and ingest
+	uv run python infra/gcp/deploy.py deploy
+
+gcp-pause:  ## Stop the Cloud SQL instance between demos (storage is still billed)
+	uv run python infra/gcp/deploy.py pause
+
+gcp-resume:  ## Start the Cloud SQL instance again
+	uv run python infra/gcp/deploy.py resume
+
+gcp-destroy:  ## Delete every resource of the Google Cloud deployment (asks first)
+	uv run python infra/gcp/deploy.py destroy
 
 up:  ## Start local infrastructure (Postgres + pgvector, Keycloak)
 	docker compose up -d --wait

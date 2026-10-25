@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src https://*.trycloudflare.com http://localhost:* http://127.0.0.1:*; base-uri 'none'; form-action 'self'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src https://customer-agent-865980992655.europe-west1.run.app https://*.trycloudflare.com http://localhost:* http://127.0.0.1:*; base-uri 'none'; form-action 'self'">
   <meta name="referrer" content="no-referrer">
   <title>NordElektro Kundenservice</title>
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
@@ -29,8 +29,8 @@
   <main>
     <section id="setup" class="card" hidden>
       <h1>Mit dem Demo-Server verbinden</h1>
-      <p>Die Demo läuft auf dem Rechner des Entwicklers und ist über einen Link mit
-        <code>?backend=…</code> erreichbar. Sie haben nur die Adresse? Dann fügen Sie sie hier ein.</p>
+      <p>Eine Demo auf dem Rechner des Entwicklers ist über einen Link mit <code>?backend=…</code>
+        erreichbar. Sie haben nur die Adresse? Dann fügen Sie sie hier ein.</p>
       <form id="setup-form" class="inline-form">
         <label class="visually-hidden" for="backend-input">Backend-Adresse</label>
         <input id="backend-input" type="url" placeholder="https://….trycloudflare.com" required>

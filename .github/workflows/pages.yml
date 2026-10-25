@@ -1,7 +1,8 @@
 name: Pages
 
 # Publishes the browser demo (frontend/public: static files, no build step) to GitHub Pages.
-# The backend is not hosted here: infra/demo/public.sh exposes a local one through a tunnel.
+# The backend is not hosted here: it runs on Google Cloud (infra/gcp) or, through a tunnel, on a
+# developer's machine (infra/demo).
 on:
   push:
     branches: [main]

@@ -151,9 +151,11 @@ demo customer; send it as `Authorization: Bearer <token>`. With the `LANGFUSE_*`
 run `make prompts-sync` once and every turn appears in Langfuse.
 
 **Browser demo.** A small chat page ([`frontend/`](frontend/public): static files, no build step)
-is published to GitHub Pages and signs in with OpenID Connect against Keycloak.
-`make demo-public` exposes this machine through a Cloudflare quick tunnel behind a proxy that
-lets only chat, health and login through; `make demo-public-down` stops it.
+is published to GitHub Pages and signs in with OpenID Connect against Keycloak. Its backend runs
+on Google Cloud: one Cloud Run service (proxy, API, Keycloak) with Cloud SQL, deployed by
+`make gcp-deploy` ([`infra/gcp`](infra/gcp/README.md)). Registration is closed; the demo
+accounts share a generated password. `make demo-public` serves this machine instead, through a
+Cloudflare quick tunnel.
 
 ## API
 
@@ -210,6 +212,7 @@ Environment variables with the prefix `CA_` (see [`.env.example`](.env.example))
 | `make load-test` | k6 load test with the model mocked out |
 | `make audit` · `make deps-check` | Secret and vulnerability scans; unused packages and dead code |
 | `make prompts-sync` | Publish the prompt versions from `prompts/` to Langfuse |
+| `make gcp-deploy` | Build, push and deploy the backend to Google Cloud; `gcp-pause`, `gcp-destroy` |
 
 Every pull request runs four CI jobs: **check** (lint, types, unit and integration tests),
 **eval-gate** (the real agent on 24 smoke conversations; all must pass), **security** and
@@ -232,6 +235,7 @@ data/               knowledge base (Markdown), demo customers and orders
 eval/               evaluation datasets, results and the CI cassette
 prompts/            versioned prompt templates (source of the Langfuse prompts)
 frontend/           browser demo (GitHub Pages)
+infra/              Keycloak realm, tunnel demo, Google Cloud deployment (Terraform)
 migrations/         database schema (Alembic)
 tests/              unit, data, integration and load tests
 ```
