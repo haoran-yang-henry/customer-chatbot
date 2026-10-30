@@ -152,8 +152,9 @@ run `make prompts-sync` once and every turn appears in Langfuse.
 
 **Browser demo.** A small chat page ([`frontend/`](frontend/public): static files, no build step)
 is published to GitHub Pages and signs in with OpenID Connect against Keycloak. Its backend runs
-on Google Cloud: one Cloud Run service (proxy, API, Keycloak) with Cloud SQL, deployed by
-`make gcp-deploy` ([`infra/gcp`](infra/gcp/README.md)). Registration is closed; the demo
+on Google Cloud: one Cloud Run service (proxy, API, Keycloak) with Cloud SQL, defined in
+Terraform and deployed from `main` by GitHub Actions ([`infra/gcp`](infra/gcp/README.md)).
+Registration is closed; the demo
 accounts share a generated password. `make demo-public` serves this machine instead, through a
 Cloudflare quick tunnel.
 
@@ -212,11 +213,14 @@ Environment variables with the prefix `CA_` (see [`.env.example`](.env.example))
 | `make load-test` | k6 load test with the model mocked out |
 | `make audit` · `make deps-check` | Secret and vulnerability scans; unused packages and dead code |
 | `make prompts-sync` | Publish the prompt versions from `prompts/` to Langfuse |
-| `make gcp-deploy` | Build, push and deploy the backend to Google Cloud; `gcp-pause`, `gcp-destroy` |
+| `make gcp-deploy` | First deploy and infrastructure changes on Google Cloud (`main` deploys itself); `gcp-secrets`, `gcp-pause`, `gcp-destroy` |
 
 Every pull request runs four CI jobs: **check** (lint, types, unit and integration tests),
 **eval-gate** (the real agent on 24 smoke conversations; all must pass), **security** and
-**image** (build, scan, start without a database). The evaluation gate makes no model call:
+**image** (build, scan, start without a database). On `main`, a fifth job, **deploy**, follows
+once all four pass: it builds the images, applies the Terraform and runs the setup job on Cloud
+Run, signed in through Workload Identity Federation, with no stored cloud key and no model key.
+The evaluation gate makes no model call:
 `make eval-smoke-record` stores the model's answers in `eval/cassettes/smoke.json.gz`, CI replays
 them, and any change to a prompt, the evidence or the chunking misses the recording until it is
 re-recorded with the change.

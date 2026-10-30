@@ -7,7 +7,8 @@ on:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # A newer push replaces a running pull request check, but never a deploy halfway through.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 # Least privilege: no job writes to the repository (Day 6 hardening).
 permissions:
@@ -141,3 +142,42 @@ jobs:
           done
           docker logs api
           exit 1
+
+  # Continuous deployment: main goes to Cloud Run (infra/gcp) once the four jobs above pass.
+  # GitHub's OIDC token becomes the deployer's credentials through Workload Identity
+  # Federation, which admits only this repository's main branch; no key is stored in GitHub.
+  # The job reads the settings `make gcp-deploy` saved and never sees a model key.
+  deploy:
+    needs: [check, eval-gate, security, image]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: gcp
+      url: https://customer-agent-865980992655.europe-west1.run.app
+    permissions:
+      contents: read
+      id-token: write # the OIDC token for Workload Identity Federation
+    env:
+      GCP_PROJECT_ID: nordelektro-agent
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      # Both values: `terraform -chdir=infra/gcp output`.
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: projects/865980992655/locations/global/workloadIdentityPools/github/providers/customer-chatbot
+          service_account: deployer@nordelektro-agent.iam.gserviceaccount.com
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.16.6
+          terraform_wrapper: false
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+        with:
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync --locked
+      - name: Build and push the images, apply, run the setup job, wait until ready
+        run: uv run python infra/gcp/deploy.py release
