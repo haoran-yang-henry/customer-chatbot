@@ -1,0 +1,4 @@
+# Findings gitleaks reports that are not secrets (fingerprint: commit:file:rule:line).
+# infra/gcp/run.tf: Secret Manager secret names (keycloak-db-password, demo-password), not values.
+e441919381afe3fcf2dd2f1842d6d2fbabe16212:infra/gcp/run.tf:hashicorp-tf-password:38
+e441919381afe3fcf2dd2f1842d6d2fbabe16212:infra/gcp/run.tf:hashicorp-tf-password:40

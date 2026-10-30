@@ -1,0 +1,29 @@
+# Entry point of the hosted backend (infra/gcp): the ingress container of the Cloud Run service.
+# Cloud Run terminates TLS; API and Keycloak run beside this proxy and are reached on localhost.
+# As in the tunnel demo (infra/demo/Caddyfile), only what the browser demo needs is routed;
+# the Keycloak admin and account consoles, the master realm, /metrics and the API docs answer 404.
+{
+	admin off
+	auto_https off
+}
+
+:8080 {
+	# Login, token, refresh and logout of the nordelektro realm, and the login page's assets.
+	@login path /realms/nordelektro/protocol/openid-connect/* /realms/nordelektro/login-actions/* /resources/*
+	handle @login {
+		reverse_proxy localhost:8081 {
+			header_up X-Forwarded-Proto https
+		}
+	}
+
+	@api path /v1/chat /v1/chat/stream /v1/feedback /health/live /health/ready
+	handle @api {
+		reverse_proxy localhost:8000 {
+			flush_interval -1 # Server-Sent Events: pass every event on at once
+		}
+	}
+
+	handle {
+		respond "Not found" 404
+	}
+}

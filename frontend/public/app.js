@@ -1,6 +1,6 @@
 import { ApiError, chatStream, isReady, sendFeedback } from "./api.js";
 import { Auth } from "./auth.js";
-import { normaliseBackend } from "./config.js";
+import { DEFAULT_BACKEND, normaliseBackend } from "./config.js";
 import { render } from "./format.js";
 
 const BACKEND_KEY = "nordelektro.backend"; // localStorage: the link only needs to be opened once
@@ -55,7 +55,7 @@ function showSetup(message = "") {
     event.preventDefault();
     const backend = normaliseBackend($("backend-input").value);
     if (!backend) {
-      $("setup-error").textContent = "Erlaubt sind Adressen der Form https://….trycloudflare.com.";
+      $("setup-error").textContent = "Erlaubt sind der NordElektro-Server und Adressen der Form https://….trycloudflare.com.";
       return;
     }
     location.assign(`${REDIRECT_URI}?backend=${encodeURIComponent(backend)}`);
@@ -274,7 +274,7 @@ async function main() {
     backend = normaliseBackend(params.get("backend"));
     if (backend) write(localStorage, BACKEND_KEY, backend);
   } else {
-    backend = normaliseBackend(read(localStorage, BACKEND_KEY) ?? "");
+    backend = normaliseBackend(read(localStorage, BACKEND_KEY) ?? DEFAULT_BACKEND);
   }
   if (!backend) {
     history.replaceState(null, "", REDIRECT_URI);

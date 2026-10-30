@@ -16,7 +16,7 @@
 		}
 	}
 
-	@api path /v1/chat /v1/chat/stream /health/live /health/ready
+	@api path /v1/chat /v1/chat/stream /v1/feedback /health/live /health/ready
 	handle @api {
 		reverse_proxy app:8000 {
 			flush_interval -1 # Server-Sent Events: pass every event on at once
