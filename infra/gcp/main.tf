@@ -19,10 +19,12 @@ resource "google_project_service" "apis" {
     "cloudscheduler.googleapis.com",
     "compute.googleapis.com",
     "iam.googleapis.com",
+    "iamcredentials.googleapis.com", # GitHub Actions: tokens of the deployer
     "run.googleapis.com",
     "secretmanager.googleapis.com",
     "servicenetworking.googleapis.com",
     "sqladmin.googleapis.com",
+    "sts.googleapis.com", # GitHub Actions: its OIDC token exchanged (github.tf)
   ])
   service            = each.value
   disable_on_destroy = false
@@ -211,23 +213,29 @@ resource "google_secret_manager_secret_version" "generated" {
   secret_data = each.value
 }
 
-resource "google_secret_manager_secret_version" "llm_api_key" {
-  secret                 = google_secret_manager_secret.secrets["llm-api-key"].id
-  secret_data_wo         = var.llm_api_key
-  secret_data_wo_version = var.secrets_version
+# The provided secrets get their values from `make gcp-secrets` (gcloud, from .env), not from
+# Terraform: no plan, no state and no CI deploy needs a model key.
+
+# Terraform wrote these versions until 2026-10-30. It forgets them; the keys stay in use.
+removed {
+  from = google_secret_manager_secret_version.llm_api_key
+  lifecycle {
+    destroy = false
+  }
 }
 
-resource "google_secret_manager_secret_version" "openai_api_key" {
-  secret                 = google_secret_manager_secret.secrets["openai-api-key"].id
-  secret_data_wo         = var.openai_api_key
-  secret_data_wo_version = var.secrets_version
+removed {
+  from = google_secret_manager_secret_version.openai_api_key
+  lifecycle {
+    destroy = false
+  }
 }
 
-resource "google_secret_manager_secret_version" "langfuse_secret_key" {
-  count                  = var.langfuse_enabled ? 1 : 0
-  secret                 = google_secret_manager_secret.secrets["langfuse-secret-key"].id
-  secret_data_wo         = var.langfuse_secret_key
-  secret_data_wo_version = var.secrets_version
+removed {
+  from = google_secret_manager_secret_version.langfuse_secret_key
+  lifecycle {
+    destroy = false
+  }
 }
 
 # --- identities -------------------------------------------------------------------------------
