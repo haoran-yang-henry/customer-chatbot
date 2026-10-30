@@ -19,6 +19,8 @@ RUN /opt/keycloak/bin/kc.sh build
 FROM ${KEYCLOAK_IMAGE}
 COPY --from=build /opt/keycloak/ /opt/keycloak/
 COPY --from=realm --chown=keycloak:keycloak /realm.json /opt/keycloak/data/import/nordelektro-realm.json
+# The base image's keycloak user, stated: never root.
+USER 1000
 ENTRYPOINT ["/opt/keycloak/bin/kc.sh"]
 # The realm is imported once, when the database has none; `make gcp-realm` re-imports it.
 CMD ["start", "--optimized", "--import-realm"]
