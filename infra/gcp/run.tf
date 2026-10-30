@@ -157,11 +157,9 @@ resource "google_cloud_run_v2_service" "agent" {
     google_secret_manager_secret_iam_member.runtime,
     google_sql_database.app,
     google_sql_database.keycloak,
-    # Every secret a container reads needs a version before a revision can start.
+    # Every secret a container reads needs a version before a revision can start; the keys
+    # get theirs from deploy.py before this apply.
     google_secret_manager_secret_version.generated,
-    google_secret_manager_secret_version.llm_api_key,
-    google_secret_manager_secret_version.openai_api_key,
-    google_secret_manager_secret_version.langfuse_secret_key,
   ]
 }
 
@@ -225,11 +223,9 @@ resource "google_cloud_run_v2_job" "jobs" {
   depends_on = [
     google_secret_manager_secret_iam_member.runtime,
     google_sql_database.app,
-    # Every secret a container reads needs a version before a revision can start.
+    # Every secret a container reads needs a version before a revision can start; the keys
+    # get theirs from deploy.py before this apply.
     google_secret_manager_secret_version.generated,
-    google_secret_manager_secret_version.llm_api_key,
-    google_secret_manager_secret_version.openai_api_key,
-    google_secret_manager_secret_version.langfuse_secret_key,
   ]
 }
 

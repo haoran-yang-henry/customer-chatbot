@@ -36,35 +36,25 @@ variable "model_settings" {
   default     = {}
 }
 
-# The secrets come from .env through deploy.py. Write-only: Secret Manager stores them, the
-# Terraform state does not. Bump secrets_version to send changed values.
-variable "llm_api_key" {
-  type      = string
-  sensitive = true
-  ephemeral = true
-}
-
-variable "openai_api_key" {
-  type      = string
-  sensitive = true
-  ephemeral = true
-}
-
-variable "langfuse_secret_key" {
-  description = "Empty: no Langfuse traces from the hosted backend."
-  type        = string
-  default     = ""
-  sensitive   = true
-  ephemeral   = true
-}
-
 variable "langfuse_enabled" {
-  description = "Whether a Langfuse secret key is given (an ephemeral value cannot decide that)."
+  description = "Whether .env has a Langfuse secret key: then the secret exists and is read."
   type        = bool
   default     = false
 }
 
-variable "secrets_version" {
-  type    = number
-  default = 1
+variable "state_bucket" {
+  description = "The Terraform state's bucket (created by deploy.py); the deployer writes to it."
+  type        = string
+}
+
+variable "github_repository" {
+  description = "The repository whose main branch deploys (owner/name)."
+  type        = string
+  default     = "haoran-yang-henry/customer-chatbot"
+}
+
+variable "github_repository_id" {
+  description = "Its numeric id: a deleted and re-created repository of the same name gets a new one."
+  type        = string
+  default     = "1416107290"
 }

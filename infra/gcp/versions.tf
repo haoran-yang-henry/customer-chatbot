@@ -2,6 +2,12 @@ terraform {
   # 1.11: write-only arguments, so the model API keys never enter the state.
   required_version = ">= 1.11"
 
+  # In Cloud Storage, shared by `make gcp-deploy` and the deploy job in CI. deploy.py creates
+  # the bucket (<project>-tfstate) before the first init and passes its name.
+  backend "gcs" {
+    prefix = "terraform"
+  }
+
   required_providers {
     google = {
       source  = "hashicorp/google"
