@@ -53,7 +53,7 @@ class Settings(BaseSettings):
     # Chat model (ADR-0008): any OpenAI-compatible endpoint
     llm_api_key: SecretStr | None = None
     llm_base_url: str | None = "https://opencode.ai/zen/go/v1"
-    llm_model: str = "deepseek-v4-flash"
+    llm_model: str = "qwen3.8-flash"
     llm_timeout_seconds: float = 30.0  # answer generation (read timeout per streamed chunk)
     # Router and classifier: 4 s and one retry stay below NFR-11's 10 s to the fallback (Day 7).
     router_timeout_seconds: float = 4.0
