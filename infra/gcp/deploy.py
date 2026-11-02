@@ -6,7 +6,8 @@ deploy (your gcloud login, settings from .env): creates the project and the stat
 needed, adds missing model keys to Secret Manager, saves the settings for CI, then releases.
 release (the deploy job in CI, as the deployer; also the end of deploy): builds and pushes the
 three images (tag: the commit), runs the setup job (migrations, demo orders, knowledge index)
-with the new image, then applies the rest of the Terraform and waits until the backend is ready.
+with the new image, and the realm job if the realm's sources changed, then applies the rest of
+the Terraform and waits until the backend is ready.
 It needs no .env and no key: GCP_PROJECT_ID comes from the environment, the rest from the
 settings deploy saved.
 secrets: adds the model and Langfuse keys from .env as new versions (a new key).
@@ -16,6 +17,7 @@ GCP_DAILY_MESSAGE_LIMIT (all visitors together, default 200), the model keys and
 keys go to Secret Manager through gcloud, never to Terraform, and are never printed.
 """
 
+import hashlib
 import json
 import os
 import subprocess
@@ -67,6 +69,8 @@ IMAGE_SOURCES = [
     "uv.lock",
     "Dockerfile",
 ]
+# What the hosted realm is made of: a change here re-imports it (realm job, run.tf).
+REALM_SOURCES = ["infra/keycloak/nordelektro-realm.json", "infra/gcp/keycloak/realm.py"]
 READY_TIMEOUT = 180  # seconds; a cold start waits about 15 s for Keycloak
 
 
@@ -83,6 +87,13 @@ def show(*args: str, env: dict[str, str] | None = None) -> None:
 
 def state_bucket(project: str) -> str:
     return f"{project}-tfstate"
+
+
+def realm_sha() -> str:
+    digest = hashlib.sha256()
+    for source in REALM_SOURCES:
+        digest.update((ROOT / source).read_bytes())
+    return digest.hexdigest()[:16]
 
 
 @dataclass(frozen=True)
@@ -155,6 +166,7 @@ class Deployment:
             "TF_VAR_langfuse_enabled": "true" if self.settings.langfuse_enabled else "false",
             "TF_VAR_state_bucket": self.bucket,
             "TF_VAR_daily_message_limit": str(self.settings.daily_message_limit),
+            "TF_VAR_realm_sha": realm_sha(),
         }
 
     def authorized(self) -> dict[str, str]:
@@ -166,6 +178,17 @@ class Deployment:
 
     def terraform(self, *args: str) -> None:
         show("terraform", f"-chdir={TERRAFORM_DIR}", *args, env=self.authorized())
+
+    def deployed(self, name: str) -> str | None:
+        """An output of the state as it is now; ``None`` before an apply that wrote it."""
+        result = subprocess.run(
+            ["terraform", f"-chdir={TERRAFORM_DIR}", "output", "-raw", name],
+            cwd=ROOT,
+            env=self.authorized(),
+            capture_output=True,
+            text=True,
+        )
+        return result.stdout.strip() if result.returncode == 0 else None
 
     def output(self, name: str) -> str:
         return run(
@@ -336,23 +359,29 @@ class Deployment:
 
     def release(self) -> None:
         self.push_images()
-        # The schema before the service: the new revision may need it, and migrations only add
-        # what the running revision can ignore.
-        self.apply("google_cloud_run_v2_job.jobs")
-        print("Running the setup job (migrations, demo orders, knowledge index) …")
+        imported = self.deployed("realm_sha")
+        # Schema and realm before the service: the new revision may need them, and migrations
+        # only add what the running revision can ignore.
+        self.apply("google_cloud_run_v2_job.jobs", "google_cloud_run_v2_job.realm")
+        self.execute("setup", "migrations, demo orders, knowledge index")
+        if imported != self.env["TF_VAR_realm_sha"]:
+            self.execute("realm", "the realm changed: signed-in users sign in again")
+        self.apply()
+        self.wait_until_ready(self.output("url"))
+        self.terraform("output")
+
+    def execute(self, job: str, what: str) -> None:
+        print(f"Running the {job} job ({what}) …")
         show(
             "gcloud",
             "run",
             "jobs",
             "execute",
-            "setup",
+            job,
             "--wait",
             f"--region={self.region}",
             f"--project={self.project}",
         )
-        self.apply()
-        self.wait_until_ready(self.output("url"))
-        self.terraform("output")
 
     def activation(self, policy: str) -> None:
         show(

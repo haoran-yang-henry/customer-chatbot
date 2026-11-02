@@ -46,6 +46,7 @@ def create_app(
             else None
         )
         app.state.daily_limit = settings.daily_message_limit
+        app.state.daily_exempt = frozenset(settings.daily_limit_exempt_users)
         app.state.readiness = None
         if chat is not None:
             app.state.chat = chat

@@ -54,4 +54,10 @@ class JwtVerifier:
         if not isinstance(customer_id, str) or not isinstance(tenant_id, str):
             log.info("token rejected reason=missing_customer_claims")
             raise AuthenticationError("missing customer_id/tenant_id claims")
-        return Principal(subject=claims["sub"], customer_id=customer_id, tenant_id=tenant_id)
+        username = claims.get("preferred_username")
+        return Principal(
+            subject=claims["sub"],
+            customer_id=customer_id,
+            tenant_id=tenant_id,
+            username=username if isinstance(username, str) else None,
+        )

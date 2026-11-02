@@ -69,6 +69,10 @@ class FakeVerifier:
     async def verify(self, token: str) -> Principal:
         if token == "anna":
             return Principal(subject="u1", customer_id="C-1001", tenant_id="nordelektro")
+        if token == "owner":  # the owner's account, on Anna's demo data
+            return Principal(
+                subject="u3", customer_id="C-1001", tenant_id="nordelektro", username="owner"
+            )
         if token == "other-tenant":
             return Principal(subject="u2", customer_id="X-1", tenant_id="other-shop")
         raise AuthenticationError("bad token")

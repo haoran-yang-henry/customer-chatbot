@@ -36,6 +36,11 @@ variable "model_settings" {
   default     = {}
 }
 
+variable "realm_sha" {
+  description = "Digest of the realm's sources (deploy.py): when it changes, the realm is re-imported."
+  type        = string
+}
+
 variable "daily_message_limit" {
   description = "Chat messages per UTC day from all visitors together (GCP_DAILY_MESSAGE_LIMIT); 0 = off."
   type        = number

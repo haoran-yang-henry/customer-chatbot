@@ -5,15 +5,16 @@
 locals {
   # Model calls only: the API and the jobs reach the internet directly, Cloud SQL via the VPC.
   app_env = merge(var.model_settings, {
-    CA_LOG_FORMAT            = "json"
-    CA_AUTH_ISSUER           = local.issuer
-    CA_AUTH_JWKS_URL         = "http://localhost:8081/realms/nordelektro/protocol/openid-connect/certs"
-    CA_AUTH_REQUIRED         = "true" # every message costs model calls: logged-in demo users only
-    CA_CORS_ORIGINS          = var.pages_origin
-    CA_RATE_LIMIT_PER_MINUTE = "10"
-    CA_DAILY_MESSAGE_LIMIT   = tostring(var.daily_message_limit) # the public demo's cost cap
-    CA_DB_POOL_SIZE          = "5"
-    CA_DB_MAX_OVERFLOW       = "5"
+    CA_LOG_FORMAT               = "json"
+    CA_AUTH_ISSUER              = local.issuer
+    CA_AUTH_JWKS_URL            = "http://localhost:8081/realms/nordelektro/protocol/openid-connect/certs"
+    CA_AUTH_REQUIRED            = "true" # every message costs model calls: logged-in demo users only
+    CA_CORS_ORIGINS             = var.pages_origin
+    CA_RATE_LIMIT_PER_MINUTE    = "10"
+    CA_DAILY_MESSAGE_LIMIT      = tostring(var.daily_message_limit) # the public demo's cost cap
+    CA_DAILY_LIMIT_EXEMPT_USERS = "owner"                           # the owner's account (realm.py)
+    CA_DB_POOL_SIZE             = "5"
+    CA_DB_MAX_OVERFLOW          = "5"
   })
   app_secrets = merge(
     {
@@ -23,23 +24,30 @@ locals {
     },
     var.langfuse_enabled ? { LANGFUSE_SECRET_KEY = "langfuse-secret-key" } : {},
   )
-  keycloak_env = {
+  # The server and the realm job reach the same database and resolve the same placeholders.
+  keycloak_db_env = {
+    KC_DB_URL           = "jdbc:postgresql://${local.db_host}:5432/keycloak?sslmode=require"
+    KC_DB_USERNAME      = google_sql_user.keycloak.name
+    KC_DB_POOL_MAX_SIZE = "5"
+    JAVA_OPTS_KC_HEAP   = "-Xms256m -Xmx640m"
+  }
+  keycloak_env = merge(local.keycloak_db_env, {
     KC_HOSTNAME                 = local.url
     KC_HTTP_ENABLED             = "true"
     KC_HTTP_PORT                = "8081"
     KC_PROXY_HEADERS            = "xforwarded"
     KC_PROXY_TRUSTED_ADDRESSES  = "127.0.0.1/32,::1/128"
-    KC_DB_URL                   = "jdbc:postgresql://${local.db_host}:5432/keycloak?sslmode=require"
-    KC_DB_USERNAME              = google_sql_user.keycloak.name
-    KC_DB_POOL_MAX_SIZE         = "5"
-    KC_BOOTSTRAP_ADMIN_USERNAME = "admin" # only for the first start; the console is not routed
-    JAVA_OPTS_KC_HEAP           = "-Xms256m -Xmx640m"
+    KC_BOOTSTRAP_ADMIN_USERNAME = "admin"       # only for the first start; the console is not routed
+    REALM_SHA                   = var.realm_sha # a changed realm starts Keycloak with fresh caches
+  })
+  realm_secrets = {
+    KC_DB_PASSWORD = "keycloak-db-password"
+    DEMO_PASSWORD  = "demo-password"  # the demo users' password, on realm import
+    OWNER_PASSWORD = "owner-password" # the owner's account
   }
-  keycloak_secrets = {
-    KC_DB_PASSWORD              = "keycloak-db-password"
+  keycloak_secrets = merge(local.realm_secrets, {
     KC_BOOTSTRAP_ADMIN_PASSWORD = "keycloak-admin-password"
-    DEMO_PASSWORD               = "demo-password" # the demo users' password, on realm import
-  }
+  })
 }
 
 resource "google_cloud_run_v2_service" "agent" {
@@ -250,4 +258,66 @@ resource "google_cloud_scheduler_job" "retention" {
     }
   }
   depends_on = [google_cloud_run_v2_job_iam_member.scheduler]
+}
+
+# Replaces the realm in the database with the one in the Keycloak image. deploy.py runs it when
+# the realm's sources changed (realm_sha); signed-in users sign in again, as the realm's keys are
+# new. The revision that follows starts Keycloak with fresh caches.
+resource "google_cloud_run_v2_job" "realm" {
+  name                = "realm"
+  location            = var.region
+  deletion_protection = false
+
+  template {
+    task_count = 1
+    template {
+      service_account = google_service_account.runtime.email
+      timeout         = "600s"
+      max_retries     = 0
+
+      vpc_access {
+        network_interfaces {
+          network    = google_compute_network.vpc.id
+          subnetwork = google_compute_subnetwork.run.id
+        }
+        egress = "PRIVATE_RANGES_ONLY"
+      }
+
+      containers {
+        image = "${local.registry}/keycloak:${var.image_tag}"
+        args = [
+          "import", "--optimized", "--override", "true",
+          "--file", "/opt/keycloak/data/import/nordelektro-realm.json",
+        ]
+        resources {
+          limits = { cpu = "1", memory = "1Gi" }
+        }
+        dynamic "env" {
+          for_each = local.keycloak_db_env
+          content {
+            name  = env.key
+            value = env.value
+          }
+        }
+        dynamic "env" {
+          for_each = local.realm_secrets
+          content {
+            name = env.key
+            value_source {
+              secret_key_ref {
+                secret  = env.value
+                version = "latest"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  depends_on = [
+    google_secret_manager_secret_iam_member.runtime,
+    google_sql_database.keycloak,
+    google_secret_manager_secret_version.generated,
+  ]
 }

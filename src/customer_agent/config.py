@@ -110,6 +110,8 @@ class Settings(BaseSettings):
     rate_limit_per_minute: int = 20
     # Chat messages per UTC day from all clients together: the public demo's cost cap; 0 = off.
     daily_message_limit: int = Field(default=0, ge=0)
+    # Usernames (``preferred_username``) the daily limit does not count: the owner's account.
+    daily_limit_exempt_users: Annotated[list[str], NoDecode] = Field(default_factory=list)
     # Customer feedback (rebuild phase 3): this share of sessions is asked once, from this many
     # rounds on, whether the conversation helped.
     feedback_sample_rate: float = Field(default=0.3, ge=0.0, le=1.0)
@@ -142,11 +144,11 @@ class Settings(BaseSettings):
     def _empty_as_none(cls, value: Any) -> Any:
         return None if value == "" else value
 
-    @field_validator("cors_origins", mode="before")
+    @field_validator("cors_origins", "daily_limit_exempt_users", mode="before")
     @classmethod
     def _comma_separated(cls, value: Any) -> Any:
         if isinstance(value, str):
-            return [origin.strip().rstrip("/") for origin in value.split(",") if origin.strip()]
+            return [item.strip().rstrip("/") for item in value.split(",") if item.strip()]
         return value
 
     @property

@@ -187,6 +187,11 @@ resource "random_password" "demo" {
   special = false
 }
 
+resource "random_password" "owner" {
+  length  = 20
+  special = false
+}
+
 locals {
   # Generated here; they live in Secret Manager and in the local state (keep it private).
   generated_secrets = {
@@ -194,6 +199,7 @@ locals {
     "keycloak-db-password"    = random_password.keycloak_db.result
     "keycloak-admin-password" = random_password.keycloak_admin.result
     "demo-password"           = random_password.demo.result
+    "owner-password"          = random_password.owner.result # the owner's account (realm.py)
   }
   provided_secrets = concat(["llm-api-key", "openai-api-key"], var.langfuse_enabled ? ["langfuse-secret-key"] : [])
 }

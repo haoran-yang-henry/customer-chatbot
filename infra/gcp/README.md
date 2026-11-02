@@ -24,7 +24,7 @@ flowchart LR
 |---|---|
 | Address | `https://customer-agent-865980992655.europe-west1.run.app`, the frontend's default backend |
 | Project | `nordelektro-agent` (its own project: costs and permissions stay separate) |
-| Login | The three demo customers, with a generated password; no registration, no password grant |
+| Login | The three demo customers, with a shared generated password, and `owner`, the owner's own account on Anna's data with a password of its own and no daily limit; no registration, no password grant |
 | Not reachable | Keycloak admin and account consoles, the master realm, `/metrics`, API docs (404) |
 | Cost | About $10 a month for Cloud SQL (`db-f1-micro`); Cloud Run within its free tier at demo traffic. A budget alert mails at 50, 90 and 100 % of $20. All visitors together get 200 chat messages a day (`GCP_DAILY_MESSAGE_LIMIT` in `.env`), so model costs stay bounded |
 
@@ -55,10 +55,12 @@ A change to the infrastructure (IAM, secrets, network, database, scheduler) is a
 left to change. Every deploy creates a new revision; the first request after an idle period
 waits about 15 seconds while Keycloak starts.
 
-The demo password (in your terminal; share it only with whom you give the link):
+The passwords, in your terminal: the demo accounts' (share it only with whom you give the link)
+and your own account's, `owner`:
 
 ```bash
 gcloud secrets versions access latest --secret demo-password --project nordelektro-agent
+gcloud secrets versions access latest --secret owner-password --project nordelektro-agent
 ```
 
 ## Operate
@@ -88,9 +90,12 @@ gcloud secrets versions access latest --secret demo-password --project nordelekt
   the budget. It cannot change IAM ([`github.tf`](github.tf)).
 - **One instance.** Keycloak keeps its caches in memory, so the service never runs a second
   instance. The database pools are small to stay below the instance's 50 connections.
-- **The realm is imported once**, on Keycloak's first start against an empty database. Later
-  changes to `infra/keycloak/nordelektro-realm.json` or a new demo password do not reach the
-  running realm by a deploy.
+- **The realm follows its sources.** Keycloak imports it on its first start against an empty
+  database. When `infra/keycloak/nordelektro-realm.json` or `keycloak/realm.py` changes, a
+  release runs the `realm` job, which replaces the realm (`kc.sh import --override`), and the
+  next revision starts Keycloak with fresh caches. The realm's keys are new then: signed-in
+  users sign in again. A new realm needs `make gcp-deploy` once if it adds a secret (as
+  `owner-password` did): the deployer cannot create secrets.
 - **The hosted realm** is derived from the development realm by `keycloak/realm.py`: the
-  development password is replaced, HTTPS is required, the password grant is off, and logins
-  redirect only to GitHub Pages.
+  development password is replaced, the `owner` account is added, HTTPS is required, the
+  password grant is off, and logins redirect only to GitHub Pages.
