@@ -81,11 +81,17 @@ async def enforce_rate_limit(request: Request, principal: CurrentPrincipal) -> N
 RateLimited = Annotated[None, Depends(enforce_rate_limit)]
 
 
-async def enforce_message_limits(request: Request, _: RateLimited) -> None:
-    """The per-client limit first, so a client already over it does not use up the day."""
+async def enforce_message_limits(
+    request: Request, principal: CurrentPrincipal, _: RateLimited
+) -> None:
+    """The per-client limit first, so a client already over it does not use up the day. Exempt
+    accounts (the owner's) still have the per-minute limit."""
     limit: int = getattr(request.app.state, "daily_limit", 0)
     usage: UsageCounter | None = getattr(request.app.state, "usage", None)
+    exempt: frozenset[str] = getattr(request.app.state, "daily_exempt", frozenset())
     if not limit or usage is None:
+        return
+    if principal is not None and principal.username in exempt:
         return
     now = datetime.now(UTC)
     if await usage.count_message(now.date()) <= limit:

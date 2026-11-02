@@ -6,14 +6,18 @@ The development realm (infra/keycloak) is the source; the hosted one differs onl
 reachable from the internet: the demo users' password comes from the DEMO_PASSWORD environment
 variable (Keycloak resolves ``${...}`` placeholders on import) instead of the published
 development password, HTTPS is required, the password grant is off, and the login redirects only
-to the GitHub Pages frontend.
+to the GitHub Pages frontend. One more user, ``owner``, is the owner's own account: Anna's demo
+data, a password of its own (OWNER_PASSWORD), and no daily message limit (run.tf).
 """
 
+import copy
 import json
 import sys
 
 PAGES_ORIGIN = "https://haoran-yang-henry.github.io"
 CHAT_CLIENT = "customer-chat"
+OWNER = "owner"
+OWNER_DATA = "anna.schneider"  # whose customer and orders the owner's account uses
 
 
 def hosted(realm: dict) -> dict:
@@ -23,11 +27,21 @@ def hosted(realm: dict) -> dict:
         for credential in user.get("credentials", []):
             credential["value"] = "${DEMO_PASSWORD}"
             credential["temporary"] = False
+    realm["users"].append(_owner(realm["users"]))
     [client] = [c for c in realm["clients"] if c["clientId"] == CHAT_CLIENT]
     client["directAccessGrantsEnabled"] = False
     client["redirectUris"] = [f"{PAGES_ORIGIN}/customer-chatbot/*"]
     client["webOrigins"] = [PAGES_ORIGIN]  # logout redirects follow ("+")
     return realm
+
+
+def _owner(users: list[dict]) -> dict:
+    [template] = [u for u in users if u["username"] == OWNER_DATA]
+    owner = copy.deepcopy(template)
+    owner["username"] = OWNER
+    owner["email"] = f"{OWNER}@example.de"  # e-mails are unique in the realm
+    owner["credentials"] = [{"type": "password", "value": "${OWNER_PASSWORD}", "temporary": False}]
+    return owner
 
 
 if __name__ == "__main__":

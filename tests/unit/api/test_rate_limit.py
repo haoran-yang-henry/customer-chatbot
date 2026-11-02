@@ -118,3 +118,31 @@ def test_without_a_daily_limit_nothing_is_counted() -> None:
 
     assert statuses == {200}
     assert usage.days == {}
+
+
+def test_exempt_accounts_are_neither_counted_nor_limited_by_the_day() -> None:
+    usage = FakeUsage()
+    settings = Settings(
+        app_env="test",
+        rate_limit_per_minute=0,
+        daily_message_limit=1,
+        daily_limit_exempt_users="owner",  # type: ignore[arg-type]  # as from the environment
+    )
+    app = create_app(settings, chat=FakeChat(), verifier=FakeVerifier(), usage=usage)  # type: ignore[arg-type]
+    with TestClient(app) as client:
+        owner = [
+            client.post(
+                "/v1/chat", json={"message": "Hallo"}, headers={"authorization": "Bearer owner"}
+            ).status_code
+            for _ in range(3)
+        ]
+        anna = [
+            client.post(
+                "/v1/chat", json={"message": "Hallo"}, headers={"authorization": "Bearer anna"}
+            ).status_code
+            for _ in range(2)
+        ]
+
+    assert owner == [200, 200, 200]
+    assert anna == [200, 429]  # the same customer's data, but not the owner's account
+    assert list(usage.days.values()) == [2]

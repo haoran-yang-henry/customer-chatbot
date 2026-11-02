@@ -60,6 +60,14 @@ async def test_valid_token_yields_the_customer() -> None:
     )
 
 
+async def test_the_username_is_carried_when_the_token_has_one() -> None:
+    named = await VERIFIER.verify(token(preferred_username="owner"))
+    unnamed = await VERIFIER.verify(token())
+    odd = await VERIFIER.verify(token(preferred_username=["owner"]))
+
+    assert (named.username, unnamed.username, odd.username) == ("owner", None, None)
+
+
 @pytest.mark.parametrize(
     "bad",
     [

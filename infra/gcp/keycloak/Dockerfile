@@ -22,5 +22,5 @@ COPY --from=realm --chown=keycloak:keycloak /realm.json /opt/keycloak/data/impor
 # The base image's keycloak user, stated: never root.
 USER 1000
 ENTRYPOINT ["/opt/keycloak/bin/kc.sh"]
-# The realm is imported once, when the database has none; `make gcp-realm` re-imports it.
+# The realm is imported when the database has none; the realm job (run.tf) replaces it after a change.
 CMD ["start", "--optimized", "--import-realm"]

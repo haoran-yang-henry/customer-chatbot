@@ -23,6 +23,7 @@ class Principal(BaseModel):
     subject: str
     customer_id: str
     tenant_id: str
+    username: str | None = None  # for the daily limit's exempt list only, never for data access
 
 
 class AuthenticationError(Exception):
