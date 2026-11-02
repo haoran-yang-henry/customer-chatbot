@@ -2,3 +2,7 @@
 # infra/gcp/run.tf: Secret Manager secret names (keycloak-db-password, demo-password), not values.
 e441919381afe3fcf2dd2f1842d6d2fbabe16212:infra/gcp/run.tf:hashicorp-tf-password:38
 e441919381afe3fcf2dd2f1842d6d2fbabe16212:infra/gcp/run.tf:hashicorp-tf-password:40
+# The same names in f9e583b (realm_secrets); run.tf now refers to the secrets instead.
+f9e583b152051a6ca255164075c21eb4f5b7579a:infra/gcp/run.tf:hashicorp-tf-password:44
+f9e583b152051a6ca255164075c21eb4f5b7579a:infra/gcp/run.tf:hashicorp-tf-password:45
+f9e583b152051a6ca255164075c21eb4f5b7579a:infra/gcp/run.tf:hashicorp-tf-password:46

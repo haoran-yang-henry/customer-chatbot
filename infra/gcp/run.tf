@@ -40,13 +40,14 @@ locals {
     KC_BOOTSTRAP_ADMIN_USERNAME = "admin"       # only for the first start; the console is not routed
     REALM_SHA                   = var.realm_sha # a changed realm starts Keycloak with fresh caches
   })
+  # Secrets by reference, not by name: gitleaks reads `…_PASSWORD = "<name>"` as a password.
   realm_secrets = {
-    KC_DB_PASSWORD = "keycloak-db-password"
-    DEMO_PASSWORD  = "demo-password"  # the demo users' password, on realm import
-    OWNER_PASSWORD = "owner-password" # the owner's account
+    KC_DB_PASSWORD = google_secret_manager_secret.secrets["keycloak-db-password"].secret_id
+    DEMO_PASSWORD  = google_secret_manager_secret.secrets["demo-password"].secret_id  # demo users
+    OWNER_PASSWORD = google_secret_manager_secret.secrets["owner-password"].secret_id # owner
   }
   keycloak_secrets = merge(local.realm_secrets, {
-    KC_BOOTSTRAP_ADMIN_PASSWORD = "keycloak-admin-password"
+    KC_BOOTSTRAP_ADMIN_PASSWORD = google_secret_manager_secret.secrets["keycloak-admin-password"].secret_id
   })
 }
 
