@@ -3,7 +3,7 @@ import { Auth } from "./auth.js";
 import { DEFAULT_BACKEND, normaliseBackend } from "./config.js";
 import { render } from "./format.js";
 
-const BACKEND_KEY = "nordelektro.backend"; // localStorage: the link only needs to be opened once
+const BACKEND_KEY = "nordelektro.backend"; // sessionStorage: a linked backend lasts through the login, not the tab
 const SESSION_KEY = "nordelektro.session"; // sessionStorage: one conversation per tab
 const REDIRECT_URI = `${location.origin}${location.pathname}`;
 
@@ -45,21 +45,20 @@ function write(storage, key, value) {
 }
 
 function show(view) {
-  for (const id of ["setup", "login", "chat"]) $(id).hidden = id !== view;
+  for (const id of ["login", "chat"]) $(id).hidden = id !== view;
 }
 
-function showSetup(message = "") {
-  show("setup");
-  $("setup-error").textContent = message;
-  $("setup-form").addEventListener("submit", (event) => {
-    event.preventDefault();
-    const backend = normaliseBackend($("backend-input").value);
-    if (!backend) {
-      $("setup-error").textContent = "Erlaubt sind der NordElektro-Server und Adressen der Form https://….trycloudflare.com.";
-      return;
-    }
-    location.assign(`${REDIRECT_URI}?backend=${encodeURIComponent(backend)}`);
-  });
+/** The hosted backend, unless a demo link in this tab named another allowed one. */
+function chooseBackend(params) {
+  write(localStorage, BACKEND_KEY, null); // remembered by earlier versions: often a dead tunnel
+  let notice = "";
+  if (params.has("backend")) {
+    const linked = normaliseBackend(params.get("backend"));
+    write(sessionStorage, BACKEND_KEY, linked);
+    if (!linked) notice = "Diese Server-Adresse ist nicht erlaubt.";
+  }
+  const backend = normaliseBackend(read(sessionStorage, BACKEND_KEY)) ?? DEFAULT_BACKEND;
+  return { backend, notice };
 }
 
 async function watchBackend(backend) {
@@ -91,7 +90,7 @@ function describe(error) {
         return "Auf dem Server ist ein Fehler aufgetreten. Bitte versuchen Sie es später erneut.";
     }
   }
-  return "Der Server ist nicht erreichbar. Die Demo läuft nur, solange der Rechner des Entwicklers eingeschaltet ist.";
+  return "Der Server ist gerade nicht erreichbar. Bitte versuchen Sie es in einer Minute noch einmal.";
 }
 
 function startChat(auth, backend) {
@@ -268,22 +267,9 @@ function startChat(auth, backend) {
 }
 
 async function main() {
-  const params = new URLSearchParams(location.search);
-  let backend;
-  if (params.has("backend")) {
-    backend = normaliseBackend(params.get("backend"));
-    if (backend) write(localStorage, BACKEND_KEY, backend);
-  } else {
-    backend = normaliseBackend(read(localStorage, BACKEND_KEY) ?? DEFAULT_BACKEND);
-  }
-  if (!backend) {
-    history.replaceState(null, "", REDIRECT_URI);
-    showSetup(params.has("backend") ? "Diese Server-Adresse ist nicht erlaubt." : "");
-    return;
-  }
-
+  const { backend, notice } = chooseBackend(new URLSearchParams(location.search));
   const auth = new Auth(backend, REDIRECT_URI);
-  let loginError = "";
+  let loginError = notice;
   try {
     await auth.completeLogin(location.search);
   } catch (error) {
@@ -299,10 +285,6 @@ async function main() {
   show("login");
   $("login-error").textContent = loginError;
   $("login-button").addEventListener("click", () => auth.login());
-  $("change-backend").addEventListener("click", () => {
-    write(localStorage, BACKEND_KEY, null);
-    showSetup();
-  });
 }
 
 main();

@@ -1,5 +1,5 @@
-// Where the backend runs: the hosted one by default; a demo link may name another as ?backend=…,
-// and the browser remembers it.
+// Where the backend runs: the hosted one; a demo link may name another as ?backend=…, which the
+// tab keeps through the login.
 
 export const REALM_PATH = "/realms/nordelektro";
 export const CLIENT_ID = "customer-chat";
