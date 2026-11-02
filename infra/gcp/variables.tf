@@ -36,6 +36,12 @@ variable "model_settings" {
   default     = {}
 }
 
+variable "daily_message_limit" {
+  description = "Chat messages per UTC day from all visitors together (GCP_DAILY_MESSAGE_LIMIT); 0 = off."
+  type        = number
+  default     = 200
+}
+
 variable "langfuse_enabled" {
   description = "Whether .env has a Langfuse secret key: then the secret exists and is read."
   type        = bool

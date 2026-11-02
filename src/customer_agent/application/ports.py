@@ -139,6 +139,12 @@ class SessionStore(Protocol):
         ...
 
 
+class UsageCounter(Protocol):
+    async def count_message(self, day: date) -> int:
+        """Counts one chat message on ``day`` and returns the day's count, this one included."""
+        ...
+
+
 class OrderRepository(Protocol):
     async def get_for_customer(
         self, order_id: str, *, customer_id: str, tenant_id: str

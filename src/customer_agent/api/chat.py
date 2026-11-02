@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 
 from customer_agent.api.auth import CurrentPrincipal
-from customer_agent.api.rate_limit import RateLimited
+from customer_agent.api.rate_limit import MessageLimited, RateLimited
 from customer_agent.api.schemas import ChatRequest, ChatResponse, FeedbackRequest
 from customer_agent.application.answering import TextDelta
 from customer_agent.application.chat import (
@@ -48,7 +48,7 @@ def _response(turn: ChatTurn, request_id: str) -> ChatResponse:
 # The customer comes only from a verified token, never from the request body (T06, T13).
 @router.post("/chat")
 async def chat(
-    body: ChatRequest, service: Chat, principal: CurrentPrincipal, _: RateLimited
+    body: ChatRequest, service: Chat, principal: CurrentPrincipal, _: MessageLimited
 ) -> ChatResponse:
     customer_id = principal.customer_id if principal else None
     try:
@@ -70,13 +70,13 @@ def _sse(event: str, data: dict[str, object]) -> str:
     responses={
         200: {"content": {"text/event-stream": {}}},
         401: {"description": "Invalid token"},
-        429: {"description": "Too many messages; see Retry-After"},
+        429: {"description": "Too many messages, or the day's are used up; see Retry-After"},
         404: {"description": "Unknown session"},
         409: {"description": "Concurrent turn on the same session"},
     },
 )
 async def chat_stream(
-    body: ChatRequest, service: Chat, principal: CurrentPrincipal, _: RateLimited
+    body: ChatRequest, service: Chat, principal: CurrentPrincipal, _: MessageLimited
 ) -> StreamingResponse:
     """Server-Sent Events: ``delta`` events with text, then one authoritative ``final`` event.
 

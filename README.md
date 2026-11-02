@@ -15,6 +15,18 @@ from read-only order data with deterministic policy checks. A request to change 
 ticket for the service team once the customer has confirmed it. Language models classify and
 write; code decides.
 
+## Live demo
+
+**[Open the demo](https://haoran-yang-henry.github.io/customer-chatbot/)**: a chat page on GitHub
+Pages, with the agent behind it on Google Cloud Run. Sign in as one of three made-up customers
+(`anna.schneider`, `jonas.weber`, `mehmet.yilmaz`); the password is shared on request, so ask
+the author through the GitHub profile. Each customer has sample orders: besides questions about
+returns, shipping, payment and warranty, try *"Wo ist meine Bestellung NE-100245?"* or *"Kann
+ich NE-100231 zurückgeben?"* as `anna.schneider`. The agent answers in German.
+
+The shop and its orders are fictional. The backend scales to zero, so the first message after a
+quiet period takes about 15 seconds, and all visitors share a daily message limit.
+
 ## Architecture
 
 ### LangChain, LangGraph, Langfuse
@@ -187,7 +199,8 @@ Environment variables with the prefix `CA_` (see [`.env.example`](.env.example))
 | `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASE_URL` | Langfuse; unset = off, never on with `CA_APP_ENV=test` or `ci` |
 | `CA_FEEDBACK_SAMPLE_RATE`, `CA_FEEDBACK_MIN_ROUNDS` | Share of conversations asked for feedback (0.3), from which round (3) |
 | `CA_RETENTION_DAYS` | Conversations without a turn for this long are deleted by `make retention` (90) |
-| `CA_RATE_LIMIT_PER_MINUTE`, `CA_BREAKER_*`, `CA_LOG_FORMAT`, `CA_OTEL_ENDPOINT` | Rate limit, circuit breaker, JSON logs, OTLP traces |
+| `CA_RATE_LIMIT_PER_MINUTE`, `CA_DAILY_MESSAGE_LIMIT` | Messages per minute per customer or address; per UTC day from everyone together (0 = off) |
+| `CA_BREAKER_*`, `CA_LOG_FORMAT`, `CA_OTEL_ENDPOINT` | Circuit breaker, JSON logs, OTLP traces |
 
 ## Operations
 

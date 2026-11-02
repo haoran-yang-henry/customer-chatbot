@@ -1,8 +1,10 @@
-"""Per-client rate limit on the chat endpoints (Day 7, T12)."""
+"""Per-client rate limit on the chat endpoints (Day 7, T12), and the daily cap of the demo."""
+
+from datetime import date
 
 from fastapi.testclient import TestClient
 
-from customer_agent.api.rate_limit import SlidingWindowLimiter
+from customer_agent.api.rate_limit import DAILY_LIMIT_DETAIL, SlidingWindowLimiter
 from customer_agent.config import Settings
 from customer_agent.main import create_app
 from tests.unit.api.test_chat import FakeChat, FakeVerifier
@@ -68,3 +70,51 @@ def test_zero_disables_the_limit() -> None:
 
     statuses = {r.status_code for r in responses}
     assert statuses == {200}
+
+
+class FakeUsage:
+    def __init__(self) -> None:
+        self.days: dict[date, int] = {}
+
+    async def count_message(self, day: date) -> int:
+        self.days[day] = self.days.get(day, 0) + 1
+        return self.days[day]
+
+
+def test_messages_past_the_daily_limit_get_429_until_midnight() -> None:
+    settings = Settings(app_env="test", rate_limit_per_minute=0, daily_message_limit=2)
+    app = create_app(settings, chat=FakeChat(), usage=FakeUsage())  # type: ignore[arg-type]
+    with TestClient(app) as client:
+        responses = [client.post("/v1/chat", json={"message": "Hallo"}) for _ in range(3)]
+        stream = client.post("/v1/chat/stream", json={"message": "Hallo"})
+
+    assert [r.status_code for r in responses] == [200, 200, 429]
+    rejected = responses[2]
+    assert rejected.json()["detail"] == DAILY_LIMIT_DETAIL  # the frontend's cue
+    assert 0 < int(rejected.headers["retry-after"]) <= 24 * 60 * 60
+    assert stream.status_code == 429  # streamed messages count against the same day
+
+
+def test_messages_over_the_per_minute_limit_do_not_use_up_the_day() -> None:
+    usage = FakeUsage()
+    settings = Settings(app_env="test", rate_limit_per_minute=1, daily_message_limit=5)
+    app = create_app(settings, chat=FakeChat(), usage=usage)  # type: ignore[arg-type]
+    with TestClient(app) as client:
+        statuses = [
+            client.post("/v1/chat", json={"message": "Hallo"}).status_code for _ in range(3)
+        ]
+
+    assert statuses == [200, 429, 429]
+    assert list(usage.days.values()) == [1]
+
+
+def test_without_a_daily_limit_nothing_is_counted() -> None:
+    usage = FakeUsage()
+    app = create_app(Settings(app_env="test"), chat=FakeChat(), usage=usage)  # type: ignore[arg-type]
+    with TestClient(app) as client:
+        statuses = {
+            client.post("/v1/chat", json={"message": "Hallo"}).status_code for _ in range(5)
+        }
+
+    assert statuses == {200}
+    assert usage.days == {}
