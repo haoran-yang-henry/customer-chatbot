@@ -24,6 +24,7 @@ from customer_agent.application.ports import (
     Clock,
     TicketService,
     TokenVerifier,
+    UsageCounter,
 )
 from customer_agent.application.retrieval import HybridRetriever
 from customer_agent.application.turn_graph import CHECKPOINT_TYPES
@@ -41,6 +42,7 @@ from customer_agent.infrastructure.db.order_repository import (
     PostgresTicketService,
 )
 from customer_agent.infrastructure.db.session_repository import PostgresSessionStore
+from customer_agent.infrastructure.db.usage_repository import PostgresUsageCounter
 from customer_agent.infrastructure.embeddings import ProviderEmbeddings
 from customer_agent.infrastructure.lifecycle import aclose_all
 from customer_agent.infrastructure.memory import InMemoryAuditLog, InMemoryTicketService
@@ -255,6 +257,7 @@ class Container:
     verifier: TokenVerifier | None
     prompts: dict[str, str]
     breakers: dict[str, CircuitBreaker]
+    usage: UsageCounter
 
     @property
     def models(self) -> dict[str, str]:
@@ -356,4 +359,5 @@ def build_container(
         verifier=create_token_verifier(settings),
         prompts=prompts,
         breakers=breakers,
+        usage=PostgresUsageCounter(db),
     )

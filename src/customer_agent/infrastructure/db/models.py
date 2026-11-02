@@ -165,3 +165,12 @@ class AuditLogRow(Base):
     tool: Mapped[str]
     arguments: Mapped[dict[str, str]] = mapped_column(JSONB)
     outcome: Mapped[str]
+
+
+class DailyUsageRow(Base):
+    """Chat messages per UTC day from all clients: the public demo's cost cap."""
+
+    __tablename__ = "daily_usage"
+
+    day: Mapped[date] = mapped_column(primary_key=True)
+    messages: Mapped[int]

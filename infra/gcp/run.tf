@@ -11,6 +11,7 @@ locals {
     CA_AUTH_REQUIRED         = "true" # every message costs model calls: logged-in demo users only
     CA_CORS_ORIGINS          = var.pages_origin
     CA_RATE_LIMIT_PER_MINUTE = "10"
+    CA_DAILY_MESSAGE_LIMIT   = tostring(var.daily_message_limit) # the public demo's cost cap
     CA_DB_POOL_SIZE          = "5"
     CA_DB_MAX_OVERFLOW       = "5"
   })

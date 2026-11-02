@@ -41,7 +41,7 @@ async def engine(database_url: str) -> AsyncIterator[AsyncEngine]:
         await connection.execute(
             text(
                 "TRUNCATE knowledge_documents, chat_sessions, orders, customers, tickets, "
-                "audit_log RESTART IDENTITY CASCADE"
+                "audit_log, daily_usage RESTART IDENTITY CASCADE"
             )
         )
     yield engine

@@ -5,14 +5,15 @@
 deploy (your gcloud login, settings from .env): creates the project and the state bucket if
 needed, adds missing model keys to Secret Manager, saves the settings for CI, then releases.
 release (the deploy job in CI, as the deployer; also the end of deploy): builds and pushes the
-three images (tag: the commit), applies the Terraform, runs the setup job (migrations, demo
-orders, knowledge index) and waits until the backend is ready. It needs no .env and no key:
-GCP_PROJECT_ID comes from the environment, the rest from the settings deploy saved.
+three images (tag: the commit), runs the setup job (migrations, demo orders, knowledge index)
+with the new image, then applies the rest of the Terraform and waits until the backend is ready.
+It needs no .env and no key: GCP_PROJECT_ID comes from the environment, the rest from the
+settings deploy saved.
 secrets: adds the model and Langfuse keys from .env as new versions (a new key).
 
-.env holds GCP_PROJECT_ID, GCP_BILLING_ACCOUNT, optionally GCP_REGION, the model keys and
-settings. The keys go to Secret Manager through gcloud, never to Terraform, and are never
-printed.
+.env holds GCP_PROJECT_ID, GCP_BILLING_ACCOUNT, optionally GCP_REGION and
+GCP_DAILY_MESSAGE_LIMIT (all visitors together, default 200), the model keys and settings. The
+keys go to Secret Manager through gcloud, never to Terraform, and are never printed.
 """
 
 import json
@@ -93,6 +94,7 @@ class Settings:
     region: str
     model_settings: dict[str, str]
     langfuse_enabled: bool
+    daily_message_limit: int = 200  # also for settings saved before the limit existed
 
     @classmethod
     def from_env_file(cls, values: dict[str, str]) -> "Settings":
@@ -105,6 +107,7 @@ class Settings:
             region=values.get("GCP_REGION", "europe-west1"),
             model_settings={key: values[key] for key in MODEL_SETTINGS if key in values},
             langfuse_enabled="LANGFUSE_SECRET_KEY" in values,
+            daily_message_limit=int(values.get("GCP_DAILY_MESSAGE_LIMIT", "200")),
         )
 
     @classmethod
@@ -151,6 +154,7 @@ class Deployment:
             "TF_VAR_model_settings": json.dumps(self.settings.model_settings),
             "TF_VAR_langfuse_enabled": "true" if self.settings.langfuse_enabled else "false",
             "TF_VAR_state_bucket": self.bucket,
+            "TF_VAR_daily_message_limit": str(self.settings.daily_message_limit),
         }
 
     def authorized(self) -> dict[str, str]:
@@ -332,7 +336,9 @@ class Deployment:
 
     def release(self) -> None:
         self.push_images()
-        self.apply()
+        # The schema before the service: the new revision may need it, and migrations only add
+        # what the running revision can ignore.
+        self.apply("google_cloud_run_v2_job.jobs")
         print("Running the setup job (migrations, demo orders, knowledge index) …")
         show(
             "gcloud",
@@ -344,6 +350,7 @@ class Deployment:
             f"--region={self.region}",
             f"--project={self.project}",
         )
+        self.apply()
         self.wait_until_ready(self.output("url"))
         self.terraform("output")
 

@@ -13,7 +13,7 @@ from customer_agent.api.middleware import RequestContextMiddleware
 from customer_agent.api.problems import register_problem_handlers
 from customer_agent.api.rate_limit import SlidingWindowLimiter
 from customer_agent.application.chat import ChatService
-from customer_agent.application.ports import TokenVerifier
+from customer_agent.application.ports import TokenVerifier, UsageCounter
 from customer_agent.config import Settings, get_settings
 from customer_agent.observability import (
     configure_logging,
@@ -29,8 +29,10 @@ def create_app(
     settings: Settings | None = None,
     chat: ChatService | None = None,
     verifier: TokenVerifier | None = None,
+    usage: UsageCounter | None = None,
 ) -> FastAPI:
-    """``chat``/``verifier`` let tests inject fakes; otherwise the lifespan builds real ones."""
+    """``chat``/``verifier``/``usage`` let tests inject fakes; otherwise the lifespan builds real
+    ones."""
     settings = settings or get_settings()
     configure_logging(settings.log_level, settings.log_format)
     tracing = configure_tracing("customer-agent", __version__, settings.otel_endpoint)
@@ -43,10 +45,12 @@ def create_app(
             if settings.rate_limit_per_minute > 0
             else None
         )
+        app.state.daily_limit = settings.daily_message_limit
         app.state.readiness = None
         if chat is not None:
             app.state.chat = chat
             app.state.verifier = verifier
+            app.state.usage = usage
             yield
             return
         from customer_agent.bootstrap import build_container, start_langfuse
@@ -56,6 +60,7 @@ def create_app(
         start_langfuse(settings, tracing, __version__)
         app.state.chat = container.chat
         app.state.verifier = container.verifier
+        app.state.usage = container.usage
         app.state.readiness = container.readiness
         if container.verifier is None:
             log.warning("authentication disabled (CA_AUTH_ISSUER unset): all requests anonymous")

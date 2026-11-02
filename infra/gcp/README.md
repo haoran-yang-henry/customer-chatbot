@@ -26,15 +26,16 @@ flowchart LR
 | Project | `nordelektro-agent` (its own project: costs and permissions stay separate) |
 | Login | The three demo customers, with a generated password; no registration, no password grant |
 | Not reachable | Keycloak admin and account consoles, the master realm, `/metrics`, API docs (404) |
-| Cost | About $10 a month for Cloud SQL (`db-f1-micro`); Cloud Run within its free tier at demo traffic. A budget alert mails at 50, 90 and 100 % of $20 |
+| Cost | About $10 a month for Cloud SQL (`db-f1-micro`); Cloud Run within its free tier at demo traffic. A budget alert mails at 50, 90 and 100 % of $20. All visitors together get 200 chat messages a day (`GCP_DAILY_MESSAGE_LIMIT` in `.env`), so model costs stay bounded |
 
 ## Deploy
 
 **From `main`, automatically.** Every push to `main` that passes the four CI jobs is deployed
 by the `deploy` job in [`ci.yml`](../../.github/workflows/ci.yml): it builds and pushes the API,
-Keycloak and proxy images (tag: the commit), applies the Terraform in this directory, runs the
-`setup` job (migrations, demo orders, knowledge index, all idempotent) and waits until
-`/health/ready` answers. It signs in through Workload Identity Federation as the `deployer`
+Keycloak and proxy images (tag: the commit), runs the `setup` job with the new image
+(migrations, demo orders, knowledge index, all idempotent), then applies the rest of the
+Terraform in this directory and waits until `/health/ready` answers. The schema changes before
+the service does, so a migration must leave the running revision working (add, do not drop). It signs in through Workload Identity Federation as the `deployer`
 service account: only this repository's `main` branch gets a token, and GitHub stores no key.
 The job needs no `.env` and no model key; it reads the settings that `make gcp-deploy` saved
 beside the Terraform state.
@@ -42,7 +43,7 @@ beside the Terraform state.
 **From this machine**, for the first deploy, changed model settings and every change the
 deployer may not make (below). Needs `gcloud` (logged in), `terraform` ≥ 1.11, Docker, and in
 `.env` besides the model keys: `GCP_PROJECT_ID`, `GCP_BILLING_ACCOUNT` (optional `GCP_REGION`,
-default `europe-west1`).
+default `europe-west1`, and `GCP_DAILY_MESSAGE_LIMIT`, default 200).
 
 ```bash
 make gcp-plan     # what would change
@@ -68,7 +69,7 @@ gcloud secrets versions access latest --secret demo-password --project nordelekt
 | Retention | The `retention` job runs daily at 03:00 (Europe/Berlin) via Cloud Scheduler |
 | Between demos | `make gcp-pause` stops Cloud SQL (storage is still billed), `make gcp-resume` starts it |
 | New model key | Change it in `.env`, `make gcp-secrets`: new versions, which new instances read |
-| New model settings | Change them in `.env`, `make gcp-deploy`: deployed and saved for CI |
+| New model settings or daily limit | Change them in `.env` (`GCP_DAILY_MESSAGE_LIMIT`, default 200), `make gcp-deploy`: deployed and saved for CI |
 | Remove | `make gcp-destroy` (asks first), then `gcloud projects delete nordelektro-agent` |
 
 ## Notes

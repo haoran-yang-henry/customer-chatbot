@@ -1,20 +1,27 @@
-"""Per-client rate limit for the chat endpoints (Day 7, threat model T12).
+"""Per-client rate limit for the chat endpoints (Day 7, threat model T12), and the daily cap of
+all chat messages together (the public demo).
 
 A sliding window in process memory: enough for one instance and for measuring the cost of the
 check. Several instances need a shared store (Redis); the dependency keeps that a local change.
-Behind a reverse proxy, run uvicorn with ``--proxy-headers`` so the client address is real.
+Behind a reverse proxy, run uvicorn with ``--proxy-headers`` so the client address is real. The
+daily count is in the database: it survives a restart, which a scaled-to-zero service has often.
 """
 
 import math
 import time
 from collections import deque
 from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request
 
 from customer_agent.api.auth import CurrentPrincipal
+from customer_agent.application.ports import UsageCounter
 from customer_agent.observability.metrics import RATE_LIMITED
+
+# The frontend tells this 429 apart from the per-minute one by its detail.
+DAILY_LIMIT_DETAIL = "the demo's daily message limit is reached; please try again tomorrow"
 
 _PRUNE_ABOVE = 10_000  # keys kept before idle ones are dropped
 
@@ -72,3 +79,22 @@ async def enforce_rate_limit(request: Request, principal: CurrentPrincipal) -> N
 
 
 RateLimited = Annotated[None, Depends(enforce_rate_limit)]
+
+
+async def enforce_message_limits(request: Request, _: RateLimited) -> None:
+    """The per-client limit first, so a client already over it does not use up the day."""
+    limit: int = getattr(request.app.state, "daily_limit", 0)
+    usage: UsageCounter | None = getattr(request.app.state, "usage", None)
+    if not limit or usage is None:
+        return
+    now = datetime.now(UTC)
+    if await usage.count_message(now.date()) <= limit:
+        return
+    RATE_LIMITED.labels(scope="daily").inc()
+    midnight = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    raise HTTPException(
+        429, DAILY_LIMIT_DETAIL, {"Retry-After": str(math.ceil((midnight - now).total_seconds()))}
+    )
+
+
+MessageLimited = Annotated[None, Depends(enforce_message_limits)]

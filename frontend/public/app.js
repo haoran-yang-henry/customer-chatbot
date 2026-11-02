@@ -6,6 +6,8 @@ import { render } from "./format.js";
 const BACKEND_KEY = "nordelektro.backend"; // sessionStorage: a linked backend lasts through the login, not the tab
 const SESSION_KEY = "nordelektro.session"; // sessionStorage: one conversation per tab
 const REDIRECT_URI = `${location.origin}${location.pathname}`;
+// The detail of the 429 for a used-up day (DAILY_LIMIT_DETAIL in api/rate_limit.py).
+const DAILY_LIMIT = "the demo's daily message limit is reached; please try again tomorrow";
 
 const BEHAVIOR = {
   answer: "Antwort",
@@ -85,6 +87,9 @@ function describe(error) {
       case 422:
         return "Diese Nachricht kann nicht verarbeitet werden (zu lang oder leer).";
       case 429:
+        if (error.message === DAILY_LIMIT) {
+          return "Die Demo hat ihr Tageslimit erreicht. Bitte versuchen Sie es morgen wieder.";
+        }
         return `Zu viele Nachrichten in kurzer Zeit. Bitte warten Sie ${error.retryAfter ?? 60} Sekunden.`;
       default:
         return "Auf dem Server ist ein Fehler aufgetreten. Bitte versuchen Sie es später erneut.";
